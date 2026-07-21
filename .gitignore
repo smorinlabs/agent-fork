@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Claude Code session worktrees
+.claude/worktrees/
+
+# Flox runtime state (manifest + lock are committed)
+.flox/run/
+.flox/cache/
+.flox/lib/
+.flox/log/
