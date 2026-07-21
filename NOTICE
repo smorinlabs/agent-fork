@@ -1,0 +1,17 @@
+agent-fork
+Copyright (c) 2026 Steve Morin
+
+This project derives portions of its design and logic from agent-deck
+(https://github.com/asheshgoplani/agent-deck), MIT License,
+Copyright (c) 2025 Ashesh Goplani.
+
+Ported logic includes: the [fork] config resolver semantics (tri-state
+with_state / with_ignored accessors and the implication rule), the
+guard -> anchor -> worktree-create -> materialize -> rollback fork
+pipeline, the state-materialization command sequence (staged -> unstaged
+-> untracked -> ignored), the git-state detection matrix, and the
+branch / worktree naming schemes.
+
+Source files containing ported logic carry an attribution header
+referencing this NOTICE. The port source map (exact file:line references
+into agent-deck) is recorded in RESEARCH.md.

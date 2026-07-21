@@ -1,0 +1,59 @@
+[project]
+name = "agent-fork"
+version = "0.1.0"
+description = "Fork a running coding-agent session: new branch + worktree carrying the current file state, verified, plus the exact paste command to continue (Claude Code, Codex)"
+readme = "README.md"
+authors = [
+    { name = "Steve Morin", email = "steve.morin@gmail.com" }
+]
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.11"
+dependencies = [
+    "platformdirs>=4.10.1",
+]
+keywords = ["cli", "git", "worktree", "session", "fork", "claude-code", "codex"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Version Control :: Git",
+]
+
+[project.urls]
+Repository = "https://github.com/smorinlabs/agent-fork"
+Issues = "https://github.com/smorinlabs/agent-fork/issues"
+
+[project.scripts]
+agent-fork = "agent_fork.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.29,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "requires_real_cli: integration tests against real claude/codex binaries (skipped when absent)",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.15.22",
+    "ty>=0.0.61",
+]
