@@ -44,3 +44,4 @@ file plus those.
 ## Project index
 
 <!-- One row per project. Scoped / in-progress / done first; ideas last. -->
+- [~] **P01** — [agent-fork v1](projects/P01-agent-fork-v1.md)
