@@ -1,0 +1,257 @@
+{
+  "version": "1",
+  "skill": "html-codesign",
+  "mode": "codesign",
+  "title": "agent-fork Phase 3 — design decisions (D2–D14)",
+  "lead": "Thirteen pick-one decisions. Each opens with context and a ★ recommendation — recommendations are pre-selected, so change any you disagree with, add notes, then Export → MD (or click “Here are my answers”) and paste the result back into chat.",
+  "generated_at": "2026-07-21T07:50:00-07:00",
+  "sections": [
+    {
+      "id": "sec-01-default-posture",
+      "title": "What should a bare fork carry over by default?",
+      "lead": "Pick one — decision D3. This sets the defaults everything else builds on.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-01-a", "label": "Exact-copy: carry staged + unstaged + untracked (gitignored stays off)", "detail": "Comprehensive by default — the fork continues your in-flight work; tweak down with flags.", "selected": true },
+        { "id": "ch-01-b", "label": "Clean-from-HEAD: worktree at the parent's commit, no uncommitted state", "detail": "Minimal by default — carrying state becomes an opt-in flag.", "selected": false }
+      ],
+      "note": { "id": "note-01", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-02-state-flags",
+      "title": "How should the state choice appear in flags and config?",
+      "lead": "Pick one — decision D2. Defines the flag vocabulary and config keys.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-02-a", "label": "agent-deck toggles: --no-with-state / --with-ignored flags, with_state / with_ignored config keys", "detail": "One vocabulary, direct port of the proven schema; flag↔env↔config name parity is trivial.", "selected": true },
+        { "id": "ch-02-b", "label": "A named mode: --clean flag, mode = \"exact\" | \"clean\" in config", "detail": "Fewer flags on the happy path, but a second vocabulary for the same axis — and --with-ignored still exists.", "selected": false },
+        { "id": "ch-02-c", "label": "Toggles canonical plus --clean as a documented alias for --no-with-state", "detail": "Both vocabularies from day one.", "selected": false }
+      ],
+      "note": { "id": "note-02", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-03-worktree-location",
+      "title": "Where should the fork's worktree directory land?",
+      "lead": "Pick one — decision D5. A worktree_location config override exists in every variant.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-03-a", "label": "Sibling dir <repo>-<branch-slug>; mirror the parent's pattern when the parent is itself a worktree", "detail": "agent-deck's default plus the kickoff's mirror rule for already-forked parents.", "selected": true },
+        { "id": "ch-03-b", "label": "Sibling dir always — no mirroring heuristic", "detail": "Simplest predictable rule; nested forks may land somewhere surprising.", "selected": false },
+        { "id": "ch-03-c", "label": "Central forks dir under XDG data (~/.local/share/agent-fork/worktrees/<repo>/…)", "detail": "Keeps project parents clean, but hides working code far from the repo.", "selected": false },
+        { "id": "ch-03-d", "label": "Inside the repo: <repo>/.worktrees/<branch-slug>", "detail": "agent-deck's 'subdirectory' option; keeps everything under one root.", "selected": false }
+      ],
+      "note": { "id": "note-03", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-04-fork-name",
+      "title": "Where does a fork's name come from?",
+      "lead": "Pick one — decision D4. The name seeds the branch slug, worktree suffix, and session name.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-04-a", "label": "Optional positional (agent-fork fork fix-auth); auto-derived from branch + date when omitted", "detail": "Auto form: <parent-branch-slug>-<mmdd>, collisions suffixed -2, -3 (agent-deck's scheme).", "selected": true },
+        { "id": "ch-04-b", "label": "Required positional — a name must always be given", "detail": "Always explicit, but breaks the zero-argument one-word flow.", "selected": false },
+        { "id": "ch-04-c", "label": "Always auto-generated — no name argument accepted", "detail": "Zero decisions at fork time, zero control.", "selected": false }
+      ],
+      "note": { "id": "note-04", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-05-session-name",
+      "title": "What display name does the forked session get?",
+      "lead": "Pick one — decision D6.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-05-a", "label": "The fork name itself — one identity across branch, worktree, and session", "detail": "\"fix-auth-2\" is the branch suffix, the directory suffix, and the session you pick in /resume.", "selected": true },
+        { "id": "ch-05-b", "label": "A parent-derived template like {parent}-fork-{n}", "detail": "Richer lineage, but the parent's display name is not reliably discoverable (env exposes only its id).", "selected": false },
+        { "id": "ch-05-c", "label": "No name — let the agent use its default", "detail": "Loses findability in session pickers.", "selected": false }
+      ],
+      "note": { "id": "note-05", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-06-fallback",
+      "title": "What should happen when a native session fork is impossible?",
+      "lead": "Pick one — decision D14. Applies when preflight finds an old CLI, a missing Codex rollout, or an unrelated directory.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-06-a", "label": "Degradation ladder: native fork, else fresh NAMED session + generated HANDOFF.md seeded via the launch command", "detail": "Preflight picks the rung before emitting; the handoff carries parent id, anchor commit, branch, status snapshot, and a task-notes slot the skill fills.", "selected": true },
+        { "id": "ch-06-b", "label": "Refuse with a diagnosis — no fallback rung in v1", "detail": "Simplest and honest, but old-CLI users get nothing.", "selected": false },
+        { "id": "ch-06-c", "label": "The ladder plus a third rung: copy the Claude session file into the target project dir", "detail": "Manipulates a format Anthropic declares internal and version-unstable; research verdict was last-resort-only.", "selected": false }
+      ],
+      "note": { "id": "note-06", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-07-verification",
+      "title": "Should fork verification run by default?",
+      "lead": "Pick one — decision D8.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-07-a", "label": "On by default; --no-verify to skip", "detail": "A handful of git status/rev-parse calls — milliseconds — and a failed check rolls the fork back.", "selected": true },
+        { "id": "ch-07-b", "label": "Off by default; --verify to enable (agent-deck parity)", "detail": "agent-deck verifies only in its test suite, never at runtime.", "selected": false }
+      ],
+      "note": { "id": "note-07", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-08-clipboard",
+      "title": "Should the paste command land on the clipboard in v1?",
+      "lead": "Pick one — decision D9 (the kickoff's stretch goal).",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-08-a", "label": "Yes — a --copy flag (config default off); OSC52 first, then pbcopy/xclip; failure is a notice, never an error", "detail": "OSC52 writes the clipboard through SSH and tmux; shell-outs are the fallback.", "selected": true },
+        { "id": "ch-08-b", "label": "Defer clipboard entirely to v1.1", "detail": "Keeps v1 lean; the command still prints on stdout.", "selected": false },
+        { "id": "ch-08-c", "label": "Copy by default when on a TTY, with --no-copy to opt out", "detail": "One less keystroke, but a silent clipboard write surprises people.", "selected": false }
+      ],
+      "note": { "id": "note-08", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-09-list-command",
+      "title": "Should v1 ship an agent-fork list command?",
+      "lead": "Pick one — decision D10.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-09-a", "label": "Yes — read the fork registry; show name, branch, worktree, agent, and whether the worktree still exists", "detail": "The registry exists anyway for cleanup ownership; list is a thin read.", "selected": true },
+        { "id": "ch-09-b", "label": "Defer — git worktree list covers it for now", "detail": "One less command, but cleanup targeting goes blind.", "selected": false }
+      ],
+      "note": { "id": "note-09", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-10-cleanup-guards",
+      "title": "What may cleanup remove, and what stops it?",
+      "lead": "Pick one — decision D12. Consent (--yes) is separate from guards in every variant.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-10-a", "label": "Registry-scoped: only forks agent-fork created; --force extends to any worktree AND overrides the dirty/unpushed guards", "detail": "Guards: uncommitted changes; commits on no remote (no upstream counts as unpushed); target is your current directory.", "selected": true },
+        { "id": "ch-10-b", "label": "Any worktree from the start, with the same guards everywhere", "detail": "More useful as a general tool, more dangerous on worktrees it didn't make.", "selected": false },
+        { "id": "ch-10-c", "label": "Registry-only, permanently — --force never extends the target set", "detail": "Safest; orphaned or hand-made worktrees need manual git.", "selected": false }
+      ],
+      "note": { "id": "note-10", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-11-cleanup-verb",
+      "title": "What is the removal command called?",
+      "lead": "Pick one — decision D13.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-11-a", "label": "cleanup — the kickoff name (stays the one waived SHOULD in CONFORMANCE.md)", "detail": "Does more than delete: worktree + branch + prune + registry update.", "selected": true },
+        { "id": "ch-11-b", "label": "delete — the CLI standard's core verb (drops the waiver)", "detail": "Standard-pure; slightly undersells the multi-step semantics.", "selected": false },
+        { "id": "ch-11-c", "label": "prune — docker-style", "detail": "Usually implies sweep-all-stale rather than remove-this-one; could later be cleanup --all instead.", "selected": false }
+      ],
+      "note": { "id": "note-11", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-12-config-surface",
+      "title": "How much configuration should v1 expose?",
+      "lead": "Pick one — decision D7. File locations and precedence are already fixed by the CLI standard; this is only about which keys exist.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-12-a", "label": "Trimmed schema tracking today's answers: with_state, with_ignored, branch_prefix, worktree_location, verify, copy", "detail": "Every key mirrors a flag decided above; drops agent-deck's docker, worktree toggle, and inherit_from_parent.", "selected": true },
+        { "id": "ch-12-b", "label": "Minimal: branch_prefix only — everything else is flags", "detail": "Leanest possible; users re-type preferences per invocation.", "selected": false },
+        { "id": "ch-12-c", "label": "Full agent-deck [fork] port including inherit_from_parent", "detail": "Maximum familiarity; carries keys with no meaning in a standalone CLI.", "selected": false }
+      ],
+      "note": { "id": "note-12", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-13-extra-args",
+      "title": "Should per-agent extra-args passthrough ship in v1?",
+      "lead": "Pick one — decision D11.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-13-a", "label": "Defer to v1.1 — keep v1's launch templates fixed and testable", "detail": "Adding [agents.claude] extra_args later is additive and non-breaking.", "selected": true },
+        { "id": "ch-13-b", "label": "Ship in v1: [agents.<name>] extra_args injected into emitted commands", "detail": "Power users get --model etc. now; adds a quoting/injection surface to v1.", "selected": false }
+      ],
+      "note": { "id": "note-13", "placeholder": "Adjustments or reasoning", "value": "" }
+    }
+  ],
+  "contexts": [
+    {
+      "id": "ctx-01",
+      "section": "sec-01-default-posture",
+      "summary": "Whether the one-word fork carries your dirty working state or starts clean at the parent's commit.",
+      "recommendation": "Exact-copy — the tool exists to continue in-flight work; a clean worktree at the parent's commit is what plain git worktree add already gives you. Gitignored files stay off by default either way (agent-deck flipped that default off after real-world pain: secrets in .env and unbounded node_modules-style trees).",
+      "recommended": ["ch-01-a"]
+    },
+    {
+      "id": "ctx-02",
+      "section": "sec-02-state-flags",
+      "summary": "The vocabulary for exact-copy vs clean: independent toggles (agent-deck's shape) or a named mode flag.",
+      "recommendation": "The agent-deck toggles — one vocabulary, a proven schema with tri-state semantics (explicit false honored), and trivial flag/env/config name parity. A --clean alias can be added compatibly later if ergonomics demand it.",
+      "recommended": ["ch-02-a"]
+    },
+    {
+      "id": "ctx-03",
+      "section": "sec-03-worktree-location",
+      "summary": "Where the new working directory is created relative to the repo.",
+      "recommendation": "Sibling with mirror-parent — sibling <repo>-<branch> is agent-deck's default and matches how worktrees are commonly laid out by hand; the mirror rule keeps fork-of-fork placement consistent with whatever pattern the parent already follows.",
+      "recommended": ["ch-03-a"]
+    },
+    {
+      "id": "ctx-04",
+      "section": "sec-04-fork-name",
+      "summary": "Whether the fork's name is given, derived, or both.",
+      "recommendation": "Optional positional with an auto-derived fallback — preserves the zero-argument flow (the skill can always call it bare) while letting a human name the fork when the name matters. agent-deck derives from the session title; with no title available, branch + date is the deterministic equivalent.",
+      "recommended": ["ch-04-a"]
+    },
+    {
+      "id": "ctx-05",
+      "section": "sec-05-session-name",
+      "summary": "The name the forked session shows in its agent's session picker and terminal title.",
+      "recommendation": "Use the fork name — one identity across branch, worktree, and session keeps the mental model flat, and it needs no discovery machinery. Parent-derived templates require reading the parent's display name, which the environment does not expose.",
+      "recommended": ["ch-05-a"]
+    },
+    {
+      "id": "ctx-06",
+      "section": "sec-06-fallback",
+      "summary": "The behavior when preflight determines a native session fork cannot work.",
+      "recommendation": "The two-rung ladder — never emit a command known to fail, and degrade to a fresh named session seeded with a generated handoff file so the user still gets a working fork of their code with context to continue from. Leave the session-file-copy trick out of v1: it manipulates a format its vendor declares unstable.",
+      "recommended": ["ch-06-a"]
+    },
+    {
+      "id": "ctx-07",
+      "section": "sec-07-verification",
+      "summary": "Whether the fork is checked against its contract at runtime or assumed correct from exit codes.",
+      "recommendation": "On by default with --no-verify — the checks cost milliseconds, agent-deck documents this exact contract but never enforces it at runtime, and a tool whose output is a paste-command should not hand over an unverified fork.",
+      "recommended": ["ch-07-a"]
+    },
+    {
+      "id": "ctx-08",
+      "section": "sec-08-clipboard",
+      "summary": "Whether and how the emitted paste command reaches the clipboard.",
+      "recommendation": "Ship it as an explicit --copy flag with OSC52 first — cheap to build, works over SSH/tmux, and explicit beats a silent default side effect. Config can flip it on permanently for those who want it.",
+      "recommended": ["ch-08-a"]
+    },
+    {
+      "id": "ctx-09",
+      "section": "sec-09-list-command",
+      "summary": "Whether v1 can enumerate the forks it has created.",
+      "recommendation": "Yes — the state registry already exists for cleanup ownership, list is a thin read over it, and without it cleanup targeting is guesswork.",
+      "recommended": ["ch-09-a"]
+    },
+    {
+      "id": "ctx-10",
+      "section": "sec-10-cleanup-guards",
+      "summary": "The blast-radius rules for the destructive command.",
+      "recommendation": "Registry-scoped with --force as the deliberate escalation — safe by default on exactly the things agent-fork made, while still giving an operator a way to clean up anything, consistent with the standard's force-overrides-guards semantics.",
+      "recommended": ["ch-10-a"]
+    },
+    {
+      "id": "ctx-11",
+      "section": "sec-11-cleanup-verb",
+      "summary": "Naming the removal command.",
+      "recommendation": "Keep cleanup — it is the kickoff's name, its semantics are broader than delete, and the conformance waiver is already recorded. Rename later only if the waiver ever grates.",
+      "recommended": ["ch-11-a"]
+    },
+    {
+      "id": "ctx-12",
+      "section": "sec-12-config-surface",
+      "summary": "Which config keys exist in v1.",
+      "recommendation": "The trimmed schema — every key mirrors a flag decided above (nothing config-only), and the three agent-deck keys with no standalone meaning (docker, the worktree toggle, inherit_from_parent) stay dropped.",
+      "recommended": ["ch-12-a"]
+    },
+    {
+      "id": "ctx-13",
+      "section": "sec-13-extra-args",
+      "summary": "Whether users can inject extra CLI arguments into the emitted launch commands.",
+      "recommendation": "Defer — v1's templates stay fixed strings that tests can assert byte-for-byte; passthrough is additive later and carries a quoting/injection surface better designed once real requests exist.",
+      "recommended": ["ch-13-a"]
+    }
+  ],
+  "feedback": { "id": "note-overall", "value": "" }
+}

@@ -1,0 +1,1239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>agent-fork Phase 3 — design decisions (D2–D14)</title>
+<style>
+  :root{
+    color-scheme: light;
+    --ink:#1F2328; --muted:#5A6069; --bg:#FAFAF8; --card:#FFFFFF;
+    --line:#E2E3DF; --line-soft:#EEEFEB;
+    --accent:#35597E; --accent-deep:#274465; --sel-bg:#EFF3F8;
+    --warn:#8A5A00;
+    --font:system-ui,-apple-system,"Segoe UI",sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    --radius:9px;
+    --shadow:0 1px 2px rgba(31,35,40,.05),0 4px 14px rgba(31,35,40,.05);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;}
+  .bar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 92%,transparent);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
+    display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 20px;}
+  .bar.bottom{position:static;border-top:1px solid var(--line);border-bottom:0;}
+  .bar .spacer{flex:1;}
+  .bar .made{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  button{font-family:var(--font);font-size:13px;font-weight:550;cursor:pointer;
+    border-radius:8px;padding:8px 14px;border:1px solid var(--line);
+    background:var(--card);color:var(--ink);
+    transition:background .14s ease,border-color .14s ease;}
+  button:hover{border-color:var(--accent);}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+  button.primary:hover{background:var(--accent-deep);}
+  button:focus-visible,textarea:focus-visible,.summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .seg{display:inline-flex;align-items:center;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+  .seg .seg-label{font-size:12px;color:var(--muted);padding:0 8px 0 10px;}
+  .seg .seg-btn{border:0;border-radius:0;padding:7px 12px;background:var(--card);}
+  .seg .seg-btn[aria-pressed="true"]{background:var(--accent);color:#fff;}
+  .wrap{max-width:720px;margin:0 auto;padding:36px 24px 64px;}
+  h1{font-size:30px;font-weight:650;line-height:1.15;letter-spacing:-.01em;
+    margin:0 0 10px;text-wrap:balance;}
+  .lead{font-size:17px;color:var(--muted);margin:0 0 8px;max-width:60ch;}
+  section{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px;margin:22px 0;box-shadow:var(--shadow);}
+  section[data-collapsed="true"]{padding:12px 16px;}
+  section[data-collapsed="true"] .sec-head,
+  section[data-collapsed="true"] .sec-body{display:none;}
+  section[data-collapsed="false"] .summary{display:none;}
+  .sec-head{display:flex;align-items:baseline;gap:10px;margin-bottom:4px;}
+  .sec-head .id{font-family:var(--mono);font-size:12.5px;color:var(--muted);}
+  .sec-head h2{font-size:18px;font-weight:600;margin:0;letter-spacing:-.01em;}
+  .sec-head .spacer{flex:1;}
+  .fold{font-family:var(--mono);font-size:12px;padding:3px 9px;color:var(--muted);}
+  .summary{display:block;width:100%;text-align:left;background:transparent;border:0;
+    padding:2px 4px;cursor:pointer;font:inherit;color:inherit;border-radius:6px;}
+  .summary:hover{background:var(--sel-bg);}
+  .summary .s-line{display:block;font-size:14.5px;}
+  .summary .s-line .id{font-family:var(--mono);font-size:12px;color:var(--muted);margin-right:8px;}
+  .summary .s-line .s-q{font-weight:600;}
+  .summary .s-line .s-sel{color:var(--accent-deep);}
+  .summary .s-line .s-mark-follow{color:var(--accent-deep);font-size:12.5px;margin-left:6px;}
+  .summary .s-line .s-mark-against{color:var(--warn);font-size:12.5px;margin-left:6px;}
+  .summary .s-line .s-mark-skip{color:var(--muted);font-size:12.5px;margin-left:6px;}
+  .summary .s-line .s-mark-q{color:var(--warn);font-size:12.5px;margin-left:6px;}
+  .summary .s-note{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+    overflow:hidden;font-size:13px;color:var(--muted);margin-top:2px;}
+  .ctx{border:1px solid var(--line-soft);border-radius:8px;margin:2px 0 14px;background:var(--bg);}
+  .ctx-toggle{display:flex;width:100%;align-items:center;gap:8px;text-align:left;
+    background:transparent;border:0;padding:9px 12px;border-radius:8px;
+    font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);}
+  .ctx-toggle .chev{font-size:10px;transition:transform .14s ease;}
+  .ctx[data-open="false"] .ctx-toggle .chev{transform:rotate(-90deg);}
+  .ctx[data-open="false"] > :not(.ctx-toggle){display:none;}
+  .ctx-what,.ctx-why{margin:0;padding:0 14px 8px;font-size:14px;}
+  .ctx-what b,.ctx-why b{color:var(--accent-deep);}
+  .ctx-free{margin:0;padding:0 14px 10px;font-size:14px;}
+  .ctx-free table{border-collapse:collapse;margin:6px 0;font-size:13px;}
+  .ctx-free th,.ctx-free td{border:1px solid var(--line);padding:5px 9px;text-align:left;}
+  .ctx-free th{background:var(--line-soft);font-weight:600;}
+  .ctx-free code{font-family:var(--mono);font-size:12.5px;}
+  .ctx-rec{margin:0 12px 12px;padding:9px 12px;border-left:3px solid var(--accent);
+    background:var(--sel-bg);border-radius:0 8px 8px 0;font-size:13.5px;}
+  .ctx-rec .cid{font-family:var(--mono);font-size:12px;color:var(--muted);margin:0 4px;}
+  .sec-lead{font-size:14px;color:var(--muted);margin:0 0 14px;}
+  .sec-lead .rule{color:var(--accent-deep);font-weight:600;}
+  .choice{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;margin:8px 0;
+    border:1px solid var(--line-soft);border-radius:8px;cursor:pointer;user-select:none;
+    transition:border-color .14s ease,background .14s ease,opacity .14s ease;}
+  .choice:hover{border-color:var(--accent);}
+  .choice[data-selected="true"]{border-color:var(--accent);background:var(--sel-bg);}
+  section[data-options-hidden="true"] .choice[data-selected="false"]{display:none;}
+  section[data-skipped="true"] .choice{opacity:.45;}
+  .box{flex:none;width:20px;height:20px;border-radius:5px;border:1.5px solid var(--line);
+    display:grid;place-items:center;margin-top:1px;font-size:13px;color:#fff;
+    transition:background .14s ease,border-color .14s ease;}
+  section[data-exclusive="true"] .box{border-radius:999px;}
+  .choice[data-selected="true"] .box{background:var(--accent);border-color:var(--accent);}
+  .choice .box::after{content:"✓";opacity:0;transition:opacity .14s ease;}
+  .choice[data-selected="true"] .box::after{opacity:1;}
+  .choice .label{font-size:15px;}
+  .choice .label .cid{font-family:var(--mono);font-size:12px;color:var(--muted);margin-right:8px;}
+  .badge-rec{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;
+    background:var(--sel-bg);border:1px solid var(--accent);color:var(--accent-deep);
+    font-size:11px;font-weight:600;vertical-align:1px;}
+  .choice .sub{display:block;font-size:13px;color:var(--muted);margin-top:2px;}
+  .sec-actions{display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap;}
+  .opt-toggle,.skip-toggle,.ask-toggle{padding:5px 10px;font-size:12px;color:var(--muted);}
+  .skip-toggle[aria-pressed="true"]{background:var(--line-soft);border-color:var(--muted);color:var(--ink);}
+  .q-wrap{display:none;margin-top:12px;}
+  section[data-asking="true"] .q-wrap{display:block;}
+  .q-wrap label{font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--warn);}
+  .notes{margin-top:14px;}
+  .notes label{font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);}
+  textarea{width:100%;margin-top:6px;font-family:var(--font);font-size:14px;color:var(--ink);
+    background:var(--bg);border:1px solid var(--line);border-radius:8px;
+    padding:10px 12px;resize:vertical;min-height:52px;}
+  .feedback{background:var(--line-soft);border-radius:var(--radius);padding:18px 20px;margin:22px 0;}
+  .feedback h3{margin:0 0 8px;font-size:14.5px;}
+  .panel{position:fixed;inset:auto 0 0 0;max-height:62vh;overflow:auto;z-index:40;
+    background:#24292F;color:#E7E9EC;border-top:2px solid var(--accent);
+    transform:translateY(100%);transition:transform .28s cubic-bezier(.2,.8,.2,1);}
+  .panel.open{transform:translateY(0);}
+  .panel-head{position:sticky;top:0;background:#24292F;display:flex;align-items:center;
+    gap:10px;padding:12px 18px;border-bottom:1px solid #3A4048;}
+  .panel-head .t{flex:1;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;color:#9AA3AD;}
+  .panel pre{margin:0;padding:16px 18px;font-family:var(--mono);font-size:12.5px;
+    line-height:1.6;white-space:pre-wrap;word-break:break-word;}
+  .panel button{background:transparent;color:#E7E9EC;border-color:#4A515A;}
+  .panel button:hover{border-color:var(--accent);}
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{transition:none !important;}
+    .panel{transition:none;}
+  }
+</style>
+</head>
+<body>
+
+<script id="codesign-spec" type="application/json">
+{
+  "version": "1",
+  "skill": "html-codesign",
+  "mode": "codesign",
+  "title": "agent-fork Phase 3 — design decisions (D2–D14)",
+  "lead": "Thirteen pick-one decisions. Each opens with context and a ★ recommendation — recommendations are pre-selected, so change any you disagree with, add notes, then Export → MD (or click “Here are my answers”) and paste the result back into chat.",
+  "generated_at": "2026-07-21T07:50:00-07:00",
+  "sections": [
+    {
+      "id": "sec-01-default-posture",
+      "title": "What should a bare fork carry over by default?",
+      "lead": "Pick one — decision D3. This sets the defaults everything else builds on.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-01-a", "label": "Exact-copy: carry staged + unstaged + untracked (gitignored stays off)", "detail": "Comprehensive by default — the fork continues your in-flight work; tweak down with flags.", "selected": true },
+        { "id": "ch-01-b", "label": "Clean-from-HEAD: worktree at the parent's commit, no uncommitted state", "detail": "Minimal by default — carrying state becomes an opt-in flag.", "selected": false }
+      ],
+      "note": { "id": "note-01", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-02-state-flags",
+      "title": "How should the state choice appear in flags and config?",
+      "lead": "Pick one — decision D2. Defines the flag vocabulary and config keys.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-02-a", "label": "agent-deck toggles: --no-with-state / --with-ignored flags, with_state / with_ignored config keys", "detail": "One vocabulary, direct port of the proven schema; flag↔env↔config name parity is trivial.", "selected": true },
+        { "id": "ch-02-b", "label": "A named mode: --clean flag, mode = \"exact\" | \"clean\" in config", "detail": "Fewer flags on the happy path, but a second vocabulary for the same axis — and --with-ignored still exists.", "selected": false },
+        { "id": "ch-02-c", "label": "Toggles canonical plus --clean as a documented alias for --no-with-state", "detail": "Both vocabularies from day one.", "selected": false }
+      ],
+      "note": { "id": "note-02", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-03-worktree-location",
+      "title": "Where should the fork's worktree directory land?",
+      "lead": "Pick one — decision D5. A worktree_location config override exists in every variant.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-03-a", "label": "Sibling dir <repo>-<branch-slug>; mirror the parent's pattern when the parent is itself a worktree", "detail": "agent-deck's default plus the kickoff's mirror rule for already-forked parents.", "selected": true },
+        { "id": "ch-03-b", "label": "Sibling dir always — no mirroring heuristic", "detail": "Simplest predictable rule; nested forks may land somewhere surprising.", "selected": false },
+        { "id": "ch-03-c", "label": "Central forks dir under XDG data (~/.local/share/agent-fork/worktrees/<repo>/…)", "detail": "Keeps project parents clean, but hides working code far from the repo.", "selected": false },
+        { "id": "ch-03-d", "label": "Inside the repo: <repo>/.worktrees/<branch-slug>", "detail": "agent-deck's 'subdirectory' option; keeps everything under one root.", "selected": false }
+      ],
+      "note": { "id": "note-03", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-04-fork-name",
+      "title": "Where does a fork's name come from?",
+      "lead": "Pick one — decision D4. The name seeds the branch slug, worktree suffix, and session name.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-04-a", "label": "Optional positional (agent-fork fork fix-auth); auto-derived from branch + date when omitted", "detail": "Auto form: <parent-branch-slug>-<mmdd>, collisions suffixed -2, -3 (agent-deck's scheme).", "selected": true },
+        { "id": "ch-04-b", "label": "Required positional — a name must always be given", "detail": "Always explicit, but breaks the zero-argument one-word flow.", "selected": false },
+        { "id": "ch-04-c", "label": "Always auto-generated — no name argument accepted", "detail": "Zero decisions at fork time, zero control.", "selected": false }
+      ],
+      "note": { "id": "note-04", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-05-session-name",
+      "title": "What display name does the forked session get?",
+      "lead": "Pick one — decision D6.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-05-a", "label": "The fork name itself — one identity across branch, worktree, and session", "detail": "\"fix-auth-2\" is the branch suffix, the directory suffix, and the session you pick in /resume.", "selected": true },
+        { "id": "ch-05-b", "label": "A parent-derived template like {parent}-fork-{n}", "detail": "Richer lineage, but the parent's display name is not reliably discoverable (env exposes only its id).", "selected": false },
+        { "id": "ch-05-c", "label": "No name — let the agent use its default", "detail": "Loses findability in session pickers.", "selected": false }
+      ],
+      "note": { "id": "note-05", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-06-fallback",
+      "title": "What should happen when a native session fork is impossible?",
+      "lead": "Pick one — decision D14. Applies when preflight finds an old CLI, a missing Codex rollout, or an unrelated directory.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-06-a", "label": "Degradation ladder: native fork, else fresh NAMED session + generated HANDOFF.md seeded via the launch command", "detail": "Preflight picks the rung before emitting; the handoff carries parent id, anchor commit, branch, status snapshot, and a task-notes slot the skill fills.", "selected": true },
+        { "id": "ch-06-b", "label": "Refuse with a diagnosis — no fallback rung in v1", "detail": "Simplest and honest, but old-CLI users get nothing.", "selected": false },
+        { "id": "ch-06-c", "label": "The ladder plus a third rung: copy the Claude session file into the target project dir", "detail": "Manipulates a format Anthropic declares internal and version-unstable; research verdict was last-resort-only.", "selected": false }
+      ],
+      "note": { "id": "note-06", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-07-verification",
+      "title": "Should fork verification run by default?",
+      "lead": "Pick one — decision D8.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-07-a", "label": "On by default; --no-verify to skip", "detail": "A handful of git status/rev-parse calls — milliseconds — and a failed check rolls the fork back.", "selected": true },
+        { "id": "ch-07-b", "label": "Off by default; --verify to enable (agent-deck parity)", "detail": "agent-deck verifies only in its test suite, never at runtime.", "selected": false }
+      ],
+      "note": { "id": "note-07", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-08-clipboard",
+      "title": "Should the paste command land on the clipboard in v1?",
+      "lead": "Pick one — decision D9 (the kickoff's stretch goal).",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-08-a", "label": "Yes — a --copy flag (config default off); OSC52 first, then pbcopy/xclip; failure is a notice, never an error", "detail": "OSC52 writes the clipboard through SSH and tmux; shell-outs are the fallback.", "selected": true },
+        { "id": "ch-08-b", "label": "Defer clipboard entirely to v1.1", "detail": "Keeps v1 lean; the command still prints on stdout.", "selected": false },
+        { "id": "ch-08-c", "label": "Copy by default when on a TTY, with --no-copy to opt out", "detail": "One less keystroke, but a silent clipboard write surprises people.", "selected": false }
+      ],
+      "note": { "id": "note-08", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-09-list-command",
+      "title": "Should v1 ship an agent-fork list command?",
+      "lead": "Pick one — decision D10.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-09-a", "label": "Yes — read the fork registry; show name, branch, worktree, agent, and whether the worktree still exists", "detail": "The registry exists anyway for cleanup ownership; list is a thin read.", "selected": true },
+        { "id": "ch-09-b", "label": "Defer — git worktree list covers it for now", "detail": "One less command, but cleanup targeting goes blind.", "selected": false }
+      ],
+      "note": { "id": "note-09", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-10-cleanup-guards",
+      "title": "What may cleanup remove, and what stops it?",
+      "lead": "Pick one — decision D12. Consent (--yes) is separate from guards in every variant.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-10-a", "label": "Registry-scoped: only forks agent-fork created; --force extends to any worktree AND overrides the dirty/unpushed guards", "detail": "Guards: uncommitted changes; commits on no remote (no upstream counts as unpushed); target is your current directory.", "selected": true },
+        { "id": "ch-10-b", "label": "Any worktree from the start, with the same guards everywhere", "detail": "More useful as a general tool, more dangerous on worktrees it didn't make.", "selected": false },
+        { "id": "ch-10-c", "label": "Registry-only, permanently — --force never extends the target set", "detail": "Safest; orphaned or hand-made worktrees need manual git.", "selected": false }
+      ],
+      "note": { "id": "note-10", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-11-cleanup-verb",
+      "title": "What is the removal command called?",
+      "lead": "Pick one — decision D13.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-11-a", "label": "cleanup — the kickoff name (stays the one waived SHOULD in CONFORMANCE.md)", "detail": "Does more than delete: worktree + branch + prune + registry update.", "selected": true },
+        { "id": "ch-11-b", "label": "delete — the CLI standard's core verb (drops the waiver)", "detail": "Standard-pure; slightly undersells the multi-step semantics.", "selected": false },
+        { "id": "ch-11-c", "label": "prune — docker-style", "detail": "Usually implies sweep-all-stale rather than remove-this-one; could later be cleanup --all instead.", "selected": false }
+      ],
+      "note": { "id": "note-11", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-12-config-surface",
+      "title": "How much configuration should v1 expose?",
+      "lead": "Pick one — decision D7. File locations and precedence are already fixed by the CLI standard; this is only about which keys exist.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-12-a", "label": "Trimmed schema tracking today's answers: with_state, with_ignored, branch_prefix, worktree_location, verify, copy", "detail": "Every key mirrors a flag decided above; drops agent-deck's docker, worktree toggle, and inherit_from_parent.", "selected": true },
+        { "id": "ch-12-b", "label": "Minimal: branch_prefix only — everything else is flags", "detail": "Leanest possible; users re-type preferences per invocation.", "selected": false },
+        { "id": "ch-12-c", "label": "Full agent-deck [fork] port including inherit_from_parent", "detail": "Maximum familiarity; carries keys with no meaning in a standalone CLI.", "selected": false }
+      ],
+      "note": { "id": "note-12", "placeholder": "Adjustments or reasoning", "value": "" }
+    },
+    {
+      "id": "sec-13-extra-args",
+      "title": "Should per-agent extra-args passthrough ship in v1?",
+      "lead": "Pick one — decision D11.",
+      "exclusive": true,
+      "choices": [
+        { "id": "ch-13-a", "label": "Defer to v1.1 — keep v1's launch templates fixed and testable", "detail": "Adding [agents.claude] extra_args later is additive and non-breaking.", "selected": true },
+        { "id": "ch-13-b", "label": "Ship in v1: [agents.<name>] extra_args injected into emitted commands", "detail": "Power users get --model etc. now; adds a quoting/injection surface to v1.", "selected": false }
+      ],
+      "note": { "id": "note-13", "placeholder": "Adjustments or reasoning", "value": "" }
+    }
+  ],
+  "contexts": [
+    {
+      "id": "ctx-01",
+      "section": "sec-01-default-posture",
+      "summary": "Whether the one-word fork carries your dirty working state or starts clean at the parent's commit.",
+      "recommendation": "Exact-copy — the tool exists to continue in-flight work; a clean worktree at the parent's commit is what plain git worktree add already gives you. Gitignored files stay off by default either way (agent-deck flipped that default off after real-world pain: secrets in .env and unbounded node_modules-style trees).",
+      "recommended": ["ch-01-a"]
+    },
+    {
+      "id": "ctx-02",
+      "section": "sec-02-state-flags",
+      "summary": "The vocabulary for exact-copy vs clean: independent toggles (agent-deck's shape) or a named mode flag.",
+      "recommendation": "The agent-deck toggles — one vocabulary, a proven schema with tri-state semantics (explicit false honored), and trivial flag/env/config name parity. A --clean alias can be added compatibly later if ergonomics demand it.",
+      "recommended": ["ch-02-a"]
+    },
+    {
+      "id": "ctx-03",
+      "section": "sec-03-worktree-location",
+      "summary": "Where the new working directory is created relative to the repo.",
+      "recommendation": "Sibling with mirror-parent — sibling <repo>-<branch> is agent-deck's default and matches how worktrees are commonly laid out by hand; the mirror rule keeps fork-of-fork placement consistent with whatever pattern the parent already follows.",
+      "recommended": ["ch-03-a"]
+    },
+    {
+      "id": "ctx-04",
+      "section": "sec-04-fork-name",
+      "summary": "Whether the fork's name is given, derived, or both.",
+      "recommendation": "Optional positional with an auto-derived fallback — preserves the zero-argument flow (the skill can always call it bare) while letting a human name the fork when the name matters. agent-deck derives from the session title; with no title available, branch + date is the deterministic equivalent.",
+      "recommended": ["ch-04-a"]
+    },
+    {
+      "id": "ctx-05",
+      "section": "sec-05-session-name",
+      "summary": "The name the forked session shows in its agent's session picker and terminal title.",
+      "recommendation": "Use the fork name — one identity across branch, worktree, and session keeps the mental model flat, and it needs no discovery machinery. Parent-derived templates require reading the parent's display name, which the environment does not expose.",
+      "recommended": ["ch-05-a"]
+    },
+    {
+      "id": "ctx-06",
+      "section": "sec-06-fallback",
+      "summary": "The behavior when preflight determines a native session fork cannot work.",
+      "recommendation": "The two-rung ladder — never emit a command known to fail, and degrade to a fresh named session seeded with a generated handoff file so the user still gets a working fork of their code with context to continue from. Leave the session-file-copy trick out of v1: it manipulates a format its vendor declares unstable.",
+      "recommended": ["ch-06-a"]
+    },
+    {
+      "id": "ctx-07",
+      "section": "sec-07-verification",
+      "summary": "Whether the fork is checked against its contract at runtime or assumed correct from exit codes.",
+      "recommendation": "On by default with --no-verify — the checks cost milliseconds, agent-deck documents this exact contract but never enforces it at runtime, and a tool whose output is a paste-command should not hand over an unverified fork.",
+      "recommended": ["ch-07-a"]
+    },
+    {
+      "id": "ctx-08",
+      "section": "sec-08-clipboard",
+      "summary": "Whether and how the emitted paste command reaches the clipboard.",
+      "recommendation": "Ship it as an explicit --copy flag with OSC52 first — cheap to build, works over SSH/tmux, and explicit beats a silent default side effect. Config can flip it on permanently for those who want it.",
+      "recommended": ["ch-08-a"]
+    },
+    {
+      "id": "ctx-09",
+      "section": "sec-09-list-command",
+      "summary": "Whether v1 can enumerate the forks it has created.",
+      "recommendation": "Yes — the state registry already exists for cleanup ownership, list is a thin read over it, and without it cleanup targeting is guesswork.",
+      "recommended": ["ch-09-a"]
+    },
+    {
+      "id": "ctx-10",
+      "section": "sec-10-cleanup-guards",
+      "summary": "The blast-radius rules for the destructive command.",
+      "recommendation": "Registry-scoped with --force as the deliberate escalation — safe by default on exactly the things agent-fork made, while still giving an operator a way to clean up anything, consistent with the standard's force-overrides-guards semantics.",
+      "recommended": ["ch-10-a"]
+    },
+    {
+      "id": "ctx-11",
+      "section": "sec-11-cleanup-verb",
+      "summary": "Naming the removal command.",
+      "recommendation": "Keep cleanup — it is the kickoff's name, its semantics are broader than delete, and the conformance waiver is already recorded. Rename later only if the waiver ever grates.",
+      "recommended": ["ch-11-a"]
+    },
+    {
+      "id": "ctx-12",
+      "section": "sec-12-config-surface",
+      "summary": "Which config keys exist in v1.",
+      "recommendation": "The trimmed schema — every key mirrors a flag decided above (nothing config-only), and the three agent-deck keys with no standalone meaning (docker, the worktree toggle, inherit_from_parent) stay dropped.",
+      "recommended": ["ch-12-a"]
+    },
+    {
+      "id": "ctx-13",
+      "section": "sec-13-extra-args",
+      "summary": "Whether users can inject extra CLI arguments into the emitted launch commands.",
+      "recommendation": "Defer — v1's templates stay fixed strings that tests can assert byte-for-byte; passthrough is additive later and carries a quoting/injection surface better designed once real requests exist.",
+      "recommended": ["ch-13-a"]
+    }
+  ],
+  "feedback": { "id": "note-overall", "value": "" }
+}
+</script>
+
+<div class="bar" role="toolbar" aria-label="Codesign actions">
+  <button class="primary" onclick="doExport('md')">Export → MD</button>
+  <button class="primary" onclick="doExport('json')">Export → JSON</button>
+  <button onclick="reprompt('draft')">Another draft</button>
+  <button onclick="reprompt('answers')">Here are my answers</button>
+  <button onclick="questionsFirst()">Questions first</button>
+  <span class="seg" role="group" aria-label="Export detail">
+    <span class="seg-label">Export</span>
+    <button class="seg-btn" id="segSlim" aria-pressed="true" onclick="setVariant('slim')">Slim</button>
+    <button class="seg-btn" id="segFull" aria-pressed="false" onclick="setVariant('full')">Full</button>
+  </span>
+  <button onclick="collapseAll()">Collapse all</button>
+  <button onclick="expandAll()">Expand all</button>
+  <span class="spacer"></span>
+  <span class="made" id="madeCount"></span>
+</div>
+
+<div class="wrap">
+  <h1 id="pageTitle">agent-fork Phase 3 — design decisions (D2–D14)</h1>
+  <p class="lead" id="pageLead">Thirteen pick-one decisions. Each opens with context and a ★ recommendation — recommendations are pre-selected, so change any you disagree with, add notes, then Export → MD (or click “Here are my answers”) and paste the result back into chat.</p>
+
+  <section data-id="sec-01-default-posture" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="What should a bare fork carry over by default?">
+    <div class="sec-head"><span class="id">sec-01</span><h2>What should a bare fork carry over by default?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-01-default-posture" aria-expanded="true" aria-label="Collapse sec-01 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-01-default-posture" role="button" tabindex="0" aria-label="Expand sec-01"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-01" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> <code>agent-fork</code> duplicates your current work into a new git worktree (a second working directory sharing the same repository) so a second agent session can continue it in parallel. "Exact-copy" also transfers your uncommitted work — files staged for commit, edited-but-unstaged files, and brand-new untracked files — so the copy looks exactly like where you left off. "Clean-from-HEAD" starts the copy at your latest commit with none of that.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> This default defines what the one-word gesture <em>means</em>, and every flag and config key downstream is phrased relative to it (decision D3).</p>
+        <div class="ctx-free">
+          <table>
+            <tr><th></th><th>Continues in-flight work</th><th>Distinct from plain <code>git worktree add</code></th></tr>
+            <tr><td>Exact-copy</td><td>Yes — dirty state travels</td><td>Yes — this is the tool's core value</td></tr>
+            <tr><td>Clean-from-HEAD</td><td>Only committed work</td><td>Barely — git does this natively</td></tr>
+          </table>
+          <p>Prior art: agent-deck (the production tool this extracts from) makes its one-key quick-fork comprehensive-by-default, and its maintainers later reversed exactly one piece of it — gitignored-file copying — after it dragged in secrets and gigabyte caches. That reversal is baked into both options here: gitignored stays off unless explicitly requested.</p>
+        </div>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-01-a</span>Exact-copy — the tool exists to continue in-flight work; a clean worktree at the parent's commit is what plain git worktree add already gives you.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D3. This sets the defaults everything else builds on.</p>
+      <div class="choice" data-id="ch-01-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-01-a</span>Exact-copy: carry staged + unstaged + untracked (gitignored stays off)<span class="badge-rec">★ rec</span><span class="sub">Comprehensive by default — the fork continues your in-flight work; tweak down with flags.</span></span>
+      </div>
+      <div class="choice" data-id="ch-01-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-01-b</span>Clean-from-HEAD: worktree at the parent's commit, no uncommitted state<span class="sub">Minimal by default — carrying state becomes an opt-in flag.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-01-default-posture" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-01-default-posture" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-01-default-posture" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-01">❓ Your question about this section</label><textarea id="q-01" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-01">Adjustments or reasoning</label><textarea id="note-01" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-02-state-flags" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="How should the state choice appear in flags and config?">
+    <div class="sec-head"><span class="id">sec-02</span><h2>How should the state choice appear in flags and config?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-02-state-flags" aria-expanded="true" aria-label="Collapse sec-02 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-02-state-flags" role="button" tabindex="0" aria-label="Expand sec-02"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-02" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> The words users type to change what a fork carries. agent-deck models it as two independent toggles — <code>with_state</code> (carry uncommitted work) and <code>with_ignored</code> (also carry gitignored files, which implies the first) — so the CLI flags would be <code>--no-with-state</code> and <code>--with-ignored</code>. The alternative is one named mode (<code>--clean</code>) treating exact-vs-clean as a single switch.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> This fixes flag names, config keys, and help text — the part of the interface that cannot change compatibly later (decision D2).</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-02-a</span>The agent-deck toggles — one vocabulary, a proven schema with tri-state semantics, trivial flag/env/config parity; a --clean alias can be added compatibly later.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D2. Defines the flag vocabulary and config keys.</p>
+      <div class="choice" data-id="ch-02-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-02-a</span>agent-deck toggles: --no-with-state / --with-ignored flags, with_state / with_ignored config keys<span class="badge-rec">★ rec</span><span class="sub">One vocabulary, direct port of the proven schema; flag↔env↔config name parity is trivial.</span></span>
+      </div>
+      <div class="choice" data-id="ch-02-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-02-b</span>A named mode: --clean flag, mode = "exact" | "clean" in config<span class="sub">Fewer flags on the happy path, but a second vocabulary for the same axis — and --with-ignored still exists.</span></span>
+      </div>
+      <div class="choice" data-id="ch-02-c" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-02-c</span>Toggles canonical plus --clean as a documented alias for --no-with-state<span class="sub">Both vocabularies from day one.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-02-state-flags" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-02-state-flags" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-02-state-flags" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-02">❓ Your question about this section</label><textarea id="q-02" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-02">Adjustments or reasoning</label><textarea id="note-02" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-03-worktree-location" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="Where should the fork's worktree directory land?">
+    <div class="sec-head"><span class="id">sec-03</span><h2>Where should the fork's worktree directory land?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-03-worktree-location" aria-expanded="true" aria-label="Collapse sec-03 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-03-worktree-location" role="button" tabindex="0" aria-label="Expand sec-03"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-03" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> The filesystem location of the fork's new working directory. For a repo at <code>~/c/myapp</code> forked as <code>fix-auth</code>: sibling = <code>~/c/myapp-fix-auth</code>; central = <code>~/.local/share/agent-fork/worktrees/myapp/fix-auth</code>; subdirectory = <code>~/c/myapp/.worktrees/fix-auth</code>. "Mirror the parent's pattern" means: when you fork <em>from</em> a directory that is itself a fork, place the new one the way that one was placed.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> This is where users will physically find their forked code, and where cleanup will later delete directories (decision D5).</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-03-a</span>Sibling with mirror-parent — agent-deck's default, matches hand-made worktree layouts, and keeps fork-of-fork placement consistent.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D5. A worktree_location config override exists in every variant.</p>
+      <div class="choice" data-id="ch-03-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-03-a</span>Sibling dir &lt;repo&gt;-&lt;branch-slug&gt;; mirror the parent's pattern when the parent is itself a worktree<span class="badge-rec">★ rec</span><span class="sub">agent-deck's default plus the kickoff's mirror rule for already-forked parents.</span></span>
+      </div>
+      <div class="choice" data-id="ch-03-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-03-b</span>Sibling dir always — no mirroring heuristic<span class="sub">Simplest predictable rule; nested forks may land somewhere surprising.</span></span>
+      </div>
+      <div class="choice" data-id="ch-03-c" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-03-c</span>Central forks dir under XDG data (~/.local/share/agent-fork/worktrees/&lt;repo&gt;/…)<span class="sub">Keeps project parents clean, but hides working code far from the repo.</span></span>
+      </div>
+      <div class="choice" data-id="ch-03-d" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-03-d</span>Inside the repo: &lt;repo&gt;/.worktrees/&lt;branch-slug&gt;<span class="sub">agent-deck's 'subdirectory' option; keeps everything under one root.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-03-worktree-location" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-03-worktree-location" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-03-worktree-location" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-03">❓ Your question about this section</label><textarea id="q-03" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-03">Adjustments or reasoning</label><textarea id="note-03" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-04-fork-name" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="Where does a fork's name come from?">
+    <div class="sec-head"><span class="id">sec-04</span><h2>Where does a fork's name come from?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-04-fork-name" aria-expanded="true" aria-label="Collapse sec-04 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-04-fork-name" role="button" tabindex="0" aria-label="Expand sec-04"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-04" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> The fork's single identity string. It becomes the branch name (behind the <code>fork/</code> prefix), the worktree directory suffix, and — per sec-05 — the session's display name. Typed example: <code>agent-fork fork fix-auth</code>. Auto example: forking from branch <code>feat-login</code> on July 21 yields <code>feat-login-0721</code>, bumped to <code>-2</code>, <code>-3</code> on collision.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> agent-deck derives its name from the session's title — agent-fork has no title to slug, so the fallback scheme has to come from somewhere (decision D4).</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-04-a</span>Optional positional with auto-derived fallback — preserves the zero-argument flow while letting a human name the fork when it matters.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D4. The name seeds the branch slug, worktree suffix, and session name.</p>
+      <div class="choice" data-id="ch-04-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-04-a</span>Optional positional (agent-fork fork fix-auth); auto-derived from branch + date when omitted<span class="badge-rec">★ rec</span><span class="sub">Auto form: &lt;parent-branch-slug&gt;-&lt;mmdd&gt;, collisions suffixed -2, -3 (agent-deck's scheme).</span></span>
+      </div>
+      <div class="choice" data-id="ch-04-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-04-b</span>Required positional — a name must always be given<span class="sub">Always explicit, but breaks the zero-argument one-word flow.</span></span>
+      </div>
+      <div class="choice" data-id="ch-04-c" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-04-c</span>Always auto-generated — no name argument accepted<span class="sub">Zero decisions at fork time, zero control.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-04-fork-name" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-04-fork-name" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-04-fork-name" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-04">❓ Your question about this section</label><textarea id="q-04" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-04">Adjustments or reasoning</label><textarea id="note-04" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-05-session-name" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="What display name does the forked session get?">
+    <div class="sec-head"><span class="id">sec-05</span><h2>What display name does the forked session get?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-05-session-name" aria-expanded="true" aria-label="Collapse sec-05 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-05-session-name" role="button" tabindex="0" aria-label="Expand sec-05"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-05" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> Coding agents show a display name for each saved session (Claude Code's <code>--name</code> appears in its prompt box, resume picker, and terminal title). This decides what the forked session is called there.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> The launch command bakes the name in (<code>-n '…'</code>), so it must be derivable at fork time from information the CLI actually has (decision D6). The environment exposes the parent session's <em>id</em>, not its human display name — templates built on the parent's name would need extra discovery machinery.</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-05-a</span>Use the fork name — one identity across branch, worktree, and session; no discovery machinery needed.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D6.</p>
+      <div class="choice" data-id="ch-05-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-05-a</span>The fork name itself — one identity across branch, worktree, and session<span class="badge-rec">★ rec</span><span class="sub">"fix-auth-2" is the branch suffix, the directory suffix, and the session you pick in /resume.</span></span>
+      </div>
+      <div class="choice" data-id="ch-05-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-05-b</span>A parent-derived template like {parent}-fork-{n}<span class="sub">Richer lineage, but the parent's display name is not reliably discoverable (env exposes only its id).</span></span>
+      </div>
+      <div class="choice" data-id="ch-05-c" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-05-c</span>No name — let the agent use its default<span class="sub">Loses findability in session pickers.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-05-session-name" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-05-session-name" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-05-session-name" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-05">❓ Your question about this section</label><textarea id="q-05" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-05">Adjustments or reasoning</label><textarea id="note-05" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-06-fallback" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="What should happen when a native session fork is impossible?">
+    <div class="sec-head"><span class="id">sec-06</span><h2>What should happen when a native session fork is impossible?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-06-fallback" aria-expanded="true" aria-label="Collapse sec-06 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-06-fallback" role="button" tabindex="0" aria-label="Expand sec-06"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-06" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> Both target agents can natively fork a session (full conversation copy) — but only on recent versions: Claude Code needs ≥2.0.73 for pinned-id forks, Codex needs ≥0.81.0 for <code>codex fork</code>, and Codex also needs its session file flushed to disk first. The tool checks all of this <em>before</em> emitting a command ("preflight"). This decides what happens when the check fails.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> The Phase 1 research pass on handoff conventions returned nothing verified, so this is a design-from-first-principles call (decision D14). A "handoff file" = a generated <code>HANDOFF.md</code> in the new worktree carrying the parent session id, anchor commit, branch, a status snapshot, and a task-notes slot the agent skill fills in — the fresh session reads it and continues informed, though without the parent's conversation memory.</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-06-a</span>The two-rung ladder — never emit a command known to fail; degrade to a fresh named session seeded with the handoff file. Leave the vendor-unstable session-file-copy trick out of v1.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D14. Applies when preflight finds an old CLI, a missing Codex rollout, or an unrelated directory.</p>
+      <div class="choice" data-id="ch-06-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-06-a</span>Degradation ladder: native fork, else fresh NAMED session + generated HANDOFF.md seeded via the launch command<span class="badge-rec">★ rec</span><span class="sub">Preflight picks the rung before emitting; the handoff carries parent id, anchor commit, branch, status snapshot, and a task-notes slot the skill fills.</span></span>
+      </div>
+      <div class="choice" data-id="ch-06-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-06-b</span>Refuse with a diagnosis — no fallback rung in v1<span class="sub">Simplest and honest, but old-CLI users get nothing.</span></span>
+      </div>
+      <div class="choice" data-id="ch-06-c" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-06-c</span>The ladder plus a third rung: copy the Claude session file into the target project dir<span class="sub">Manipulates a format Anthropic declares internal and version-unstable; research verdict was last-resort-only.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-06-fallback" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-06-fallback" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-06-fallback" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-06">❓ Your question about this section</label><textarea id="q-06" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-06">Adjustments or reasoning</label><textarea id="note-06" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-07-verification" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="Should fork verification run by default?">
+    <div class="sec-head"><span class="id">sec-07</span><h2>Should fork verification run by default?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-07-verification" aria-expanded="true" aria-label="Collapse sec-07 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-07-verification" role="button" tabindex="0" aria-label="Expand sec-07"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-07" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> After creating the fork, the tool can prove it worked: the new worktree sits at the right commit and branch, git registers it, the copy's <code>git status</code> output is byte-identical to the parent's (for exact-copy), and the parent was left untouched. A failed check rolls the fork back instead of handing it over.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> agent-deck documents this exact contract but only enforces it in its test suite — at runtime it assumes success from exit codes. Enforcing it live is agent-fork's chance to be strictly safer at negligible cost (decision D8).</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-07-a</span>On by default with --no-verify — milliseconds of git calls, and a paste-command tool should not hand over an unverified fork.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D8.</p>
+      <div class="choice" data-id="ch-07-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-07-a</span>On by default; --no-verify to skip<span class="badge-rec">★ rec</span><span class="sub">A handful of git status/rev-parse calls — milliseconds — and a failed check rolls the fork back.</span></span>
+      </div>
+      <div class="choice" data-id="ch-07-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-07-b</span>Off by default; --verify to enable (agent-deck parity)<span class="sub">agent-deck verifies only in its test suite, never at runtime.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-07-verification" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-07-verification" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-07-verification" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-07">❓ Your question about this section</label><textarea id="q-07" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-07">Adjustments or reasoning</label><textarea id="note-07" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-08-clipboard" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="Should the paste command land on the clipboard in v1?">
+    <div class="sec-head"><span class="id">sec-08</span><h2>Should the paste command land on the clipboard in v1?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-08-clipboard" aria-expanded="true" aria-label="Collapse sec-08 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-08-clipboard" role="button" tabindex="0" aria-label="Expand sec-08"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-08" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> The tool's final output is one shell command the user pastes into a fresh terminal. Clipboard assist puts that command on the clipboard so the paste is immediate. OSC52 is a terminal escape sequence that sets the clipboard from inside the terminal — it works even through SSH and tmux, where <code>pbcopy</code>/<code>xclip</code> shell-outs cannot reach your local clipboard.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> The kickoff marked this a stretch goal; the question is whether it earns a v1 slot and whether it should ever happen without being asked for (decision D9).</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-08-a</span>Ship it as an explicit --copy flag with OSC52 first — cheap, SSH/tmux-safe, and explicit beats a silent side effect.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D9 (the kickoff's stretch goal).</p>
+      <div class="choice" data-id="ch-08-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-08-a</span>Yes — a --copy flag (config default off); OSC52 first, then pbcopy/xclip; failure is a notice, never an error<span class="badge-rec">★ rec</span><span class="sub">OSC52 writes the clipboard through SSH and tmux; shell-outs are the fallback.</span></span>
+      </div>
+      <div class="choice" data-id="ch-08-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-08-b</span>Defer clipboard entirely to v1.1<span class="sub">Keeps v1 lean; the command still prints on stdout.</span></span>
+      </div>
+      <div class="choice" data-id="ch-08-c" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-08-c</span>Copy by default when on a TTY, with --no-copy to opt out<span class="sub">One less keystroke, but a silent clipboard write surprises people.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-08-clipboard" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-08-clipboard" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-08-clipboard" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-08">❓ Your question about this section</label><textarea id="q-08" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-08">Adjustments or reasoning</label><textarea id="note-08" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-09-list-command" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="Should v1 ship an agent-fork list command?">
+    <div class="sec-head"><span class="id">sec-09</span><h2>Should v1 ship an agent-fork list command?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-09-list-command" aria-expanded="true" aria-label="Collapse sec-09 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-09-list-command" role="button" tabindex="0" aria-label="Expand sec-09"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-09" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> The tool keeps a small local registry recording each fork it creates (name, branch, worktree path, agent, parent session). That registry must exist anyway so <code>cleanup</code> knows what it owns. <code>list</code> would print it.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> Scope control — every v1 command adds test and doc surface, and the command count sits at the small-CLI profile's boundary (decision D10).</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-09-a</span>Yes — a thin read over data that exists anyway; without it, cleanup targeting is guesswork.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D10.</p>
+      <div class="choice" data-id="ch-09-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-09-a</span>Yes — read the fork registry; show name, branch, worktree, agent, and whether the worktree still exists<span class="badge-rec">★ rec</span><span class="sub">The registry exists anyway for cleanup ownership; list is a thin read.</span></span>
+      </div>
+      <div class="choice" data-id="ch-09-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-09-b</span>Defer — git worktree list covers it for now<span class="sub">One less command, but cleanup targeting goes blind.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-09-list-command" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-09-list-command" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-09-list-command" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-09">❓ Your question about this section</label><textarea id="q-09" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-09">Adjustments or reasoning</label><textarea id="note-09" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-10-cleanup-guards" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="What may cleanup remove, and what stops it?">
+    <div class="sec-head"><span class="id">sec-10</span><h2>What may cleanup remove, and what stops it?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-10-cleanup-guards" aria-expanded="true" aria-label="Collapse sec-10 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-10-cleanup-guards" role="button" tabindex="0" aria-label="Expand sec-10"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-10" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> <code>cleanup</code> deletes a fork's worktree directory and (unless told to keep it) its branch — the tool's one destructive command. Two independent dials: <em>which targets it may touch</em> (only forks recorded in its own registry, or any git worktree), and <em>which guard conditions block it</em> (uncommitted changes, commits not pushed to any remote, or the target being the directory you are standing in).</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> Blast radius. Per the CLI standard, <code>--force</code> overrides guard conditions and <code>--yes</code> answers the consent prompt — this decision fixes what force may extend to (decision D12).</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-10-a</span>Registry-scoped with --force as the deliberate escalation — safe by default on exactly what agent-fork made, with an operator path to clean anything.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D12. Consent (--yes) is separate from guards in every variant.</p>
+      <div class="choice" data-id="ch-10-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-10-a</span>Registry-scoped: only forks agent-fork created; --force extends to any worktree AND overrides the dirty/unpushed guards<span class="badge-rec">★ rec</span><span class="sub">Guards: uncommitted changes; commits on no remote (no upstream counts as unpushed); target is your current directory.</span></span>
+      </div>
+      <div class="choice" data-id="ch-10-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-10-b</span>Any worktree from the start, with the same guards everywhere<span class="sub">More useful as a general tool, more dangerous on worktrees it didn't make.</span></span>
+      </div>
+      <div class="choice" data-id="ch-10-c" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-10-c</span>Registry-only, permanently — --force never extends the target set<span class="sub">Safest; orphaned or hand-made worktrees need manual git.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-10-cleanup-guards" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-10-cleanup-guards" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-10-cleanup-guards" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-10">❓ Your question about this section</label><textarea id="q-10" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-10">Adjustments or reasoning</label><textarea id="note-10" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-11-cleanup-verb" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="What is the removal command called?">
+    <div class="sec-head"><span class="id">sec-11</span><h2>What is the removal command called?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-11-cleanup-verb" aria-expanded="true" aria-label="Collapse sec-11 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-11-cleanup-verb" role="button" tabindex="0" aria-label="Expand sec-11"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-11" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> The org's CLI standard has a core verb set where removal is <code>delete</code>; other names need either an established-domain-verb justification or a recorded waiver. <code>cleanup</code> is the name the project kickoff used; it removes the worktree, optionally the branch, prunes git's bookkeeping, and updates the registry.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> Command names are permanent interface (renames need deprecation cycles), and this one is currently the only waiver in the conformance note (decision D13).</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-11-a</span>Keep cleanup — the kickoff's name, broader-than-delete semantics, waiver already recorded.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D13.</p>
+      <div class="choice" data-id="ch-11-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-11-a</span>cleanup — the kickoff name (stays the one waived SHOULD in CONFORMANCE.md)<span class="badge-rec">★ rec</span><span class="sub">Does more than delete: worktree + branch + prune + registry update.</span></span>
+      </div>
+      <div class="choice" data-id="ch-11-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-11-b</span>delete — the CLI standard's core verb (drops the waiver)<span class="sub">Standard-pure; slightly undersells the multi-step semantics.</span></span>
+      </div>
+      <div class="choice" data-id="ch-11-c" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-11-c</span>prune — docker-style<span class="sub">Usually implies sweep-all-stale rather than remove-this-one; could later be cleanup --all instead.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-11-cleanup-verb" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-11-cleanup-verb" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-11-cleanup-verb" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-11">❓ Your question about this section</label><textarea id="q-11" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-11">Adjustments or reasoning</label><textarea id="note-11" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-12-config-surface" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="How much configuration should v1 expose?">
+    <div class="sec-head"><span class="id">sec-12</span><h2>How much configuration should v1 expose?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-12-config-surface" aria-expanded="true" aria-label="Collapse sec-12 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-12-config-surface" role="button" tabindex="0" aria-label="Expand sec-12"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-12" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> Which keys a user can set in <code>agent-fork_config.toml</code> (project and user scopes; file locations and precedence are already fixed by the CLI standard). The trimmed schema carries exactly the toggles decided in the sections above; agent-deck's original <code>[fork]</code> block additionally has <code>docker</code> (sandbox choice), a <code>worktree</code> on/off toggle, and <code>inherit_from_parent</code> (mirror a live parent session's runtime state) — none of which mean anything in a standalone CLI whose fork <em>is</em> a worktree.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> Config keys are interface: every key needs validation, docs, and a deprecation path if removed later (decision D7).</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-12-a</span>The trimmed schema — every key mirrors a flag decided above; the three meaningless-here agent-deck keys stay dropped.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D7. File locations and precedence are already fixed by the CLI standard; this is only about which keys exist.</p>
+      <div class="choice" data-id="ch-12-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-12-a</span>Trimmed schema tracking today's answers: with_state, with_ignored, branch_prefix, worktree_location, verify, copy<span class="badge-rec">★ rec</span><span class="sub">Every key mirrors a flag decided above; drops agent-deck's docker, worktree toggle, and inherit_from_parent.</span></span>
+      </div>
+      <div class="choice" data-id="ch-12-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-12-b</span>Minimal: branch_prefix only — everything else is flags<span class="sub">Leanest possible; users re-type preferences per invocation.</span></span>
+      </div>
+      <div class="choice" data-id="ch-12-c" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-12-c</span>Full agent-deck [fork] port including inherit_from_parent<span class="sub">Maximum familiarity; carries keys with no meaning in a standalone CLI.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-12-config-surface" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-12-config-surface" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-12-config-surface" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-12">❓ Your question about this section</label><textarea id="q-12" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-12">Adjustments or reasoning</label><textarea id="note-12" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <section data-id="sec-13-extra-args" data-exclusive="true" data-collapsed="false" data-options-hidden="false" data-skipped="false" data-asking="false" role="radiogroup" aria-label="Should per-agent extra-args passthrough ship in v1?">
+    <div class="sec-head"><span class="id">sec-13</span><h2>Should per-agent extra-args passthrough ship in v1?</h2>
+      <span class="spacer"></span>
+      <button class="fold" data-sec="sec-13-extra-args" aria-expanded="true" aria-label="Collapse sec-13 to summary">[–]</button>
+    </div>
+    <div class="summary" data-sec="sec-13-extra-args" role="button" tabindex="0" aria-label="Expand sec-13"></div>
+    <div class="sec-body">
+      <div class="ctx" data-id="ctx-13" data-open="true">
+        <button class="ctx-toggle" aria-expanded="true"><span class="chev">▾</span>Context &amp; recommendation</button>
+        <p class="ctx-what"><b>What this is:</b> A config hook like <code>[agents.claude] extra_args = ["--model", "opus"]</code> that injects user-chosen arguments into the launch command agent-fork emits. agent-deck supports the equivalent for its managed sessions.</p>
+        <p class="ctx-why"><b>Why you're being asked:</b> With it, v1's emitted commands are no longer fixed strings — every test and quoting guarantee gains a variable; without it, power users wait a release for model/flag control (decision D11).</p>
+        <p class="ctx-rec">★ Recommends<span class="cid">ch-13-a</span>Defer — v1 templates stay byte-for-byte testable; passthrough is additive later, designed against real requests.</p>
+      </div>
+      <p class="sec-lead"><span class="rule">Pick one</span> — decision D11.</p>
+      <div class="choice" data-id="ch-13-a" data-selected="true" tabindex="0" role="radio" aria-checked="true">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-13-a</span>Defer to v1.1 — keep v1's launch templates fixed and testable<span class="badge-rec">★ rec</span><span class="sub">Adding [agents.claude] extra_args later is additive and non-breaking.</span></span>
+      </div>
+      <div class="choice" data-id="ch-13-b" data-selected="false" tabindex="0" role="radio" aria-checked="false">
+        <span class="box"></span>
+        <span class="label"><span class="cid">ch-13-b</span>Ship in v1: [agents.&lt;name&gt;] extra_args injected into emitted commands<span class="sub">Power users get --model etc. now; adds a quoting/injection surface to v1.</span></span>
+      </div>
+      <div class="sec-actions">
+        <button class="opt-toggle" data-sec="sec-13-extra-args" aria-expanded="true">Hide unchosen options</button>
+        <button class="skip-toggle" data-sec="sec-13-extra-args" aria-pressed="false">⏩ Skip this question</button>
+        <button class="ask-toggle" data-sec="sec-13-extra-args" aria-expanded="false">💬 Ask a question</button>
+      </div>
+      <div class="q-wrap"><label for="q-13">❓ Your question about this section</label><textarea id="q-13" placeholder="What do you need to know before you can answer?"></textarea></div>
+      <div class="notes"><label for="note-13">Adjustments or reasoning</label><textarea id="note-13" placeholder="Adjustments or reasoning"></textarea></div>
+    </div>
+  </section>
+
+  <div class="feedback">
+    <h3>Overall feedback</h3>
+    <textarea id="note-overall" aria-label="Overall feedback" placeholder="Anything the options above don't capture?"></textarea>
+  </div>
+</div>
+
+<div class="bar bottom" role="toolbar" aria-label="Codesign actions (bottom)">
+  <button class="primary" onclick="doExport('md')">Export → MD</button>
+  <button class="primary" onclick="doExport('json')">Export → JSON</button>
+  <button onclick="reprompt('draft')">Another draft</button>
+  <button onclick="reprompt('answers')">Here are my answers</button>
+  <button onclick="questionsFirst()">Questions first</button>
+</div>
+
+<div class="panel" id="panel" aria-live="polite">
+  <div class="panel-head"><span class="t" id="panelTitle">Export</span>
+    <button onclick="copyPanel()" id="copyBtn">Copy</button>
+    <button onclick="document.getElementById('panel').classList.remove('open')">Close</button>
+  </div>
+  <pre id="panelBody"></pre>
+</div>
+
+<script>
+/* ============ ENGINE (keep intact) ============ */
+var SPEC;
+try {
+  SPEC = JSON.parse(document.getElementById("codesign-spec").textContent);
+} catch (e) {
+  var banner = document.createElement("div");
+  banner.textContent = "This page's embedded codesign-spec failed to parse (" + e.message + "). Buttons are disabled — regenerate the page.";
+  banner.style.cssText = "background:#8B2E2E;color:#fff;padding:12px 20px;font:14px/1.4 system-ui;position:sticky;top:0;z-index:99;";
+  document.body.prepend(banner);
+  document.querySelectorAll("button").forEach(function(b){ b.disabled = true; });
+  throw e;
+}
+
+var CONTEXTS = {};
+(SPEC.contexts || []).forEach(function(x){ CONTEXTS[x.section] = x; });
+var VARIANT = "slim";
+
+function secEl(id){ return document.querySelector('section[data-id="'+id+'"]'); }
+function choiceEl(id){ return document.querySelector('.choice[data-id="'+id+'"]'); }
+function isSel(id){ var el=choiceEl(id); return !!el && el.getAttribute("data-selected")==="true"; }
+function isSkipped(sid){ var el=secEl(sid); return !!el && el.getAttribute("data-skipped")==="true"; }
+function noteVal(id){ var el=document.getElementById(id); return el ? el.value.trim() : ""; }
+function qNum(sid){ var m=/^sec-(\d{2})/.exec(sid); return m ? m[1] : null; }
+function qVal(sid){ var n=qNum(sid); return n ? noteVal("q-"+n) : ""; }
+function totals(){ var n=0,t=0,sk=0; SPEC.sections.forEach(function(s){ if(isSkipped(s.id)) sk++; s.choices.forEach(function(c){ t++; if(isSel(c.id)) n++; }); }); return [n,t,sk]; }
+function setSel(el,on){ el.setAttribute("data-selected", on?"true":"false"); el.setAttribute("aria-checked", on?"true":"false"); }
+
+function verdict(s){
+  if(isSkipped(s.id)) return { k: "skipped", rec: [] };
+  var ctx = CONTEXTS[s.id];
+  var rec = (ctx && Array.isArray(ctx.recommended)) ? ctx.recommended : [];
+  var sel = s.choices.filter(function(c){ return isSel(c.id); }).map(function(c){ return c.id; });
+  if(!sel.length) return { k: rec.length ? "unanswered" : "none", rec: rec };
+  if(!rec.length) return { k: "none", rec: rec };
+  var followed = s.exclusive
+    ? rec.indexOf(sel[0]) >= 0
+    : (sel.length === rec.length && sel.every(function(id){ return rec.indexOf(id) >= 0; }));
+  return { k: followed ? "followed" : "against", rec: rec };
+}
+
+function buildSummary(s){
+  var host = document.querySelector('.summary[data-sec="'+s.id+'"]');
+  if(!host) return;
+  while(host.firstChild) host.removeChild(host.firstChild);
+  var line = document.createElement("span"); line.className = "s-line";
+  function span(cls, text){ var e=document.createElement("span"); if(cls) e.className=cls; e.textContent=text; line.appendChild(e); }
+  span("id", "[+] " + s.id.replace(/^(sec-\d{2}).*$/, "$1"));
+  span("s-q", s.title);
+  var v = verdict(s);
+  if(v.k === "skipped"){
+    span("s-mark-skip", " ⏩ skipped");
+  } else {
+    var sel = s.choices.filter(function(c){ return isSel(c.id); });
+    if(sel.length){
+      span("s-sel", " → ✓ " + sel.map(function(c){ return c.id + " " + c.label; }).join(", "));
+    } else {
+      span("", " → (unanswered)");
+    }
+    if(v.k === "followed") span("s-mark-follow", "★ followed rec");
+    else if(v.k === "against") span("s-mark-against", "⚠ went against rec (" + v.rec.join(", ") + ")");
+    else if(v.k === "unanswered") span("s-mark-follow", "★ rec: " + v.rec.join(", "));
+  }
+  if(qVal(s.id)) span("s-mark-q", "❓ question");
+  host.appendChild(line);
+  var qv = qVal(s.id);
+  var nv = s.note ? noteVal(s.note.id) : "";
+  if(qv || nv){
+    var note = document.createElement("span"); note.className = "s-note";
+    note.textContent = (qv ? "❓ " + qv + (nv ? " · " : "") : "") + (nv ? "“" + nv + "”" : "");
+    host.appendChild(note);
+  }
+}
+
+function refresh(){
+  var x = totals();
+  var el = document.getElementById("madeCount");
+  if(el) el.textContent = x[0] + " of " + x[1] + " chosen" + (x[2] ? " · " + x[2] + " skipped" : "");
+  SPEC.sections.forEach(function(s){
+    buildSummary(s);
+    var secNode = secEl(s.id);
+    var t = document.querySelector('.opt-toggle[data-sec="'+s.id+'"]');
+    if(t && secNode){
+      var hidden = secNode.getAttribute("data-options-hidden") === "true";
+      var unchosen = s.choices.filter(function(c){ return !isSel(c.id); }).length;
+      t.textContent = hidden
+        ? "Show " + unchosen + " hidden option" + (unchosen === 1 ? "" : "s")
+        : "Hide unchosen options";
+      t.setAttribute("aria-expanded", hidden ? "false" : "true");
+    }
+    var sk = document.querySelector('.skip-toggle[data-sec="'+s.id+'"]');
+    if(sk){
+      var on = isSkipped(s.id);
+      sk.textContent = on ? "⏩ Skipped — click to reconsider" : "⏩ Skip this question";
+      sk.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  });
+}
+
+function setCollapsed(sid, on){
+  var el = secEl(sid); if(!el) return;
+  el.setAttribute("data-collapsed", on ? "true" : "false");
+  var f = el.querySelector(".fold"); if(f) f.setAttribute("aria-expanded", on ? "false" : "true");
+  refresh();
+}
+function collapseAll(){ SPEC.sections.forEach(function(s){ setCollapsed(s.id, true); }); }
+function expandAll(){
+  SPEC.sections.forEach(function(s){
+    var el = secEl(s.id); if(!el) return;
+    el.setAttribute("data-collapsed", "false");
+    el.setAttribute("data-options-hidden", "false");
+    var f = el.querySelector(".fold"); if(f) f.setAttribute("aria-expanded", "true");
+    var ctx = el.querySelector(".ctx");
+    if(ctx){ ctx.setAttribute("data-open", "true");
+      var tg = ctx.querySelector(".ctx-toggle"); if(tg) tg.setAttribute("aria-expanded", "true"); }
+  });
+  refresh();
+}
+function setVariant(v){
+  VARIANT = v;
+  var s = document.getElementById("segSlim"), f = document.getElementById("segFull");
+  if(s) s.setAttribute("aria-pressed", v === "slim" ? "true" : "false");
+  if(f) f.setAttribute("aria-pressed", v === "full" ? "true" : "false");
+}
+function setSkipped(sid, on){
+  var el = secEl(sid); if(!el) return;
+  el.setAttribute("data-skipped", on ? "true" : "false");
+  if(on){
+    var s = null;
+    SPEC.sections.forEach(function(x){ if(x.id === sid) s = x; });
+    if(s) s.choices.forEach(function(c){ var ce = choiceEl(c.id); if(ce) setSel(ce, false); });
+  }
+  refresh();
+}
+
+SPEC.sections.forEach(function(s){
+  var secNode = secEl(s.id);
+  if(!secNode) return;
+  s.choices.forEach(function(c){
+    var el = choiceEl(c.id); if(!el) return;
+    setSel(el, c.selected === true);
+    function toggle(){
+      if(isSkipped(s.id)) secNode.setAttribute("data-skipped", "false");
+      if(s.exclusive){ s.choices.forEach(function(o){ var oe=choiceEl(o.id); if(oe) setSel(oe,false); }); setSel(el,true); }
+      else { setSel(el, el.getAttribute("data-selected")!=="true"); }
+      refresh();
+    }
+    el.addEventListener("click", toggle);
+    el.addEventListener("keydown", function(e){ if(e.key===" "||e.key==="Enter"){ e.preventDefault(); toggle(); } });
+  });
+  var fold = secNode.querySelector(".fold");
+  if(fold) fold.addEventListener("click", function(){ setCollapsed(s.id, true); });
+  var summ = secNode.querySelector(".summary");
+  if(summ){
+    summ.addEventListener("click", function(){ setCollapsed(s.id, false); });
+    summ.addEventListener("keydown", function(e){ if(e.key===" "||e.key==="Enter"){ e.preventDefault(); setCollapsed(s.id, false); } });
+  }
+  var optT = secNode.querySelector(".opt-toggle");
+  if(optT) optT.addEventListener("click", function(){
+    var on = secNode.getAttribute("data-options-hidden") !== "true";
+    secNode.setAttribute("data-options-hidden", on ? "true" : "false");
+    refresh();
+  });
+  var skT = secNode.querySelector(".skip-toggle");
+  if(skT) skT.addEventListener("click", function(){ setSkipped(s.id, !isSkipped(s.id)); });
+  var askT = secNode.querySelector(".ask-toggle");
+  if(askT) askT.addEventListener("click", function(){
+    var on = secNode.getAttribute("data-asking") !== "true";
+    secNode.setAttribute("data-asking", on ? "true" : "false");
+    askT.setAttribute("aria-expanded", on ? "true" : "false");
+    if(on){ var n = qNum(s.id); var q = n && document.getElementById("q-"+n); if(q) q.focus(); }
+  });
+  var ctxT = secNode.querySelector(".ctx-toggle");
+  if(ctxT) ctxT.addEventListener("click", function(){
+    var box = ctxT.closest(".ctx");
+    var open = box.getAttribute("data-open") !== "true";
+    box.setAttribute("data-open", open ? "true" : "false");
+    ctxT.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+});
+
+function verdictWord(s){
+  var v = verdict(s);
+  return v.k === "skipped" ? "skipped"
+       : v.k === "none" ? "no-recommendation"
+       : v.k === "followed" ? "followed"
+       : v.k === "against" ? "went-against" : "unanswered";
+}
+function buildAnswers(variant){
+  var doc = { kind: "codesign-answers", version: "1", variant: variant,
+              title: SPEC.title, exported_at: new Date().toISOString(), answers: [] };
+  SPEC.sections.forEach(function(s){
+    var a = { section: s.id, question: s.title };
+    if(isSkipped(s.id)){
+      a.skipped = true;
+    } else {
+      a.selected = s.choices.filter(function(c){ return isSel(c.id); })
+                            .map(function(c){ return { id: c.id, label: c.label }; });
+    }
+    var qv = qVal(s.id);
+    if(qv) a.open_question = qv;
+    var nv = s.note ? noteVal(s.note.id) : "";
+    if(nv) a.note = nv;
+    if(variant === "full"){
+      var ctx = CONTEXTS[s.id];
+      if(ctx) a.context = { summary: ctx.summary, recommendation: ctx.recommendation, recommended: ctx.recommended };
+      if(!isSkipped(s.id)) a.options = s.choices.map(function(c){ return { id: c.id, label: c.label, selected: isSel(c.id) }; });
+      a.verdict = verdictWord(s);
+    }
+    doc.answers.push(a);
+  });
+  var fb = SPEC.feedback ? noteVal(SPEC.feedback.id) : "";
+  if(fb) doc.feedback = fb;
+  return doc;
+}
+function stamp(){ var d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function buildMD(variant){
+  var x = totals();
+  var L = ["# "+SPEC.title, "", "> _Choices made: "+x[0]+" of "+x[1]+(x[2] ? " · "+x[2]+" skipped" : "")+" · Exported "+stamp()+" · "+variant+" export_", ""];
+  SPEC.sections.forEach(function(s){
+    var qv = qVal(s.id);
+    var n = qNum(s.id);
+    if(isSkipped(s.id)){
+      if(qv){
+        L.push("## "+s.id+" · "+s.title, "");
+        L.push("> ❓ **Open question (`q-"+n+"`):** "+qv+" _(section otherwise skipped)_", "");
+      }
+      return;
+    }
+    L.push("## "+s.id+" · "+s.title, "");
+    var ctx = CONTEXTS[s.id];
+    var v = verdict(s);
+    if(variant === "full" && ctx){
+      L.push("**Context:** "+ctx.summary+" _(full context lives in the page file)_", "");
+      if(ctx.recommended && ctx.recommended.length){
+        L.push("★ **Recommended:** "+ctx.recommended.map(function(r){ return "`"+r+"`"; }).join(", ")+" — "+ctx.recommendation, "");
+      } else {
+        L.push("★ **Recommendation:** "+ctx.recommendation, "");
+      }
+    }
+    var sel = s.choices.filter(function(c){ return isSel(c.id); });
+    if(variant === "full"){
+      s.choices.forEach(function(c){
+        var on = isSel(c.id);
+        var line = "- "+(on?"**":"")+"`"+c.id+"` "+(on?"✓":"✗")+" "+c.label+(on?"**":"");
+        if(on && s.exclusive){
+          if(v.k === "followed") line += " ★ _followed recommendation_";
+          else if(v.k === "against") line += " ⚠ _went against recommendation ("+v.rec.join(", ")+")_";
+        }
+        L.push(line);
+      });
+      if(!s.exclusive && v.k === "followed") L.push("", "★ _followed the recommendation_");
+      else if(!s.exclusive && v.k === "against") L.push("", "⚠ _went against the recommendation ("+v.rec.join(", ")+")_");
+    } else {
+      if(sel.length) sel.forEach(function(c){ L.push("- ✓ `"+c.id+"` "+c.label); });
+      else L.push("- (no selection)");
+    }
+    if(qv) L.push("", "> ❓ **Open question (`q-"+n+"`):** "+qv);
+    var nv = s.note ? noteVal(s.note.id) : "";
+    if(nv) L.push("", "> **Note (`"+s.note.id+"`):** "+nv);
+    L.push("");
+  });
+  var fb = SPEC.feedback ? noteVal(SPEC.feedback.id) : "";
+  if(fb) L.push("## Overall feedback", "", "> "+fb, "");
+  var y = totals();
+  L.push("_Generated by html-codesign · "+variant+" export · "+stamp()+" · "+SPEC.sections.length+" sections · "+y[1]+" choices · "+y[0]+" selected"+(y[2] ? " · "+y[2]+" skipped" : "")+"._");
+  return L.join("\n");
+}
+function selectedIds(){ var ids=[]; SPEC.sections.forEach(function(s){ s.choices.forEach(function(c){ if(isSel(c.id)) ids.push(c.id); }); }); return ids; }
+function openQuestions(){
+  var out = [];
+  SPEC.sections.forEach(function(s){
+    var qv = qVal(s.id);
+    if(qv){ var ctx = CONTEXTS[s.id]; out.push({ sec: s.id, ctx: ctx ? ctx.id : null, q: qv }); }
+  });
+  return out;
+}
+function show(title,body){
+  document.getElementById("panelTitle").textContent=title;
+  document.getElementById("panelBody").textContent=body;
+  document.getElementById("panel").classList.add("open");
+  document.getElementById("copyBtn").textContent="Copy";
+}
+function slug(){ return SPEC.title.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,60) || "codesign"; }
+function doExport(kind){
+  var name = slug()+"-"+stamp()+"."+VARIANT+"."+(kind==="json"?"json":"md");
+  if(kind==="json") show("Export · JSON ("+VARIANT+") — save as "+name, JSON.stringify(buildAnswers(VARIANT),null,2));
+  else show("Export · Markdown ("+VARIANT+") — save as "+name, buildMD(VARIANT));
+}
+function questionsFirst(){
+  var qs = openQuestions();
+  if(!qs.length){ show("Questions first", "No questions raised yet — click “💬 Ask a question” on a section and type what you need to know."); return; }
+  var body = 'Before I decide "'+SPEC.title+'": '
+    + qs.map(function(o){ return o.sec+(o.ctx ? " ("+o.ctx+")" : "")+": "+o.q; }).join(" · ")
+    + " — answer these (expand the contexts if needed), then I'll continue deciding.";
+  show("Questions first · paste into chat", body);
+  if(navigator.clipboard) navigator.clipboard.writeText(body).catch(function(){});
+}
+function reprompt(kind){
+  var picks=selectedIds().join(", ")||"(none)";
+  var body;
+  if(kind==="draft"){
+    var skips = SPEC.sections.filter(function(s){ return isSkipped(s.id); }).map(function(s){ return s.id; });
+    body='Make a v2 of "'+SPEC.title+'". Keep these picks: '+picks+'.'
+      +(skips.length ? " I skipped "+skips.join(", ")+" — drop or re-frame those." : "")
+      +' Replace the unselected options in each section with fresh alternatives. Reuse every surviving ID; only new options get new IDs. Re-author each section\'s context for the v2.';
+  } else {
+    var notes=[]; SPEC.sections.forEach(function(s){ if(s.note){ var v=noteVal(s.note.id); if(v) notes.push(s.note.id+": "+v); } });
+    var fb=SPEC.feedback?noteVal(SPEC.feedback.id):""; if(fb) notes.push("note-overall: "+fb);
+    var skips2 = SPEC.sections.filter(function(s){ return isSkipped(s.id); }).map(function(s){ return s.id; });
+    var qs2 = openQuestions();
+    body='Here are my answers for "'+SPEC.title+'" — selected: '+picks+'.'
+      +(skips2.length ? " Skipped: "+skips2.join(", ")+"." : "")
+      +(notes.length ? " Notes — "+notes.join(" · ")+"." : "")
+      +(qs2.length ? " Open questions — "+qs2.map(function(o){ return o.sec+": "+o.q; }).join(" · ")+"." : "")
+      +' Proceed using exactly these choices.';
+  }
+  show(kind==="draft"?"Another draft · paste into chat":"Here are my answers · paste into chat", body);
+  if(navigator.clipboard) navigator.clipboard.writeText(body).catch(function(){});
+}
+function copyPanel(){
+  var t=document.getElementById("panelBody").textContent;
+  var btn=document.getElementById("copyBtn");
+  if(!navigator.clipboard){ btn.textContent="Select the text manually"; return; }
+  navigator.clipboard.writeText(t)
+    .then(function(){ btn.textContent="Copied ✓"; })
+    .catch(function(){ btn.textContent="Copy failed — select manually"; });
+}
+document.querySelectorAll("textarea").forEach(function(t){ t.addEventListener("input", refresh); });
+refresh();
+</script>
+</body>
+</html>
