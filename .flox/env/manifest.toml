@@ -1,0 +1,59 @@
+# Flox manifest version managed by Flox CLI
+schema-version = "1.13.0"
+
+# agent-fork development environment.
+#
+# Reproducible dev/test toolchain, modeled on agent-deck's tiered manifest
+# (RESEARCH.md §6): tier-1 stable toolchain in the default group; the
+# fast-moving agent runtime CLIs isolated in their own 'agents' pkg-group so
+# their nixpkgs churn never over-constrains the stable tools. Python is
+# pinned at the minor level; uv drives everything inside the venv.
+
+[install]
+# --- Tier 1: build · lint · format · test (make check, just all) ---
+python3.pkg-path = "python3"
+python3.version = "3.13"
+uv.pkg-path = "uv"
+just.pkg-path = "just"
+git.pkg-path = "git"
+gnumake.pkg-path = "gnumake"
+
+# --- Agent runtime CLIs (integration tests marked requires_real_cli) ---
+# Isolated group: they track fast-moving nixpkgs revisions and would
+# otherwise over-constrain the stable toolchain in 'toplevel'.
+claude-code.pkg-path = "claude-code"
+claude-code.pkg-group = "agents"
+codex.pkg-path = "codex"
+codex.pkg-group = "agents"
+
+
+[vars]
+
+
+[hook]
+on-activate = '''
+  # Append (not prepend) so flox-provided tools win over host installs while
+  # host fallbacks (~/.local/bin etc.) stay reachable.
+  export PATH="$PATH:$HOME/.local/bin"
+'''
+
+
+[profile]
+
+
+[services]
+
+
+[include]
+
+
+[build]
+
+
+[options]
+systems = [
+  "aarch64-darwin",
+  "x86_64-darwin",
+  "aarch64-linux",
+  "x86_64-linux",
+]
