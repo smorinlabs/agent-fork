@@ -1,7 +1,7 @@
 # REQUIREMENTS.md — `agent-fork` Phase 2
 
 **Date:** 2026-07-21 · **Status:** Phase 2 gate deliverable (requirements + proposed architecture — no implementation)
-**Inputs:** `RESEARCH.md` (Phase 1, reviewed), agent-deck prior art (MIT © 2025 Ashesh Goplani — attribution carried on lifted logic), **CLI Design Standard v1.4.14** (pinned; conformance tracked in `CONFORMANCE.md`).
+**Inputs:** `RESEARCH.md` (Phase 1, reviewed), agent-deck prior art (behavioral reference only — attribution requirement removed by owner amendment 2026-07-22, see REQ-37), **CLI Design Standard v1.4.14** (pinned; conformance tracked in `CONFORMANCE.md`).
 **Profile/tier:** Small-CLI **verb-first** (Appendix A — criteria check in §3.1) · **publishable** tier · applicability map in `CONFORMANCE.md`.
 **Notation:** `REQ-*` = requirement (MUST unless marked SHOULD/MAY) · `D#` = open decision deferred to Phase 3 (§10) · `R#.#` = standard rule citations.
 
@@ -152,7 +152,7 @@ Port of RESEARCH §2 (agent-deck `forkWithStateWorktree` + `MaterializeWipFromPa
 
 - **REQ-35** Python ≥3.11 (stdlib `tomllib`), minimal runtime deps (`platformdirs`; clipboard via `pbcopy`/`xclip`/OSC52 shell-outs, not a dependency — D9). Single package, console-script `agent-fork`.
 - **REQ-36** Channels, difftree-style: **PyPI** `agent-fork` (**reserved 2026-07-21** on PyPI + TestPyPI as `0.0.0.dev0` placeholders — verified via registry check), installable via `uv tool install`/`pipx`; **Homebrew tap** (smorinlabs); **Nix/Flox**. Release automation per the org's release-please pattern; merge-commit strategy per global git policy.
-- **REQ-37** License: MIT. Files ported from agent-deck carry the upstream notice (MIT © 2025 Ashesh Goplani) via a `NOTICE`/header block; `LICENSE` documents the derivation.
+- **REQ-37** License: MIT (© 2026 Steve Morin). **Amended 2026-07-22 (owner):** the agent-deck attribution requirement is removed — no `NOTICE` file, no upstream headers, no derivation statement in `LICENSE`. Consequence for the build: agent-deck serves as a **behavioral reference only** (via RESEARCH.md's documented semantics, command sequences, and detection matrix); implementation is written fresh from that documentation, never translated from agent-deck source, keeping the codebase outside MIT's notice-preservation obligation.
 - **REQ-38** Publishable-tier obligations: SemVer interface contract (R9.3) · deprecation policy (R9.2) · UTF-8 + locale-independent machine output (R9.4) · clean SIGINT/SIGPIPE/SIGTERM (R9.6) · `doctor` (R9.10 — checks: git version, agent CLIs found + versions vs matrix, env signals visible, config valid, XDG paths writable) · error catalog (R7.12) · **conformance fixtures in CI** (R9.14; scaffold at implementation start, not this run) · telemetry: **none** (R9.7 posture: no data collection, stated in README) · self-update: none (package managers own it; R9.9 N/A).
 - **REQ-39** Dev environment: Flox manifest following the RESEARCH §6 pattern (pinned python + uv + just tier-1; `agents` pkg-group with claude-code/codex for integration tests). Repo bootstrap: uv + ruff + ty + just per the global Python-project conventions.
 

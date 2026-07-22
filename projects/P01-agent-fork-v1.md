@@ -29,7 +29,7 @@ Phase A — repo bootstrap (gate: repo live + PROJECTS.md)
 - [x] [P01-T01] git init; design-docs initial commit; create smorinlabs/agent-fork; verify org merge-method ruleset
 - [x] [P01-T02] Python scaffold: uv package, ruff, ty, `just all`, `make check` (REQ-35, REQ-39)
 - [x] [P01-T03] Flox dev env, tiered manifest with `agents` pkg-group (REQ-39)
-- [x] [P01-T04] MIT LICENSE + NOTICE with agent-deck attribution (REQ-37)
+- [x] [P01-T04] MIT LICENSE (REQ-37 — attribution removed 2026-07-22 by owner amendment)
 - [x] [P01-T05] PROJECTS.md via project harness + repo welcome announcement
 
 Phase B — live experiments (gate: EXPERIMENTS.md + updated launch templates)

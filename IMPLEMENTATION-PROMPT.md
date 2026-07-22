@@ -31,7 +31,7 @@ Key locked facts: Python ≥3.11, `uv`-based packaging; PyPI + TestPyPI names **
 2. Python scaffold per house conventions: `uv init --package`, `ruff` (lint+format), `ty` (typecheck), `just` (runner) + `make check` (deps), modeled on `smorinlabs/py-launch-blueprint`. Console script `agent-fork`; runtime deps minimal (`platformdirs`; stdlib `tomllib`).
 3. Flox dev env per RESEARCH §6: pinned python + tier-1 toolchain; `claude-code`/`codex` in an isolated `agents` pkg-group (integration tests need the real binaries).
 4. PROJECTS.md via the project harness: one project (P01, v0.1.0) whose tasks/tests map to REQ IDs and the phases below; include the repo welcome announcement in `.claude/settings.json` per my global rule.
-5. Add the MIT LICENSE + NOTICE (agent-deck attribution).
+5. Add the MIT LICENSE. *(Amended 2026-07-22: NOTICE + agent-deck attribution removed by owner — see REQ-37.)*
 
 **STOP for my review.**
 
@@ -77,4 +77,4 @@ Build the companion skill via the skill-create pipeline (it handles placement fo
 
 - Stop at every gate and wait for me. Report failures verbatim — a red test or failed release step is a finding, not something to paper over.
 - No design changes without surfacing them: if implementation contradicts a REQ or D-decision, stop and raise it (amendments go through me, and standard deviations through the cli-standards feedback loop).
-- Preserve agent-deck attribution on every ported file. Never run `claim-pypi reserve` or any publish step without the release pipeline or my explicit go.
+- *(Amended 2026-07-22: attribution guardrail removed by owner — agent-deck is a behavioral reference only; implement from RESEARCH.md's documented semantics, never by translating agent-deck source. See REQ-37.)* Never run `claim-pypi reserve` or any publish step without the release pipeline or my explicit go.
