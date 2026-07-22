@@ -36,6 +36,4 @@ None. `agent-fork` makes zero network calls at runtime and collects no data.
 
 ## License
 
-MIT — portions derived from
-[agent-deck](https://github.com/asheshgoplani/agent-deck)
-(MIT © 2025 Ashesh Goplani); see [NOTICE](NOTICE).
+MIT
