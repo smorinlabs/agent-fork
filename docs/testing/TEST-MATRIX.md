@@ -119,7 +119,7 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 | T-LOC-01 | `sibling` default path derivation — worktree placed at `<repo>-<branch>` | baseline | U | live | D5; RESEARCH §2.4 |
 | T-LOC-02 | `central` location — worktree placed under the XDG data path `~/.local/share/agent-fork/worktrees/<repo>/<slug>` | baseline | U | live | D5 |
 | T-LOC-03 | `subdirectory` location — worktree placed at `<root>/.worktrees/<slug>` | baseline | U | live | D5 |
-| T-LOC-04 | path template — `{repo-name}`, `{repo-root}`, `{branch}` placeholders each substitute correctly | baseline | U | live | D5; RESEARCH §2.4 |
+| T-LOC-04 | path template resolves each placeholder — `{repo-name}` → repo basename, `{repo-root}` → parent dir of root, `{branch}` → fork branch slug — asserted individually in one templated location | baseline | U | live | D5; RESEARCH §2.4 |
 | T-LOC-05 | explicit `worktree_location` config value suppresses the mirror-parent heuristic | baseline | U | live | D5 |
 | T-LOC-06 | mirror-parent heuristic — parent is a linked worktree → fork mirrors the parent's observed placement pattern | topology=linked-worktree | F | live | D5; RESEARCH §4 |
 | T-LOC-07 | bare-at-root placement override — fork worktree placed as a child of the bare dir | topology=bare@bare | F | live | D5; RESEARCH §2.4 |
