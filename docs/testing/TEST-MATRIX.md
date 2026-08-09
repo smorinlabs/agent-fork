@@ -10,8 +10,8 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · backend = git (jj reserved, no v1 values).
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
-- Total rows: 187 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
-- Blocked rows carry pending stubs and are checked like live rows by the checker (their docstrings name the unblock gate).
+- Total rows: 190 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
 
@@ -275,13 +275,15 @@ Varying axes: none of the shared four vary (baseline pinned); CLI flag combinati
 | T-CLN-04 | fork registry entry removed after cleanup | baseline | F | live | REQ-31 |
 | T-CLN-05 | guard — dirty worktree (uncommitted changes) → refuse, exit 5 | baseline | F | live | REQ-32; DESIGN-DECISIONS D12 |
 | T-CLN-06 | guard — commits not reachable from any upstream (unpushed) → refuse, exit 5 | baseline | F | live | REQ-32; DESIGN-DECISIONS D12 |
-| T-CLN-07 | guard — target is the invoking cwd → refuse, exit 5 | baseline | F | live | REQ-32; DESIGN-DECISIONS D12 |
-| T-CLN-08 | `--force` extends targeting beyond registry-recorded forks and overrides the dirty/unpushed/cwd guards | baseline | F | live | DESIGN-DECISIONS D12 |
+| T-CLN-07 | guard — target is the invoking cwd → refuse, exit 5; non-overridable (not even with `--force`) | baseline | F | live | REQ-32; DESIGN-DECISIONS D12 |
+| T-CLN-08 | `--force` extends targeting beyond registry-recorded forks and overrides the dirty/unpushed guards only; the invoking-cwd guard is never overridden | baseline | F | live | DESIGN-DECISIONS D12 |
 | T-CLN-09 | `--yes` bypasses the interactive consent prompt | baseline | C | live | REQ-33 |
-| T-CLN-10 | `--no-input` without `--yes` or a guard-override flag → fail, exit 2 | baseline | C | live | REQ-33 |
+| T-CLN-10 | `--no-input` without `--yes` → fail, exit 2; `--force` is not a consent bypass | baseline | C | live | REQ-33 |
 | T-CLN-11 | TTY consent prompt on stderr names exactly what will be removed (pty row) | baseline | C | live | REQ-33; spec §6.6 |
 | T-CLN-12 | session files are never deleted by cleanup; output notes the fork session remains resumable | baseline | F | live | REQ-34 |
 | T-CLN-13 | `--dry-run` prints the removal plan without mutating | baseline | C | live | REQ-33; REQ-18 |
+| T-CLN-14 | guard combination — target is the invoking cwd, run with `--force` → still refuse, exit 5 (cwd guard is non-overridable) | baseline | F | live | REQ-32; DESIGN-DECISIONS D12 |
+| T-CLN-15 | flag combination — `--force` with `--no-input` and no `--yes` → fail, exit 2 (`--force` never substitutes for consent) | baseline | C | live | REQ-33; DESIGN-DECISIONS D12 |
 
 ---
 
@@ -363,6 +365,7 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-09 | doctor content — config valid/invalid reported | baseline | C | live | REQ-38 |
 | T-CLI-10 | doctor content — XDG paths writable reported | baseline | C | live | REQ-38 |
 | T-CLI-11 | A14 — a failing doctor check produces a non-zero exit | baseline | C | live | REQ-38 (A14); spec §8 A14 |
+| T-CLI-12 | `--clean` is rejected as an unknown flag in v1 — usage error, exit 2 (D2; alias deferred to v1.1+) | baseline | C | live | REQUIREMENTS §3.3 (D2) |
 
 ---
 

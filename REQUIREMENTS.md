@@ -61,7 +61,7 @@ Positional `[NAME]` = the fork's identity (R2.3): seeds branch slug, worktree di
 | `--parent-session <id>` | — | str | from env | Parent session/thread ID |
 | `--branch <name>` | — | str | `<branch_prefix><slug>` | Explicit fork branch |
 | `--worktree-dir <path>` | — | path | location scheme (D5) | Explicit worktree destination |
-| *state model:* `--clean` **or** `--no-with-state` | — | bool | exact-copy default (D2/D3) | Clean-from-HEAD vs carry state |
+| *state model:* `--no-with-state` | — | bool | exact-copy default (D2/D3) | Clean-from-HEAD vs carry state (`--clean` alias deferred to v1.1+, D2) |
 | `--with-ignored` | — | bool | **off** (#1354 evidence) | Also copy gitignored files (implies state carry) |
 | `--dry-run` | — | bool | off | Print full plan incl. the would-be paste command; no mutation (R4.3/R8.6) |
 | `--no-verify` | — | bool | verify **on** (D8) | Skip the §4 verification ladder |
@@ -144,7 +144,7 @@ Port of RESEARCH §2 (agent-deck `forkWithStateWorktree` + `MaterializeWipFromPa
 ## 6. `cleanup` semantics & safety
 
 - **REQ-31** `agent-fork cleanup <TARGET>` (fork name, branch, or worktree path): removes the worktree (`git worktree remove` + prune), deletes the fork branch **unless** `--keep-branch`, updates the fork registry. Never touches the parent checkout; refuses targets it didn't create unless `--force` (registry-based ownership check — D12).
-- **REQ-32 Guards (exit 5 unless `--force`):** uncommitted changes in the fork worktree · commits not on any upstream (unpushed) · target is the current working directory. `--force` overrides guards; it does **not** replace consent (R8.1).
+- **REQ-32 Guards (exit 5 unless `--force`):** uncommitted changes in the fork worktree · commits not on any upstream (unpushed) · target is the current working directory. **Amended 2026-08-09 (owner, pre-merge review):** `--force` overrides the dirty/unpushed guards only (D12; the invoking-cwd refusal is not overridable). It does **not** replace consent (R8.1).
 - **REQ-33 Consent:** TTY prompt (stderr) naming exactly what will be removed; `--yes` for non-interactive consent; `--no-input` → fail exit 2 when consent/guard flags are missing (R8.2). `--dry-run` prints the removal plan (R8.6).
 - **REQ-34** Session files are **never** deleted (Claude/Codex own them); cleanup output notes the fork session remains resumable and how to archive it (e.g. `codex archive`).
 

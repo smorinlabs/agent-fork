@@ -20,12 +20,12 @@ def test_yes_flag_bypasses_consent_prompt(repo_scenario):
 
 @pytest.mark.matrix("T-CLN-10")
 @pytest.mark.skip(reason="pending: T-CLN-10")
-def test_no_input_without_yes_or_override_fails_exit_2(repo_scenario):
-    """T-CLN-10 — --no-input without --yes or a guard-override flag fails with exit 2.
+def test_no_input_without_yes_fails_exit_2(repo_scenario):
+    """T-CLN-10 — --no-input without --yes fails with exit 2.
 
-    Given:  cleanup invoked with `--no-input` but neither `--yes` nor a guard-override
-            flag
-    Expect: fail, exit 2
+    Given:  cleanup invoked with `--no-input` but no `--yes`
+    Expect: fail, exit 2 — `--yes` is the sole consent bypass; `--force` (a
+            guard-override flag) does not substitute for it (see T-CLN-15)
     Source: REQ-33
     """
     raise NotImplementedError
@@ -51,5 +51,17 @@ def test_dry_run_prints_removal_plan_without_mutating(repo_scenario):
     Given:  cleanup invoked with `--dry-run`
     Expect: the removal plan is printed; nothing is mutated
     Source: REQ-33; REQ-18
+    """
+    raise NotImplementedError
+
+
+@pytest.mark.matrix("T-CLN-15")
+@pytest.mark.skip(reason="pending: T-CLN-15")
+def test_force_does_not_substitute_for_consent(repo_scenario):
+    """T-CLN-15 — --force combined with --no-input and no --yes still fails exit 2.
+
+    Given:  cleanup invoked with `--force` and `--no-input` but no `--yes`
+    Expect: fail, exit 2 — `--force` never substitutes for consent
+    Source: REQ-33; DESIGN-DECISIONS D12
     """
     raise NotImplementedError

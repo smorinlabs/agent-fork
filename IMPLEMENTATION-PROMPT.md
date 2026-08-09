@@ -8,7 +8,7 @@ You are implementing **`agent-fork`**, whose design is complete and locked. Do n
 
 ## 1. The spec (read before anything else)
 
-All at the repo root; they are the single source of truth, in precedence order:
+In precedence order (paths as given):
 
 1. `DESIGN-DECISIONS.md` — all 14 decisions (D1–D14), final config schema, consolidated v1 surface, deferred list.
 2. `REQUIREMENTS.md` — REQ-01..43 (amended with A1–A14), the full CLI interface spec pinned to **CLI Design Standard v1.4.14**, exit codes, pipeline, cleanup semantics, test-first plan (§9).

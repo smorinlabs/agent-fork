@@ -88,13 +88,26 @@ def test_cleanup_guard_refuses_without_force(repo_scenario, guard):
 @pytest.mark.skip(reason="pending: T-CLN-08")
 def test_cleanup_force_extends_targeting_and_overrides_guards(repo_scenario):
     """T-CLN-08 — --force extends cleanup targeting beyond registry-recorded forks and
-    overrides its guards.
+    overrides the dirty/unpushed guards only.
 
     Given:  cleanup run with `--force` against a non-registry target and against
-            dirty/unpushed/cwd guard conditions
-    Expect: targeting is extended beyond registry-recorded forks; the dirty/unpushed/cwd
-            guards are overridden
+            dirty/unpushed guard conditions
+    Expect: targeting is extended beyond registry-recorded forks; the dirty/unpushed
+            guards are overridden. The invoking-cwd guard is never overridden by
+            `--force` (see T-CLN-14).
     Source: DESIGN-DECISIONS D12
+    """
+    raise NotImplementedError
+
+
+@pytest.mark.matrix("T-CLN-14")
+@pytest.mark.skip(reason="pending: T-CLN-14")
+def test_cleanup_force_does_not_override_cwd_guard(repo_scenario):
+    """T-CLN-14 — --force combined with a target-is-invoking-cwd guard still refuses.
+
+    Given:  cleanup run with `--force` against a target that is the invoking cwd
+    Expect: still refuse, exit 5 — the invoking-cwd guard is non-overridable
+    Source: REQ-32; DESIGN-DECISIONS D12
     """
     raise NotImplementedError
 

@@ -108,3 +108,15 @@ def test_a14_failing_doctor_check_nonzero_exit(repo_scenario):
     Source: REQ-38 (A14); spec §8 A14
     """
     raise NotImplementedError
+
+
+@pytest.mark.matrix("T-CLI-12")
+@pytest.mark.skip(reason="pending: T-CLI-12")
+def test_clean_flag_rejected_as_unknown(repo_scenario):
+    """T-CLI-12 — `--clean` is rejected as an unknown flag in v1.
+
+    Given:  `fork --clean` invoked
+    Expect: usage error, exit 2 (D2; the `--clean` alias is deferred to v1.1+)
+    Source: REQUIREMENTS §3.3 (D2)
+    """
+    raise NotImplementedError

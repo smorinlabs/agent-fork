@@ -39,7 +39,7 @@ Tiers describe **what a test touches**. Where tests run is a **lifecycle policy*
 - **Harness git floor:** `TEST_HARNESS_GIT_MIN = 2.43`. The gate applies **only to tiers that invoke real git (F/C/R)** and **hard-errors** (never skips) below the floor. Distinct constant from the product's own floor (see amendment A9). No pin to a newer git: the 2026-08-08 verification found the only 2.43↔2.50 behavioral difference (origin/HEAD auto-set on fetch) is neutralized by fixture design (§6.4).
 - **Tier R gating:** auto-skip only where agent binaries are legitimately absent. In the VM/CI, the require-real toggle (a pytest option, `--require-real-cli`; **not** an `AGENT_FORK_*` env var — REQ-14's namespace is closed) turns absence into failure.
 - **Subagent execution (owner directive):** during implementation, TDD and suite runs are dispatched to subagents per the SDD model matrix (sonnet: standard red-green; opus: tricky/mutating; codex: adversarial second lens at phase gates). The driving session orchestrates; it does not execute test runs inline.
-- **Bootstrap order (explicit dependency chain):** G-FIX first (builder, canaries, oracle-mutation rows green — the fixture layer is proven before anything relies on it) → **G-EXP experiments E1/E2** (they gate the REQ-28 templates; results recorded in `EXPERIMENTS.md`; these runs *are* P01-TS01..TS03 / IMPLEMENTATION-PROMPT Phase B — the skeleton-phase T-EXP stubs become those tests when G-EXP flips to `tdd`) → template-dependent rows finalized (G-EMT, G-OUT, G-PRE) → remaining product groups in pipeline order; E3 runs at its real prerequisite point (needs only a hand-built worktree + paste command, not the product).
+- **Bootstrap order (explicit dependency chain):** G-FIX first, scoped to fixture-dependent groups (builder, canaries, oracle-mutation rows green — the fixture layer is proven before anything relies on it) → template-dependent rows finalized (G-EMT, G-OUT, G-PRE) → remaining product groups in pipeline order. **E1–E3 are fixture-independent** (their stubs request no `repo_scenario`) and may run from Phase B per IMPLEMENTATION-PROMPT's ordering, ungated by G-FIX; results recorded in `EXPERIMENTS.md` — these runs *are* P01-TS01..TS03, and the skeleton-phase T-EXP stubs become those tests when G-EXP flips to `tdd`.
 
 ---
 
@@ -151,6 +151,8 @@ Finalizer order: touch all go-files → killpg every spawned group → **no git 
 tests/
   conftest.py            # RepoScenario, sealed-env composer, oracles, pty/shim/barrier
                          #   helpers — signatures + docstrings, bodies NotImplementedError
+  test_package.py        # packaging smoke — out of scope for direction-2 (see below)
+  test_check_matrix.py   # checker unit tests — out of scope for direction-2 (see below)
   fixtures/test_fix.py   # G-FIX
   unit/                  # tier U: test_cfg.py test_nam.py test_loc.py test_emt.py test_det.py
                          #   test_pre.py test_reg.py
@@ -160,9 +162,13 @@ tests/
   cli/                   # tier C: test_out.py test_cli.py test_cln.py test_cfg.py test_reg.py
   live/                  # tier R: test_exp.py
 docs/testing/TEST-MATRIX.md
-scripts/check-matrix.py
+scripts/
+  __init__.py
+  check_matrix.py        # parsers + cross-checks (logic)
+  check-matrix.py         # thin runner invoked by `just check-matrix`
+  collect_dump.py         # pytest plugin dumping collected items for the checker
 ```
-Group identity comes from filename + marker; tier from directory. A group with rows in several tiers has one file **per tier** (`unit/test_det.py` and `pipeline/test_det.py` are both legal). `tests/fixtures/` is a declared exception: it is G-FIX's dedicated home and maps to tier F in the checker's directory table. The checker cross-checks each collected item's directory against its row's tier column. `tests/test_package.py` (packaging smoke) sits outside the tier dirs and outside the checker's direction-2 scope.
+Group identity comes from filename + marker; tier from directory. A group with rows in several tiers has one file **per tier** (`unit/test_det.py` and `pipeline/test_det.py` are both legal). `tests/fixtures/` is a declared exception: it is G-FIX's dedicated home and maps to tier F in the checker's directory table. The checker cross-checks each collected item's directory against its row's tier column. `tests/test_package.py` (packaging smoke) and `tests/test_check_matrix.py` (the checker's own unit tests, out of scope for Direction 2 of this design) both sit outside the tier dirs and outside the checker's direction-2 scope.
 
 ### 7.2 Stub anatomy and the three-state lifecycle (no xfail)
 Every stub: one `@pytest.mark.matrix("T-GRP-NN")` per collected item (multi-cell functions use per-param `pytest.param(id="T-GRP-NN", marks=pytest.mark.matrix("T-GRP-NN"))`; marker arg must equal param ID). The `matrix` marker is registered in pyproject; `--strict-markers` is on.
@@ -235,4 +241,4 @@ Executing A1–A14 into the corpus — including updating IMPLEMENTATION-PROMPT 
 4. **`scripts/check-matrix.py` + `just check-matrix`** per §7.4; checker green against the stub tree.
 5. **P01 tracking rows** (TS-before-T) for steps 0–4; reconcile P01-TS01..TS03 with the G-EXP stubs (§2's chain: the stubs *become* those tests) and record the T18 CI split (§7.6).
 
-Gate: checker green + spec cross-check + owner review. Implementation then follows in the VM per §2's dependency chain (G-FIX → E1/E2 → template-dependent rows → the rest).
+Gate: checker green + spec cross-check + owner review. Implementation then follows in the VM per §2's dependency chain (G-FIX for fixture-dependent groups → template-dependent rows → the rest), with the fixture-independent E1–E3 experiments runnable from Phase B, ungated by G-FIX.
