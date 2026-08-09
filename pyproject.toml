@@ -46,6 +46,7 @@ select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-q --strict-markers"
 markers = [
     "requires_real_cli: integration tests against real claude/codex binaries (skipped when absent)",
