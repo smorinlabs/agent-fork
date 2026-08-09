@@ -33,13 +33,19 @@ Phase A — repo bootstrap (gate: repo live + PROJECTS.md)
 - [x] [P01-T05] PROJECTS.md via project harness + repo welcome announcement
 
 Phase B — live experiments (gate: EXPERIMENTS.md + updated launch templates)
-- [ ] [P01-TS01] E1: Claude flag combo `--resume --fork-session --session-id -n` as `requires_real_cli` test (REQ-28)
-- [ ] [P01-TS02] E2: Codex explicit-UUID fork from foreign cwd; `-C` behavior; cwd-prompt (REQ-28)
-- [ ] [P01-TS03] E3: Claude full paste-command E2E in a real worktree (context recall, fresh UUID, parent untouched)
+- [ ] [P01-TS01] E1: Claude flag combo `--resume --fork-session --session-id -n` as `requires_real_cli` test (REQ-28) — authored as T-EXP-01..03 stubs (skeleton phase); flip G-EXP to tdd at Phase B
+- [ ] [P01-TS02] E2: Codex explicit-UUID fork from foreign cwd; `-C` behavior; cwd-prompt (REQ-28) — authored as T-EXP-01..03 stubs (skeleton phase); flip G-EXP to tdd at Phase B
+- [ ] [P01-TS03] E3: Claude full paste-command E2E in a real worktree (context recall, fresh UUID, parent untouched) — authored as T-EXP-01..03 stubs (skeleton phase); flip G-EXP to tdd at Phase B
 - [ ] [P01-T06] Record EXPERIMENTS.md; update REQ-28 / RESEARCH §7 / recipes leaf with findings
 
 Phase C — implementation plan (gate: plan review)
 - [ ] [P01-T07] Task breakdown via superpowers:writing-plans, dependency-ordered, each task naming its failing-test-first
+
+Phase C.5 — test architecture skeleton (gate: matrix + stub tree + checker green)
+- [x] [P01-TS16] Test architecture spec + matrix authored (docs/testing/TEST-MATRIX.md, 190 rows, 18 groups) — spec docs/superpowers/specs/2026-08-08-test-architecture-design.md
+- [x] [P01-TS17] Stub tree committed (tiers U/F/C/R, pending lifecycle) + conftest signatures
+- [x] [P01-T23] Corpus amendments A1–A14 executed (REQUIREMENTS/DESIGN-DECISIONS/IMPLEMENTATION-PROMPT)
+- [x] [P01-T24] check-matrix drift guard + just check-matrix
 
 Phase D — build (gate: everything green + reviews clean; every T preceded by its TS)
 - [ ] [P01-TS04] Config resolver tests: tri-state semantics + implication rule (REQ-13)
@@ -63,7 +69,7 @@ Phase D — build (gate: everything green + reviews clean; every T preceded by i
 - [ ] [P01-TS13] Machine output + error catalog tests (REQ-16, REQ-17, R7.8/R7.12)
 - [ ] [P01-T17] Output layer (`-o json`, stream separation, error objects)
 - [ ] [P01-TS14] Conformance fixtures in CI (R9.14: help shape, streams, exit codes, `--json`, bare/unknown invocation)
-- [ ] [P01-T18] GitHub Actions CI green from the start
+- [ ] [P01-T18] GitHub Actions CI green from the start — check-matrix + strict-collection CI job moves to implementation start (spec §7.6); T18 keeps the full R9.14 conformance job
 
 Phase E — ship v0.1.0 (gate: released + installable)
 - [ ] [P01-T19] cli-standards audit vs built binary; fix/waive; CONFORMANCE.md audit row

@@ -46,9 +46,11 @@ select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+pythonpath = ["."]
+addopts = "-q --strict-markers"
 markers = [
     "requires_real_cli: integration tests against real claude/codex binaries (skipped when absent)",
+    "matrix(row_id): maps a collected test to its TEST-MATRIX.md row (exactly one per item; arg equals the param id for parametrized cells)",
 ]
 
 [dependency-groups]
