@@ -10,10 +10,10 @@ You are implementing **`agent-fork`**, whose design is complete and locked. Do n
 
 All at the repo root; they are the single source of truth, in precedence order:
 
-1. `docs/superpowers/specs/2026-08-08-test-architecture-design.md` — test architecture (§1–§7) and amendments A1–A14 (§8); corpus amended 2026-08-08 to match.
-2. `docs/superpowers/plans/2026-08-08-test-architecture-skeletons.md` — skeleton-phase planning and ordered tasks for steps 0–5 (§10).
-3. `DESIGN-DECISIONS.md` — all 14 decisions (D1–D14), final config schema, consolidated v1 surface, deferred list.
-4. `REQUIREMENTS.md` — REQ-01..43 (amended with A1–A14), the full CLI interface spec pinned to **CLI Design Standard v1.4.14**, exit codes, pipeline, cleanup semantics, test-first plan (§9).
+1. `DESIGN-DECISIONS.md` — all 14 decisions (D1–D14), final config schema, consolidated v1 surface, deferred list.
+2. `REQUIREMENTS.md` — REQ-01..43 (amended with A1–A14), the full CLI interface spec pinned to **CLI Design Standard v1.4.14**, exit codes, pipeline, cleanup semantics, test-first plan (§9).
+3. `docs/superpowers/specs/2026-08-08-test-architecture-design.md` — test architecture (§1–§7) and amendments A1–A14 (§8); corpus amended 2026-08-08 to match.
+4. `docs/superpowers/plans/2026-08-08-test-architecture-skeletons.md` — skeleton-phase planning and ordered tasks for steps 0–5 (§10).
 5. `RESEARCH.md` — the agent-deck port source map (exact `file:line` refs into `/Users/stevemorin/c/agent-deck`), the verbatim state-materialization command sequence (§2.2), detection matrix (§2.3), launch recipes (§5.2), remaining live experiments (§7).
 6. `CONFORMANCE.md` — applicability map + the one standing waiver (R2.1 `cleanup`).
 7. `research/reference/agent-session-fork-cli-recipes-2026-07-21.md` — the distilled per-agent fork recipes with version gates and gotchas.
