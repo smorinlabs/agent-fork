@@ -258,9 +258,7 @@ def run_checks(
             for item in items_by_id.get(row_id, []):
                 reason = item.skip_reason or ""
                 if group.status == "pending":
-                    if not (
-                        reason.startswith("pending:") or reason.startswith("retired:")
-                    ):
+                    if not reason.startswith("pending:"):
                         findings.append(
                             f"CHECK2: {row_id} in pending group has non-pending skip "
                             f"reason {item.skip_reason!r}"
@@ -273,16 +271,18 @@ def run_checks(
                         )
 
     # CHECK3: experiment accounting (E1-E6). Drift-check runs unconditionally
-    # on whichever canonical IDs are present; "missing" only fires once at
-    # least two canonical IDs are present, so a synthetic test declaring a
-    # single unrelated experiment row (see
-    # test_check2_retired_and_requires_real_cli_skips_are_exempt) doesn't
-    # spuriously report the other five as missing.
+    # on whichever canonical IDs are present. "Missing" fires at 0 canonical
+    # IDs present (the whole G-EXP section deleted — the catastrophic case
+    # this check exists to guard) and at >=2 (a real doc with some but not
+    # all present); the sole carve-out is exactly 1 present, which covers a
+    # synthetic test declaring a single unrelated experiment row (see
+    # test_check2_retired_and_requires_real_cli_skips_are_exempt) so it
+    # doesn't spuriously report the other five as missing.
     present_experiments = [eid for eid in _EXPERIMENT_STATUS if eid in row_index]
     for exp_id, expected_status in _EXPERIMENT_STATUS.items():
         row = row_index.get(exp_id)
         if row is None:
-            if len(present_experiments) >= 2:
+            if len(present_experiments) != 1:
                 findings.append(
                     f"CHECK3: {exp_id} missing from TEST-MATRIX.md "
                     f"(expected status {expected_status!r})"

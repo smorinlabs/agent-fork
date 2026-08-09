@@ -161,3 +161,31 @@ def test_check5_item_directory_mismatches_row_tier_fails():
     items = _item("T-GRD-01", path="tests/unit/test_grd.py", skip="pending: T-GRD-01")
     findings = run_checks(groups, items, TIER_DIRS)
     assert any("CHECK5" in f and "T-GRD-01" in f for f in findings)
+
+
+def test_check3_zero_experiments_present_names_all_six_missing():
+    groups = _group("G-EXP", "pending", [])
+    findings = run_checks(groups, [], TIER_DIRS)
+    for exp_id in (
+        "T-EXP-01",
+        "T-EXP-02",
+        "T-EXP-03",
+        "T-EXP-04",
+        "T-EXP-05",
+        "T-EXP-06",
+    ):
+        assert any("CHECK3" in f and exp_id in f for f in findings)
+
+
+def test_check2_pending_group_retired_reason_on_live_row_fails():
+    groups = _group("G-CFG", "pending", [_row("T-CFG-01", status="live")])
+    items = _item("T-CFG-01", skip="retired: T-CFG-01 stale reason")
+    findings = run_checks(groups, items, TIER_DIRS)
+    assert any("CHECK2" in f and "T-CFG-01" in f for f in findings)
+
+
+def test_check2_pending_group_genuinely_retired_row_is_exempt():
+    groups = _group("G-CFG", "pending", [_row("T-CFG-02", status="retired")])
+    items = _item("T-CFG-02", skip="retired: T-CFG-02 stale reason")
+    findings = run_checks(groups, items, TIER_DIRS)
+    assert not any("CHECK2" in f for f in findings)
