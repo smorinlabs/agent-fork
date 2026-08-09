@@ -35,7 +35,7 @@ Flags `--no-with-state`, `--with-ignored`; config `with_state` / `with_ignored`,
 Default: sibling `<repo>-<branch-slug>`; when the parent is itself a linked worktree, mirror the parent's observed placement pattern. **Owner note applied:** `worktree_location` config overrides placement with three first-class values plus a template escape hatch — `sibling` (default) · `central` (XDG data: `~/.local/share/agent-fork/worktrees/<repo>/<slug>`) · `subdirectory` (`<repo>/.worktrees/<slug>`) · or a path template with `{repo-name}`/`{repo-root}`/`{branch}` placeholders (agent-deck's template grammar). An explicit config value suppresses the mirror heuristic.
 
 ### D4 — Optional positional name (`ch-04-a` ★)
-`agent-fork fork fix-auth` names the fork; bare `fork` derives `<parent-branch-slug>-<mmdd>`, collisions suffixed `-2`, `-3` (agent-deck's `uniqueForkBranch` scheme, 1000-cap guard included). The name feeds branch (`<branch_prefix><name>`), worktree suffix, and session name.
+`agent-fork fork fix-auth` names the fork; bare `fork` derives `<parent-branch-slug>-<mmdd>`, collisions suffixed `-2`, `-3` (agent-deck's `uniqueForkBranch` scheme, 1000-cap guard included). The name feeds branch (`<branch_prefix><name>`), worktree suffix, and session name. **Amended 2026-08-08 (owner, test-architecture spec A5):** Detached HEAD auto-name: `detached-<short-sha>-<mmdd>`, collision-suffixed normally.
 
 ### D6 — Session name = fork name (`ch-05-a` ★)
 One identity across branch, worktree, and session. Claude: `-n '<fork-name>'` in the emitted command. Codex: names are a resume-time concept; the identity lives in the branch/worktree, and emitted output may note how to name the session. No `session_name_template` config key exists.
@@ -97,4 +97,4 @@ Dropped from agent-deck's `[fork]`: `docker`, the `worktree` toggle, `inherit_fr
 
 ## Next session (implementation kickoff) — queued, not started
 
-PROJECTS.md project creation per house process · git init + worktree-discipline setup for this repo · live experiments E1–E4 (RESEARCH §7) as the first test-writing step · conformance fixture scaffold (R9.14) · TDD per REQUIREMENTS §9.
+PROJECTS.md project creation per house process · git init + worktree-discipline setup for this repo · live experiments E1–E3 (E4 retired per spec A8; RESEARCH §7) as the first test-writing step · conformance fixture scaffold (R9.14) · TDD per REQUIREMENTS §9.

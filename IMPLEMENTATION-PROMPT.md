@@ -10,11 +10,13 @@ You are implementing **`agent-fork`**, whose design is complete and locked. Do n
 
 All at the repo root; they are the single source of truth, in precedence order:
 
-1. `DESIGN-DECISIONS.md` — all 14 decisions (D1–D14), final config schema, consolidated v1 surface, deferred list.
-2. `REQUIREMENTS.md` — REQ-01..42, the full CLI interface spec pinned to **CLI Design Standard v1.4.14**, exit codes, pipeline, cleanup semantics, test-first plan (§9).
-3. `RESEARCH.md` — the agent-deck port source map (exact `file:line` refs into `/Users/stevemorin/c/agent-deck`), the verbatim state-materialization command sequence (§2.2), detection matrix (§2.3), launch recipes (§5.2), remaining live experiments (§7).
-4. `CONFORMANCE.md` — applicability map + the one standing waiver (R2.1 `cleanup`).
-5. `research/reference/agent-session-fork-cli-recipes-2026-07-21.md` — the distilled per-agent fork recipes with version gates and gotchas.
+1. `docs/superpowers/specs/2026-08-08-test-architecture-design.md` — test architecture (§1–§7) and amendments A1–A14 (§8); corpus amended 2026-08-08 to match.
+2. `docs/superpowers/plans/2026-08-08-test-architecture-skeletons.md` — skeleton-phase planning and ordered tasks for steps 0–5 (§10).
+3. `DESIGN-DECISIONS.md` — all 14 decisions (D1–D14), final config schema, consolidated v1 surface, deferred list.
+4. `REQUIREMENTS.md` — REQ-01..43 (amended with A1–A14), the full CLI interface spec pinned to **CLI Design Standard v1.4.14**, exit codes, pipeline, cleanup semantics, test-first plan (§9).
+5. `RESEARCH.md` — the agent-deck port source map (exact `file:line` refs into `/Users/stevemorin/c/agent-deck`), the verbatim state-materialization command sequence (§2.2), detection matrix (§2.3), launch recipes (§5.2), remaining live experiments (§7).
+6. `CONFORMANCE.md` — applicability map + the one standing waiver (R2.1 `cleanup`).
+7. `research/reference/agent-session-fork-cli-recipes-2026-07-21.md` — the distilled per-agent fork recipes with version gates and gotchas.
 
 Key locked facts: Python ≥3.11, `uv`-based packaging; PyPI + TestPyPI names **already reserved** (`0.0.0.dev0` placeholders — PEP 541 makes shipping a real v0.1.0 time-sensitive); v1 agents are Claude Code + Codex only; v1 refuses when native fork is impossible (D14 — no fallback ladder); `[agents.<name>] extra_args` ships in v1 (D11 — individually shell-quoted).
 
@@ -43,7 +45,7 @@ The three still-open empirical questions gate the launch-command templates (REQ-
 - **E2 (Codex):** explicit-UUID `codex fork` from a foreign cwd (bypasses cwd filtering?); `-C <worktree>` behavior; whether the TUI cwd-change prompt fires with `-C`. Decides the Codex template and what the emitted output must document.
 - **E3 (Claude E2E):** full paste command in a real worktree — full context recall, fresh UUID, parent transcript untouched.
 
-D14/D11 outcomes moot the old E4 (jsonl-copy fallback) and E6 (pre-0.95 Codex support — below-matrix versions are refused); E5 (state fidelity) is Phase C's core TDD, not a standalone experiment. Update REQ-28/RESEARCH §7 and the research leaf with findings. **STOP.**
+Spec amendments A7 (pre-0.95 Codex support removed, detection `CODEX_THREAD_ID`-only) and A8 (E4 retired until v1.1) supersede pre-phase-B E experiments. E5 (state fidelity) is Phase C's core TDD, not a standalone experiment. Update REQ-28/RESEARCH §7 and the research leaf with findings. **STOP.**
 
 ## 5. PHASE C — Implementation plan *(gate: plan review, then STOP)*
 
