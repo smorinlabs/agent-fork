@@ -1,3 +1,4 @@
+import pytest
 from scripts.check_matrix import parse_matrix
 
 SAMPLE = """\
@@ -34,3 +35,14 @@ def test_collect_items_reads_marker_and_skip_reason(tmp_path):
     assert items[0].matrix_id == "T-CFG-01"
     assert items[0].skip_reason is not None
     assert items[0].skip_reason.startswith("pending:")
+
+
+def test_collect_items_raises_on_broken_tree(tmp_path):
+    (tmp_path / "tests" / "unit").mkdir(parents=True)
+    (tmp_path / "tests" / "unit" / "test_broken.py").write_text(
+        "def test_a(\n    this is not valid python\n"
+    )
+    from scripts.check_matrix import CollectionError, collect_items
+
+    with pytest.raises(CollectionError):
+        collect_items(tmp_path)

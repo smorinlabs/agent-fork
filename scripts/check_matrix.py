@@ -57,6 +57,16 @@ class Item:
     skip_reason: str | None
 
 
+class CollectionError(RuntimeError):
+    """Raised when the pytest collection subprocess fails or produces no dump.
+
+    Any nonzero exit (including pytest's own exit code 5, "no tests
+    collected") is treated as fatal — an empty tier tree is drift, not
+    cleanliness, and collect_items must never silently return [] for a
+    broken tree.
+    """
+
+
 def parse_matrix(text: str) -> dict[str, Group]:
     """Parse TEST-MATRIX.md text into {group_id: Group}.
 
@@ -124,7 +134,7 @@ def collect_items(repo_root: Path) -> list[Item]:
         env["PYTHONPATH"] = os.pathsep.join(
             p for p in (str(_CHECKER_ROOT), existing_pythonpath) if p
         )
-        subprocess.run(
+        result = subprocess.run(
             [
                 sys.executable,
                 "-m",
@@ -139,8 +149,13 @@ def collect_items(repo_root: Path) -> list[Item]:
             capture_output=True,
             text=True,
         )
-        if not dump_path.exists():
-            return []
+        if result.returncode != 0 or not dump_path.exists():
+            stderr_tail = "\n".join(result.stderr.strip().splitlines()[-20:])
+            raise CollectionError(
+                f"pytest collection failed under {repo_root} "
+                f"(exit {result.returncode}, dump "
+                f"{'missing' if not dump_path.exists() else 'present'}):\n{stderr_tail}"
+            )
         items: list[Item] = []
         for line in dump_path.read_text().splitlines():
             line = line.strip()
