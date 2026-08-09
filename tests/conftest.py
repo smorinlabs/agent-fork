@@ -115,6 +115,7 @@ def origin(pushed: int = 0, unpushed: int = 0) -> OriginSpec:
     return OriginSpec(pushed=pushed, unpushed=unpushed)
 
 
+@dataclass
 class WorldHandle:
     """Built world: realpathed paths, sealed env, test-side oracles (spec §6.5)."""
 

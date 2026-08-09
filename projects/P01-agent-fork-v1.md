@@ -42,7 +42,7 @@ Phase C — implementation plan (gate: plan review)
 - [ ] [P01-T07] Task breakdown via superpowers:writing-plans, dependency-ordered, each task naming its failing-test-first
 
 Phase C.5 — test architecture skeleton (gate: matrix + stub tree + checker green)
-- [x] [P01-TS16] Test architecture spec + matrix authored (docs/testing/TEST-MATRIX.md, ~186 rows, 18 groups) — spec docs/superpowers/specs/2026-08-08-test-architecture-design.md
+- [x] [P01-TS16] Test architecture spec + matrix authored (docs/testing/TEST-MATRIX.md, 190 rows, 18 groups) — spec docs/superpowers/specs/2026-08-08-test-architecture-design.md
 - [x] [P01-TS17] Stub tree committed (tiers U/F/C/R, pending lifecycle) + conftest signatures
 - [x] [P01-T23] Corpus amendments A1–A14 executed (REQUIREMENTS/DESIGN-DECISIONS/IMPLEMENTATION-PROMPT)
 - [x] [P01-T24] check-matrix drift guard + just check-matrix

@@ -254,7 +254,7 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-02 | `list` output ordered by creation time — deterministic order asserted across repeated runs | baseline | U | live | D10 |
 | T-REG-03 | locked-write atomicity — concurrent writers serialize, no torn/corrupt registry entries | baseline | F | live | REQ-41; REQ-12 |
 | T-REG-04 | different-name concurrent race — two forks of one repo under different names both succeed, both entries present, bounded wait observed (≤~5s) | baseline | F | live | REQ-41 (A13) |
-| T-REG-05 | timeout row — lock held past the bound → registry_busy, fork rolled back with the manual-recovery message | baseline | F | live | REQ-41 (A13) |
+| T-REG-05 | timeout row — lock held past the bound → registry_busy, fork rolled back cleanly (`cleaned up` reported; the manual-recovery command appears only if that rollback itself fails, per REQ-22) | baseline | F | live | REQ-41 (A13); REQ-22 |
 | T-REG-06 | registry ownership check feeds cleanup — `cleanup` refuses a target it didn't create unless `--force` | baseline | F | live | REQ-31; D12 |
 | T-REG-07 | `list` renders registry entries (name, branch, worktree path, agent, worktree-still-exists) in creation-time order; `-o json` emits the stable schema | baseline | C | live | REQ-31; D10; REQ-17 |
 

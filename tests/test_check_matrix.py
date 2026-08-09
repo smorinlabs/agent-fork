@@ -182,6 +182,20 @@ def test_check1_live_cell_without_item_fails():
     assert any("CHECK1" in f and "T-CFG-01" in f for f in findings)
 
 
+def test_check3_single_experiment_present_names_other_five_by_default():
+    groups = _group("G-EXP", "pending", [_row("T-EXP-04", status="retired", tier="R")])
+    items = _item(
+        "T-EXP-04",
+        path="tests/live/test_exp.py",
+        skip="retired: T-EXP-04 until v1.1 (A8)",
+    )
+    findings = run_checks(groups, items, TIER_DIRS)
+    missing = [f for f in findings if "CHECK3" in f and "missing" in f]
+    assert len(missing) == 5
+    for eid in ("T-EXP-01", "T-EXP-02", "T-EXP-03", "T-EXP-05", "T-EXP-06"):
+        assert any(eid in f for f in missing)
+
+
 def test_check2_retired_and_requires_real_cli_skips_are_exempt():
     groups = _group("G-EXP", "done", [_row("T-EXP-04", status="retired", tier="R")])
     items = _item(
@@ -189,7 +203,7 @@ def test_check2_retired_and_requires_real_cli_skips_are_exempt():
         path="tests/live/test_exp.py",
         skip="retired: T-EXP-04 until v1.1 (A8)",
     )
-    assert run_checks(groups, items, TIER_DIRS) == []
+    assert run_checks(groups, items, TIER_DIRS, enforce_experiments=False) == []
 
 
 def test_check1_item_citing_unknown_id_fails():

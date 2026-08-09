@@ -107,8 +107,8 @@ def test_unborn_head_refuses_with_remedy(repo_scenario, topology):
 @pytest.mark.parametrize(
     "markerless",
     [
-        pytest.param("markers", id="T-GRD-12", marks=pytest.mark.matrix("T-GRD-12")),
-        pytest.param("markerless", id="T-GRD-13", marks=pytest.mark.matrix("T-GRD-13")),
+        pytest.param(False, id="T-GRD-12", marks=pytest.mark.matrix("T-GRD-12")),
+        pytest.param(True, id="T-GRD-13", marks=pytest.mark.matrix("T-GRD-13")),
     ],
 )
 @pytest.mark.skip(reason="pending: T-GRD-12..T-GRD-13 family")

@@ -87,7 +87,8 @@ def test_realpath_rule_holds_for_every_handle_path(repo_scenario):
     """T-FIX-17 — every fixture handle path is already realpathed.
 
     Given:  a built WorldHandle
-    Expect: handle.path == realpath(handle.path)
+    Expect: handle.parent_path == realpath(handle.parent_path); same for
+            handle.child_path when it is not None
     Source: spec §6.5
     """
     raise NotImplementedError

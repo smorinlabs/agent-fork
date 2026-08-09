@@ -246,12 +246,22 @@ def _tier_for_path(path: str, tier_dirs: dict[str, str]) -> str | None:
 
 
 def run_checks(
-    groups: dict[str, Group], items: list[Item], tier_dirs: dict[str, str]
+    groups: dict[str, Group],
+    items: list[Item],
+    tier_dirs: dict[str, str],
+    *,
+    enforce_experiments: bool = True,
 ) -> list[str]:
     """Cross-check TEST-MATRIX.md groups/rows against collected pytest items.
 
     Implements spec §7.4's five checks and returns one finding string per
     violation, formatted "CHECK<n>: <message>". Empty list means clean.
+
+    ``enforce_experiments`` gates only CHECK3's missing-experiment check:
+    it is True in production (all six canonical E-rows must be mapped, with
+    no count-based carve-outs); synthetic unit tests that deliberately build
+    partial experiment sets pass False. Status-drift detection on rows that
+    ARE present is never gated.
     """
     findings: list[str] = []
 
@@ -349,17 +359,14 @@ def run_checks(
 
     # CHECK3: experiment accounting (E1-E6). Drift-check runs unconditionally
     # on whichever canonical IDs are present. "Missing" fires at 0 canonical
-    # IDs present (the whole G-EXP section deleted — the catastrophic case
-    # this check exists to guard) and at >=2 (a real doc with some but not
-    # all present); the sole carve-out is exactly 1 present, which covers a
-    # synthetic test declaring a single unrelated experiment row (see
-    # test_check2_retired_and_requires_real_cli_skips_are_exempt) so it
-    # doesn't spuriously report the other five as missing.
-    present_experiments = [eid for eid in _EXPERIMENT_STATUS if eid in row_index]
+    # The missing-experiment check has NO count-based carve-outs: any absent
+    # canonical E-row is a finding whenever enforce_experiments is on (the
+    # production default). Synthetic unit tests building deliberate partial
+    # sets opt out explicitly via enforce_experiments=False.
     for exp_id, expected_status in _EXPERIMENT_STATUS.items():
         row = row_index.get(exp_id)
         if row is None:
-            if len(present_experiments) != 1:
+            if enforce_experiments:
                 findings.append(
                     f"CHECK3: {exp_id} missing from TEST-MATRIX.md "
                     f"(expected status {expected_status!r})"
