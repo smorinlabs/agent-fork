@@ -10,6 +10,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · backend = git (jj reserved, no v1 values).
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
+- Total rows: 185 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 
 ---
 
@@ -22,6 +23,19 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-CFG-01 | tri-state accessor defaults — `with_state` unset resolves to `true`, `with_ignored` unset resolves to `false` (asserted individually) | baseline | U | live | REQ-13; RESEARCH §1.1 |
+| T-CFG-02 | explicit `with_state=false` in a single source is honored, not silently coerced back to the tri-state default | baseline | U | live | REQ-13; RESEARCH §1.1 |
+| T-CFG-03 | within-source implication — `--no-with-state --with-ignored` typed together on one source still resolves to `exact+ignored` | baseline | U | live | REQ-13; RESEARCH §1.1 |
+| T-CFG-04 | A12 cross-source — config `with_state=false` + `--with-ignored` flag → `exact+ignored` (the flag's implication forces state on) | baseline | U | live | REQ-13 (A12); spec §4 |
+| T-CFG-05 | A12 cross-source — config `with_ignored=true` + `--no-with-state` flag → `no-state` (flag wins; config's `with_ignored` suppressed with it) | baseline | U | live | REQ-13 (A12); spec §4 |
+| T-CFG-06 | A12 cross-source — all sources unset → `exact` | baseline | U | live | REQ-13 (A12); spec §4 |
+| T-CFG-07 | precedence chain — flags beat env beat config-file order, asserted with all three sources set to conflicting values | baseline | U | live | REQ-12; RESEARCH §1.1 |
+| T-CFG-08 | `branch_prefix` set to a whitespace-only string resolves to the default `fork/` | baseline | U | live | REQ-13 |
+| T-CFG-09 | `AGENT_FORK_CONFIG` and `AGENT_FORK_OUTPUT` env vars are read and applied to config-path and output-format resolution respectively | baseline | U | live | REQ-14 |
+| T-CFG-10 | project config walk-up stops at the repo boundary, never escalates above it | baseline | F | live | REQ-12 |
+| T-CFG-11 | A6 — in a linked worktree, the project-config walk-up boundary is the worktree's own root, not the main checkout's | topology=linked-worktree | F | live | REQ-12 (A6); spec §8 A6 |
+| T-CFG-12 | `config set` followed by `config validate` round-trips a written value through the CLI | baseline | C | live | REQUIREMENTS §3.2 |
+| T-CFG-13 | `--config <path>` replaces discovery entirely — the walk-up/XDG/system chain is not consulted | baseline | F | live | REQ-12 |
 
 ---
 
@@ -34,6 +48,14 @@ Varying axes: agent (claude/codex, must vary per §4); otherwise baseline pinned
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-DET-01 | Claude detected via `CLAUDECODE=1` ∧ `CLAUDE_CODE_SESSION_ID` present, no explicit flags → agent=claude | agent=claude | U | live | REQ-26; RESEARCH §5.0 |
+| T-DET-02 | Codex detected via `CODEX_THREAD_ID` present, no explicit flags → agent=codex | agent=codex | U | live | REQ-26 (A7); RESEARCH §5.1 Q3 |
+| T-DET-03 | explicit `--agent`/`--parent-session` flags win over a contradicting env signal | baseline | U | live | REQ-03; REQ-26 |
+| T-DET-04 | both Claude and Codex env signals present, no explicit flags → ambiguity, exit 3 | baseline | F | live | REQ-26 |
+| T-DET-05 | neither env signal present, no explicit flags → exit 3 | baseline | F | live | REQ-26 |
+| T-DET-06 | tombstone — pre-0.95 Codex fallback: own-process-ancestry walk | agent=codex | F | tombstone | RESEARCH §3.2 (A7) |
+| T-DET-07 | tombstone — pre-0.95 Codex fallback: open-fd probe | agent=codex | F | tombstone | RESEARCH §3.2 (A7) |
+| T-DET-08 | tombstone — pre-0.95 Codex fallback: newest-rollout disk scan | agent=codex | F | tombstone | RESEARCH §3.2 (A7) |
 
 ---
 
@@ -46,6 +68,16 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-PRE-01 | installed agent CLI entirely missing → refusal, exit 3, diagnosis names what was detected and what's missing | agent=claude | F | live | REQ-27; REQ-29 |
+| T-PRE-02 | Claude below the pinned-ID fork floor (2.0.73) → refuse | agent=claude | U | live | REQ-27; RESEARCH §5.2 |
+| T-PRE-03 | Claude warn-band (<~2.1.1xx) → warn-and-proceed, `notices[]` populated | agent=claude | U | live | REQ-27; RESEARCH §5.1 Q1 |
+| T-PRE-04 | Codex below the fork-subcommand floor (0.81.0) → refuse | agent=codex | U | live | REQ-27; RESEARCH §5.1 Q4 |
+| T-PRE-05 | Codex parent rollout file not yet flushed on disk → refuse before any mutation | agent=codex | F | live | REQ-27; RESEARCH §3.2 |
+| T-PRE-06 | PRODUCT_GIT_MIN boundary — injected `git --version` just below the fixed floor → the named check fails (blocked on A9's implementation-time git-feature audit fixing the floor value) | baseline | F | blocked | REQ-38 (A9); spec §8 A9 |
+| T-PRE-07 | PRODUCT_GIT_MIN boundary — injected `git --version` at/above the fixed floor → the named check passes (blocked on A9's implementation-time git-feature audit) | baseline | F | blocked | REQ-38 (A9); spec §8 A9 |
+| T-PRE-08 | A14 — below-floor `fork` refusal, exit 5, remedy names installed version/floor/upgrade path (blocked on A9's implementation-time git-feature audit) | baseline | F | blocked | REQ-19 (A14); spec §8 A14 |
+| T-PRE-09 | A14 — `fork --force` overrides the git-floor refusal only, stderr warning emitted, verify ladder still runs (blocked on A9's implementation-time git-feature audit) | baseline | F | blocked | REQUIREMENTS §3.3 (A14); spec §8 A14 |
+| T-PRE-10 | D14 — nothing is created (no worktree, no branch) on any preflight refusal | baseline | F | live | DESIGN-DECISIONS D14; REQ-29 |
 
 ---
 
@@ -104,6 +136,13 @@ Varying axes: none of the shared four vary (pure unit-level logic, tier U); deta
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-NAM-01 | sanitizer strips git-illegal chars (`.. ~ ^ : ? * [ \ @{`), converts spaces to dashes, collapses repeated dashes, strips leading dots and a trailing `.lock` — each rule asserted individually against one crafted input | baseline | U | live | RESEARCH §2.4 |
+| T-NAM-02 | auto-name derivation — bare `fork` (no positional) derives `<branch-slug>-<mmdd>` computed at call time; a run that spans midnight rebuilds a fresh world and reruns rather than reusing the stale date | baseline | U | live | D4; RESEARCH §2.4; spec §6.6 |
+| T-NAM-03 | A5 — detached-HEAD auto-name derives `detached-<short-sha>-<mmdd>`, collision-suffixed like any other auto name | baseline | U | live | D4 (A5); spec §8 A5 |
+| T-NAM-04 | collision suffix — auto-name mode escalates through `-2`, `-3`, … until a non-colliding name is found | baseline | U | live | D4; RESEARCH §2.4 |
+| T-NAM-05 | an explicit name that collides with an existing branch/worktree is passed through unmodified — refusal, not an auto-suffix | baseline | U | live | D4; REQ-19 |
+| T-NAM-06 | 1000-cap — the collision-suffix search hard-stops after 1000 attempts | baseline | U | live | D4; RESEARCH §2.4 |
+| T-NAM-07 | the derived name feeds the fork branch (`<branch_prefix><name>`), the worktree directory, and the session display name — each feed-through asserted individually for one fork | baseline | U | live | REQUIREMENTS §3.3; D6 |
 
 ---
 
@@ -226,6 +265,19 @@ Varying axes: none of the shared four vary (baseline pinned); CLI flag combinati
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-CLN-01 | `cleanup <TARGET>` accepts a fork name, a branch name, or a worktree path — each form resolves to the same fork | baseline | F | live | REQ-31 |
+| T-CLN-02 | worktree removed via `git worktree remove` and pruned | baseline | F | live | REQ-31 |
+| T-CLN-03 | fork branch deleted by default; `--keep-branch` preserves it | baseline | F | live | REQ-31 |
+| T-CLN-04 | fork registry entry removed after cleanup | baseline | F | live | REQ-31 |
+| T-CLN-05 | guard — dirty worktree (uncommitted changes) → refuse, exit 5 | baseline | F | live | REQ-32; DESIGN-DECISIONS D12 |
+| T-CLN-06 | guard — commits not reachable from any upstream (unpushed) → refuse, exit 5 | baseline | F | live | REQ-32; DESIGN-DECISIONS D12 |
+| T-CLN-07 | guard — target is the invoking cwd → refuse, exit 5 | baseline | F | live | REQ-32; DESIGN-DECISIONS D12 |
+| T-CLN-08 | `--force` extends targeting beyond registry-recorded forks and overrides the dirty/unpushed/cwd guards | baseline | F | live | DESIGN-DECISIONS D12 |
+| T-CLN-09 | `--yes` bypasses the interactive consent prompt | baseline | C | live | REQ-33 |
+| T-CLN-10 | `--no-input` without `--yes` or a guard-override flag → fail, exit 2 | baseline | C | live | REQ-33 |
+| T-CLN-11 | TTY consent prompt on stderr names exactly what will be removed (pty row) | baseline | C | live | REQ-33; spec §6.6 |
+| T-CLN-12 | session files are never deleted by cleanup; output notes the fork session remains resumable | baseline | F | live | REQ-34 |
+| T-CLN-13 | `--dry-run` prints the removal plan without mutating | baseline | C | live | REQ-33; REQ-18 |
 
 ---
 
@@ -255,6 +307,12 @@ Varying axes: agent (claude/codex, must vary per §4 — templates differ by age
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-EMT-01 | Claude fixed prefix byte-exact — `cd '<worktree>' && claude --session-id "<uuid>" --resume <parent-id> --fork-session` (the `-n '<name>'` cell is pending-E1) | agent=claude | U | live | REQ-28; DESIGN-DECISIONS |
+| T-EMT-02 | Codex fixed prefix byte-exact — `cd '<worktree>' && codex fork <parent-thread-id>` (the `-C`/cwd-prompt cells are pending-E2) | agent=codex | U | live | REQ-28; DESIGN-DECISIONS |
+| T-EMT-03 | uniform quoting — a worktree path containing a space, a single quote, `$`, and `;` is each individually verified quoted safely | baseline | U | live | REQ-42; RESEARCH §3.1 |
+| T-EMT-04 | `extra_args` — an element containing a space, a quote, `$`, and `;` is each individually shell-quoted at emission | baseline | U | live | REQ-13 D11; DESIGN-DECISIONS D11 |
+| T-EMT-05 | `extra_args` values are visible in `--dry-run` output | agent=claude | U | live | REQ-13 D11; REQ-18 |
+| T-EMT-06 | `extra_args` values are visible in the `-o json` `command` field | agent=codex | U | live | REQ-13 D11; REQ-17 |
 
 ---
 
@@ -267,6 +325,16 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-OUT-01 | stdout carries only the requested result; all progress/diagnostics/prompts go to stderr | baseline | C | live | REQ-16 |
+| T-OUT-02 | human-format output ends with the paste command as the final stdout block | baseline | C | live | REQ-16 |
+| T-OUT-03 | TTY does not change the output format (pty row) | baseline | C | live | REQ-16; spec §6.6 |
+| T-OUT-04 | `-o json` includes the `cwd_prompt_expected` field for Codex | agent=codex | C | live | REQ-17; RESEARCH §5.1 Q4 |
+| T-OUT-05 | `-o json` omits the `cwd_prompt_expected` field for Claude | agent=claude | C | live | REQ-17; RESEARCH §5.1 Q4 |
+| T-OUT-06 | error object shape on stderr — single `{"error":{"code","message"}}` under any machine format | baseline | C | live | REQ-17 |
+| T-OUT-07 | every stable error code (`conflict_branch_exists`, `parent_mid_operation`, `session_not_found`, `verify_failed`, `repo_no_commits`, `unmerged_index`, `registry_busy`) round-trips correctly in the `-o json` error object — asserted individually | baseline | C | live | REQ-17 |
+| T-OUT-08 | `--dry-run` output lists every planned mutation (branch, worktree path, files-to-carry counts, paste command) and states validation was local-only | baseline | C | live | REQ-18 |
+| T-OUT-09 | clipboard copy failure emits a stderr notice; exit code is unaffected | baseline | C | live | DESIGN-DECISIONS D9 |
+| T-OUT-10 | non-C locale row — `-o json` machine output is byte-identical regardless of process locale | locale=non-C | C | live | REQ-38 R9.4 |
 
 ---
 
@@ -279,6 +347,17 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-CLI-01 | bare `agent-fork` → help on stdout, exit 0 | baseline | C | live | REQ-06; DESIGN-DECISIONS D1 |
+| T-CLI-02 | standard global flags present — `-h/--help`, `-V/--version` (`agent-fork <semver>`), `-v` repeatable, `-q`, `--config`, `--debug` — each asserted individually | baseline | C | live | REQ-10 |
+| T-CLI-03 | exit-code catalog — malformed usage → exit 2 | baseline | C | live | REQ-11 |
+| T-CLI-04 | exit-code catalog — unknown `--agent` value → exit 3 | baseline | C | live | REQ-11; REQ-03 |
+| T-CLI-05 | `completion` subcommand smoke-tested for `bash`, `zsh`, and `fish` — each shell asserted individually | baseline | C | live | REQUIREMENTS §3.2 |
+| T-CLI-06 | doctor content — git version reported against the named `PRODUCT_GIT_MIN` check | baseline | C | live | REQ-38 (A9); spec §8 A9 |
+| T-CLI-07 | doctor content — agent CLIs found + versions reported against the version matrix | baseline | C | live | REQ-38 |
+| T-CLI-08 | doctor content — env signals visible (Claude/Codex detection env vars) reported | baseline | C | live | REQ-38 |
+| T-CLI-09 | doctor content — config valid/invalid reported | baseline | C | live | REQ-38 |
+| T-CLI-10 | doctor content — XDG paths writable reported | baseline | C | live | REQ-38 |
+| T-CLI-11 | A14 — a failing doctor check produces a non-zero exit | baseline | C | live | REQ-38 (A14); spec §8 A14 |
 
 ---
 
@@ -291,6 +370,12 @@ Varying axes: agent (claude/codex, must vary per §4 — E1/E3 claude, E2 codex)
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-EXP-01 | E1 — Claude flag combo `--resume <id> --fork-session --session-id <pre-pinned> -n <name>` in one non-interactive invocation; asserts no flag silently no-ops | agent=claude | R | live | RESEARCH §7 E1; EXPERIMENTS.md |
+| T-EXP-02 | E2 — Codex cross-cwd fork `codex fork <explicit-uuid>` plus `-C <worktree>` variant; asserts explicit ID bypasses cwd filtering and documents the TUI cwd-change prompt behavior | agent=codex | R | live | RESEARCH §7 E2; RESEARCH §5.1 Q4; EXPERIMENTS.md |
+| T-EXP-03 | E3 — Claude E2E: full paste command run in a real worktree; asserts full context recall, fresh UUID, parent transcript untouched | agent=claude | R | live | RESEARCH §7 E3; EXPERIMENTS.md |
+| T-EXP-04 | E4 — `.jsonl`-copy last-resort fallback smoke test, retired until milestone v1.1 | agent=claude | R | retired | RESEARCH §7 E4; spec §8 A8 |
+| T-EXP-05 | E5 — absorbed into G-MAT/G-VER core TDD (mapping row — prevents restoration from stale RESEARCH §7) | n/a | n/a | n/a | RESEARCH §7 E5 |
+| T-EXP-06 | E6 — Codex pre-0.95.0 fallback disambiguation, tombstoned with the pre-0.95 detection ladder | n/a | n/a | tombstone | RESEARCH §7 E6 (A7) |
 
 ---
 
@@ -303,3 +388,27 @@ Varying axes: topology (builder-vs-spec verification spans the topology set); mo
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-FIX-01 | builder-vs-spec verification — plain@branch topology constructor matches its declared spec | topology=plain@branch | F | live | spec §6.3; RESEARCH §2.3 |
+| T-FIX-02 | builder-vs-spec verification — plain@main topology constructor matches its declared spec | topology=plain@main | F | live | spec §6.3; RESEARCH §2.3 |
+| T-FIX-03 | builder-vs-spec verification — detached topology constructor matches its declared spec | topology=detached | F | live | spec §6.3; RESEARCH §2.3 |
+| T-FIX-04 | builder-vs-spec verification — linked-worktree topology constructor matches its declared spec (built with a divergent, separately-dirty main checkout) | topology=linked-worktree | F | live | spec §6.3; RESEARCH §2.3 |
+| T-FIX-05 | builder-vs-spec verification — bare@bare topology constructor matches its declared spec | topology=bare@bare | F | live | spec §6.3; RESEARCH §2.3 |
+| T-FIX-06 | builder-vs-spec verification — bare@wt topology constructor matches its declared spec | topology=bare@wt | F | live | spec §6.3; RESEARCH §2.3 |
+| T-FIX-07 | builder-vs-spec verification — dot-bare@wt topology constructor matches its declared spec | topology=dot-bare@wt | F | live | spec §6.3; RESEARCH §2.3 |
+| T-FIX-08 | builder-vs-spec verification — nested-bare topology constructor matches its declared spec | topology=nested-bare | F | live | spec §6.3; RESEARCH §2.3 |
+| T-FIX-09 | builder-vs-spec verification — unborn(plain) topology constructor matches its declared spec | topology=unborn(plain) | F | live | spec §6.3; RESEARCH §2.3 |
+| T-FIX-10 | builder-vs-spec verification — unborn(bare) topology constructor matches its declared spec | topology=unborn(bare) | F | live | spec §6.3; RESEARCH §2.3 |
+| T-FIX-11 | oracle mutation — flip a byte in a materialized file out-of-band → manifest+hash oracle fails on exactly that file | baseline | F | live | spec §5; spec §6.5 |
+| T-FIX-12 | oracle mutation — chmod a materialized file out-of-band → oracle fails on exactly that file (lstat mode mismatch) | baseline | F | live | spec §5; spec §6.5 |
+| T-FIX-13 | oracle mutation — retarget a symlink out-of-band → oracle fails on exactly that symlink | baseline | F | live | spec §5; spec §6.5 |
+| T-FIX-14 | oracle mutation — add an untracked file out-of-band → manifest oracle fails on the unexpected entry | baseline | F | live | spec §5; spec §6.5 |
+| T-FIX-15 | oracle mutation — `update-index` one entry out-of-band → index-comparison oracle fails on exactly that entry | baseline | F | live | spec §5; spec §6.5 |
+| T-FIX-16 | env-seal leak assertion — no key prefixed `CLAUDE`, `CODEX`, `AI_AGENT`, or `GIT_` is present in the sealed subprocess env outside the declared whitelist | baseline | F | live | spec §6.2 |
+| T-FIX-17 | realpath rule — every fixture handle path satisfies `handle.path == realpath(handle.path)` | baseline | F | live | spec §6.5 |
+| T-FIX-18 | git-version canary — filter-divergence: the non-idempotent clean filter on a staged new file diverges identically on git 2.43 and 2.50 | baseline | F | live | spec §6.6; spec §5 |
+| T-FIX-19 | git-version canary — origin/HEAD determinism: `git remote set-head origin -a`, applied by the remote constructor, makes origin/HEAD deterministic across git 2.43/2.50 | baseline | F | live | spec §6.4 |
+| T-FIX-20 | git-version canary — origin/HEAD deletion row exercises the detection fallback when origin/HEAD is absent | baseline | F | live | spec §6.4 |
+| T-FIX-21 | git-version canary — unborn-HEAD repo: git commands return rc=128 consistently across git 2.43/2.50 | topology=unborn(plain) | F | live | spec §5 |
+| T-FIX-22 | git-version canary — ITA flags (`--ita-invisible-in-index`, `apply --intent-to-add`) present/supported on both git 2.43 and 2.50 | baseline | F | live | spec §5; REQ-21 (A3) |
+| T-FIX-23 | shim-interception canary — the producer-failure git shim logs non-empty argv for every intercepted call | baseline | F | live | spec §6.6; REQ-43 (A10) |
+| T-FIX-24 | harness git-floor gate — F/C/R-tier collection hard-errors when the installed git is below `TEST_HARNESS_GIT_MIN` (2.43); unit tests remain collectible on any git version | baseline | F | live | spec §7.5; spec §2 |
