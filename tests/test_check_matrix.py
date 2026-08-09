@@ -14,11 +14,79 @@ Varying axes: none
 
 
 def test_parse_matrix_reads_groups_rows_and_statuses():
-    groups = parse_matrix(SAMPLE)
+    groups, errors = parse_matrix(SAMPLE)
+    assert errors == []
     assert groups["G-GRD"].status == "pending"
     assert groups["G-GRD"].rows["T-GRD-01"].row_status == "live"
     assert groups["G-GRD"].rows["T-GRD-01"].tier == "F"
     assert groups["G-GRD"].rows["T-GRD-99"].row_status == "tombstone"
+
+
+def test_parse_matrix_duplicate_group_heading_is_schema_error():
+    text = SAMPLE + (
+        "\n## G-GRD — duplicate heading\n"
+        "Status: pending\n\n"
+        "| ID | Scenario | Axes | Tier | row_status | Source |\n"
+        "|---|---|---|---|---|---|\n"
+        "| T-GRD-50 | dup heading row | baseline | F | live | X |\n"
+    )
+    groups, errors = parse_matrix(text)
+    assert any("SCHEMA" in e and "G-GRD" in e for e in errors)
+
+
+def test_parse_matrix_duplicate_row_id_same_group_is_schema_error():
+    text = (
+        "## G-CFG — dup row same group\n"
+        "Status: pending\n\n"
+        "| ID | Scenario | Axes | Tier | row_status | Source |\n"
+        "|---|---|---|---|---|---|\n"
+        "| T-CFG-01 | first | baseline | U | live | A |\n"
+        "| T-CFG-01 | dup | baseline | U | live | B |\n"
+    )
+    groups, errors = parse_matrix(text)
+    assert any("SCHEMA" in e and "T-CFG-01" in e for e in errors)
+
+
+def test_parse_matrix_duplicate_row_id_cross_group_is_schema_error():
+    text = (
+        "## G-CFG — group a\n"
+        "Status: pending\n\n"
+        "| ID | Scenario | Axes | Tier | row_status | Source |\n"
+        "|---|---|---|---|---|---|\n"
+        "| T-CFG-01 | first | baseline | U | live | A |\n"
+        "\n"
+        "## G-DET — group b\n"
+        "Status: pending\n\n"
+        "| ID | Scenario | Axes | Tier | row_status | Source |\n"
+        "|---|---|---|---|---|---|\n"
+        "| T-CFG-01 | second | baseline | U | live | B |\n"
+    )
+    groups, errors = parse_matrix(text)
+    assert any("SCHEMA" in e and "T-CFG-01" in e for e in errors)
+
+
+def test_parse_matrix_unrecognized_group_status_is_schema_error():
+    text = (
+        "## G-CFG — bad status\n"
+        "Status: bogus\n\n"
+        "| ID | Scenario | Axes | Tier | row_status | Source |\n"
+        "|---|---|---|---|---|---|\n"
+        "| T-CFG-01 | x | baseline | U | live | A |\n"
+    )
+    groups, errors = parse_matrix(text)
+    assert any("SCHEMA" in e and "bogus" in e for e in errors)
+
+
+def test_parse_matrix_unrecognized_row_status_is_schema_error():
+    text = (
+        "## G-CFG — bad row status\n"
+        "Status: pending\n\n"
+        "| ID | Scenario | Axes | Tier | row_status | Source |\n"
+        "|---|---|---|---|---|---|\n"
+        "| T-CFG-01 | x | baseline | U | bogus | A |\n"
+    )
+    groups, errors = parse_matrix(text)
+    assert any("SCHEMA" in e and "bogus" in e for e in errors)
 
 
 def test_collect_items_reads_marker_and_skip_reason(tmp_path):
@@ -35,6 +103,31 @@ def test_collect_items_reads_marker_and_skip_reason(tmp_path):
     assert items[0].matrix_id == "T-CFG-01"
     assert items[0].skip_reason is not None
     assert items[0].skip_reason.startswith("pending:")
+
+
+def test_collect_items_dumps_marker_count_and_param_id(tmp_path):
+    (tmp_path / "tests" / "unit").mkdir(parents=True)
+    (tmp_path / "tests" / "unit" / "test_x.py").write_text(
+        "import pytest\n"
+        "@pytest.mark.matrix('T-CFG-01')\n"
+        "@pytest.mark.matrix('T-CFG-02')\n"
+        "@pytest.mark.skip(reason='pending: T-CFG-01')\n"
+        "def test_two_markers():\n    raise NotImplementedError\n"
+        "\n"
+        "@pytest.mark.parametrize('x', [pytest.param(1, id='T-CFG-99')])\n"
+        "@pytest.mark.matrix('T-CFG-01')\n"
+        "@pytest.mark.skip(reason='pending: T-CFG-01')\n"
+        "def test_param_mismatch(x):\n    raise NotImplementedError\n"
+    )
+    from scripts.check_matrix import collect_items
+
+    items = collect_items(tmp_path)
+    two_marker_item = next(i for i in items if "test_two_markers" in i.nodeid)
+    assert two_marker_item.marker_count == 2
+
+    param_item = next(i for i in items if "test_param_mismatch" in i.nodeid)
+    assert param_item.matrix_id == "T-CFG-01"
+    assert param_item.param_id == "T-CFG-99"
 
 
 def test_collect_items_raises_on_broken_tree(tmp_path):
@@ -65,9 +158,22 @@ def _row(rid, status="live", tier="U"):
     return Row(row_id=rid, row_status=status, tier=tier)
 
 
-def _item(mid, path="tests/unit/test_x.py", skip="pending: x"):
+def _item(
+    mid,
+    path="tests/unit/test_x.py",
+    skip="pending: x",
+    marker_count=1,
+    param_id=None,
+):
     return [
-        Item(nodeid=f"{path}::t[{mid}]", path=path, matrix_id=mid, skip_reason=skip)
+        Item(
+            nodeid=f"{path}::t[{mid}]",
+            path=path,
+            matrix_id=mid,
+            skip_reason=skip,
+            marker_count=marker_count,
+            param_id=param_id,
+        )
     ]
 
 
@@ -189,3 +295,37 @@ def test_check2_pending_group_genuinely_retired_row_is_exempt():
     items = _item("T-CFG-02", skip="retired: T-CFG-02 stale reason")
     findings = run_checks(groups, items, TIER_DIRS)
     assert not any("CHECK2" in f for f in findings)
+
+
+def test_check_two_matrix_markers_on_one_item_fails():
+    groups = _group("G-CFG", "pending", [_row("T-CFG-01")])
+    items = _item("T-CFG-01", marker_count=2)
+    findings = run_checks(groups, items, TIER_DIRS)
+    assert any("T-CFG-01" in f for f in findings)
+
+
+def test_check_param_id_mismatch_with_marker_fails():
+    groups = _group("G-CFG", "pending", [_row("T-CFG-01")])
+    items = _item("T-CFG-01", param_id="T-CFG-99")
+    findings = run_checks(groups, items, TIER_DIRS)
+    assert any("T-CFG-99" in f and "T-CFG-01" in f for f in findings)
+
+
+def test_check_retired_row_with_no_collected_item_fails():
+    groups = _group("G-EXP", "pending", [_row("T-EXP-04", status="retired", tier="R")])
+    findings = run_checks(groups, [], TIER_DIRS)
+    assert any("T-EXP-04" in f for f in findings)
+
+
+def test_check_retired_row_unskipped_item_fails():
+    groups = _group("G-EXP", "pending", [_row("T-EXP-04", status="retired", tier="R")])
+    items = _item("T-EXP-04", path="tests/live/test_exp.py", skip=None)
+    findings = run_checks(groups, items, TIER_DIRS)
+    assert any("T-EXP-04" in f for f in findings)
+
+
+def test_check_retired_row_wrong_reason_prefix_fails():
+    groups = _group("G-EXP", "pending", [_row("T-EXP-04", status="retired", tier="R")])
+    items = _item("T-EXP-04", path="tests/live/test_exp.py", skip="pending: T-EXP-04")
+    findings = run_checks(groups, items, TIER_DIRS)
+    assert any("T-EXP-04" in f for f in findings)

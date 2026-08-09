@@ -29,6 +29,9 @@ ROW_RE = re.compile(
     r"(?P<source>[^|]*)\|?"
 )
 
+GROUP_STATUSES = {"pending", "tdd", "done"}
+ROW_STATUSES = {"live", "n/a", "tombstone", "retired", "blocked"}
+
 
 @dataclass(frozen=True)
 class Row:
@@ -49,12 +52,20 @@ class Group:
 
 @dataclass(frozen=True)
 class Item:
-    """One collected pytest item."""
+    """One collected pytest item.
+
+    `marker_count` is the number of `matrix` markers found on the item
+    (exactly 1 expected for any in-scope item); `matrix_id` is populated
+    only when there's exactly one marker with exactly one string arg.
+    `param_id` is the pytest callspec param id, None when unparametrized.
+    """
 
     nodeid: str
     path: str
     matrix_id: str | None
     skip_reason: str | None
+    marker_count: int = 1
+    param_id: str | None = None
 
 
 class CollectionError(RuntimeError):
@@ -67,23 +78,38 @@ class CollectionError(RuntimeError):
     """
 
 
-def parse_matrix(text: str) -> dict[str, Group]:
-    """Parse TEST-MATRIX.md text into {group_id: Group}.
+def parse_matrix(text: str) -> tuple[dict[str, Group], list[str]]:
+    """Parse TEST-MATRIX.md text into ({group_id: Group}, schema_errors).
 
     Stdlib regex only: `## G-XXX` headings start a group, the following
     `Status:` line sets its status, and `| T-XXX-NN | ... |` table rows
     (6 columns: ID, Scenario, Axes, Tier, row_status, Source) populate it.
+
+    Schema errors (duplicate group headings, duplicate row IDs within or
+    across groups, and unrecognized group/row statuses) are collected and
+    returned rather than silently overwriting prior data — callers must
+    treat any non-empty error list as fatal before running cross-checks.
     """
     groups: dict[str, Group] = {}
+    errors: list[str] = []
+    seen_row_ids: dict[str, str] = {}
+
     current_group_id: str | None = None
     current_status: str | None = None
     current_rows: dict[str, Row] = {}
 
     def flush() -> None:
-        if current_group_id is not None:
-            groups[current_group_id] = Group(
-                status=current_status or "", rows=current_rows
+        if current_group_id is None:
+            return
+        if current_group_id in groups:
+            errors.append(f"SCHEMA: duplicate group heading {current_group_id!r}")
+            return
+        status = current_status or ""
+        if status not in GROUP_STATUSES:
+            errors.append(
+                f"SCHEMA: group {current_group_id} has unrecognized status {status!r}"
             )
+        groups[current_group_id] = Group(status=status, rows=current_rows)
 
     for line in text.splitlines():
         heading_match = GROUP_HEADING_RE.match(line)
@@ -102,14 +128,30 @@ def parse_matrix(text: str) -> dict[str, Group]:
         row_match = ROW_RE.match(line)
         if row_match and current_group_id is not None:
             row_id = row_match.group("row_id")
+            row_status = row_match.group("row_status").strip()
+            if row_status not in ROW_STATUSES:
+                errors.append(
+                    f"SCHEMA: {row_id} has unrecognized row_status {row_status!r}"
+                )
+            if row_id in current_rows:
+                errors.append(
+                    f"SCHEMA: duplicate row ID {row_id} within group {current_group_id}"
+                )
+            elif row_id in seen_row_ids:
+                errors.append(
+                    f"SCHEMA: duplicate row ID {row_id} across groups "
+                    f"({seen_row_ids[row_id]} and {current_group_id})"
+                )
+            else:
+                seen_row_ids[row_id] = current_group_id
             current_rows[row_id] = Row(
                 row_id=row_id,
-                row_status=row_match.group("row_status").strip(),
+                row_status=row_status,
                 tier=row_match.group("tier").strip(),
             )
 
     flush()
-    return groups
+    return groups, errors
 
 
 _CHECKER_ROOT = Path(__file__).resolve().parent.parent
@@ -162,12 +204,15 @@ def collect_items(repo_root: Path) -> list[Item]:
             if not line:
                 continue
             record = json.loads(line)
+            matrix_ids: list[str | None] = record.get("matrix") or []
             items.append(
                 Item(
                     nodeid=record["nodeid"],
                     path=record["path"],
-                    matrix_id=record.get("matrix"),
+                    matrix_id=matrix_ids[0] if len(matrix_ids) == 1 else None,
                     skip_reason=record.get("skip_reason"),
+                    marker_count=len(matrix_ids),
+                    param_id=record.get("param_id"),
                 )
             )
         return items
@@ -228,11 +273,43 @@ def run_checks(
                     f"CHECK1: {row_id} has {count} collected items, expected exactly 1"
                 )
 
-    # CHECK1 direction 2 / CHECK4 / CHECK5: every in-scope collected item.
+    # CHECK8: every retired row has exactly one collected item, skip-marked
+    # with a reason starting "retired:" (the exempt-skip contract, spec §7.3).
+    for row_id, row in row_index.items():
+        if row.row_status != "retired":
+            continue
+        matched = items_by_id.get(row_id, [])
+        if len(matched) != 1:
+            findings.append(
+                f"CHECK8: retired row {row_id} has {len(matched)} collected "
+                f"items, expected exactly 1"
+            )
+            continue
+        reason = matched[0].skip_reason or ""
+        if not reason.startswith("retired:"):
+            findings.append(
+                f"CHECK8: retired row {row_id} stub has skip reason "
+                f"{matched[0].skip_reason!r}, expected prefix 'retired:'"
+            )
+
+    # CHECK1 direction 2 / CHECK4 / CHECK5 / CHECK6 / CHECK7: every in-scope
+    # collected item.
     for item in items:
         tier = _tier_for_path(item.path, tier_dirs)
         if tier is None:
             continue  # out of scope, e.g. tests/test_package.py
+        if item.marker_count != 1:
+            findings.append(
+                f"CHECK6: {item.nodeid} has {item.marker_count} matrix markers, "
+                f"expected exactly 1"
+            )
+            continue
+        if item.param_id is not None and item.matrix_id != item.param_id:
+            findings.append(
+                f"CHECK7: {item.nodeid} matrix marker {item.matrix_id!r} does "
+                f"not match param id {item.param_id!r}"
+            )
+            continue
         if not item.matrix_id or item.matrix_id not in row_index:
             findings.append(
                 f"CHECK1: {item.nodeid} cites unknown matrix ID {item.matrix_id!r}"
@@ -300,7 +377,14 @@ def run_checks(
 def main(argv: list[str] | None = None) -> int:
     """Entry point: cross-check TEST-MATRIX.md against the collected stub tree."""
     matrix_path = _CHECKER_ROOT / "docs" / "testing" / "TEST-MATRIX.md"
-    groups = parse_matrix(matrix_path.read_text())
+    groups, schema_errors = parse_matrix(matrix_path.read_text())
+    if schema_errors:
+        # Schema errors (duplicate headings/IDs, unrecognized statuses) make
+        # the parsed groups untrustworthy — never proceed to collection/
+        # cross-checks on top of drifted data.
+        for error in schema_errors:
+            print(error)
+        return 1
 
     try:
         items = collect_items(_CHECKER_ROOT)
@@ -314,6 +398,8 @@ def main(argv: list[str] | None = None) -> int:
             path=str(Path(item.path).resolve().relative_to(_CHECKER_ROOT)),
             matrix_id=item.matrix_id,
             skip_reason=item.skip_reason,
+            marker_count=item.marker_count,
+            param_id=item.param_id,
         )
         for item in items
     ]
