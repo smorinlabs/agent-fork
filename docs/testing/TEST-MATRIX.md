@@ -58,6 +58,20 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-GRD-01 | branch already exists → refuse, exit 5, conflict_branch_exists, nothing created | baseline | F | live | REQ-19; RESEARCH §2.1 step 2 |
+| T-GRD-02 | branch already has a worktree → refuse, exit 5, nothing created | baseline | F | live | REQ-19 |
+| T-GRD-03 | worktree path exists → refuse, exit 5, nothing created | baseline | F | live | REQ-19; RESEARCH §2.1 step 3 |
+| T-GRD-04 | parent mid-rebase → refuse, exit 5, abort hint asserted (`cd "<parent>" && git rebase --abort`) | baseline | F | live | REQ-19; RESEARCH §2.1 step 4 |
+| T-GRD-05 | parent mid-merge → refuse, exit 5, abort hint asserted (`git merge --abort`) | baseline | F | live | REQ-19; RESEARCH §2.1 step 4 |
+| T-GRD-06 | parent mid-cherry-pick → refuse, exit 5, abort hint asserted (`git cherry-pick --abort`) | baseline | F | live | REQ-19; RESEARCH §2.1 step 4 |
+| T-GRD-07 | parent mid-revert → refuse, exit 5, abort hint asserted (`git revert --abort`) | baseline | F | live | REQ-19; RESEARCH §2.1 step 4 |
+| T-GRD-08 | parent mid-bisect → refuse, exit 5, abort hint asserted (`git bisect reset`) | baseline | F | live | REQ-19; RESEARCH §2.1 step 4 |
+| T-GRD-09 | not-a-repo → refuse, exit 5, nothing created | baseline | F | live | REQ-19 |
+| T-GRD-10 | unborn HEAD, plain repo → refuse, exit 5, repo_no_commits, remedy text asserted (make an initial commit … and re-run) | topology=unborn(plain) | F | live | REQ-19 (A2) |
+| T-GRD-11 | unborn HEAD, bare repo → refuse, exit 5, repo_no_commits, remedy text asserted | topology=unborn(bare) | F | live | REQ-19 (A2) |
+| T-GRD-12 | unmerged index, conflict markers present → refuse, exit 5, unmerged_index, conflicted paths listed | baseline | F | live | REQ-19 (A4) |
+| T-GRD-13 | unmerged index, markerless (no conflict markers) → refuse, exit 5, unmerged_index, conflicted paths listed | baseline | F | live | REQ-19 (A4) |
+| T-GRD-14 | race loss — shim-barrier parks run A between guard-pass and `worktree add`; B completes first; A released → A exits 5, conflict_branch_exists, nothing left | baseline | F | live | REQ-11 (A1); spec §6.6 |
 
 ---
 
@@ -70,6 +84,14 @@ Varying axes: topology (the full set: plain@branch, plain@main, detached, linked
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-ANC-01 | plain@branch — anchor == parent `HEAD^{commit}` resolved at the parent's own path | baseline | F | live | REQ-20; RESEARCH §2.3 |
+| T-ANC-02 | plain@main — anchor == parent `HEAD^{commit}`; fork branch ≠ default branch recorded (feeds G-VER's conditional check) | topology=plain@main | F | live | REQ-20; RESEARCH §4 |
+| T-ANC-03 | detached HEAD — anchor == parent `HEAD^{commit}` (a commit, not a ref); parent-detached recorded in fork metadata | topology=detached | F | live | REQ-20; RESEARCH §4 |
+| T-ANC-04 | linked-worktree — anchor == this worktree's own HEAD (not main's); `git -C <fork> rev-parse --git-common-dir` == parent's common dir | topology=linked-worktree | F | live | REQ-20; RESEARCH §4 |
+| T-ANC-05 | bare@bare (invoked at the bare repo root) — anchor == bare HEAD `^{commit}` | topology=bare@bare | F | live | REQ-20; RESEARCH §2.3/§4 |
+| T-ANC-06 | bare@wt (invoked from a worktree of a bare project) — anchor == the invoking worktree's `HEAD^{commit}` | topology=bare@wt | F | live | REQ-20; RESEARCH §2.3/§4 |
+| T-ANC-07 | dot-bare@wt (`.bare/` layout, invoked from a worktree) — anchor == the invoking worktree's `HEAD^{commit}` | topology=dot-bare@wt | F | live | REQ-20; RESEARCH §2.3 |
+| T-ANC-08 | nested-bare — anchor == `HEAD^{commit}` resolved through the nested bare child | topology=nested-bare | F | live | REQ-20; RESEARCH §2.3 |
 
 ---
 
@@ -94,6 +116,13 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-LOC-01 | `sibling` default path derivation — worktree placed at `<repo>-<branch>` | baseline | U | live | D5; RESEARCH §2.4 |
+| T-LOC-02 | `central` location — worktree placed under the XDG data path `~/.local/share/agent-fork/worktrees/<repo>/<slug>` | baseline | U | live | D5 |
+| T-LOC-03 | `subdirectory` location — worktree placed at `<root>/.worktrees/<slug>` | baseline | U | live | D5 |
+| T-LOC-04 | path template — `{repo-name}`, `{repo-root}`, `{branch}` placeholders each substitute correctly | baseline | U | live | D5; RESEARCH §2.4 |
+| T-LOC-05 | explicit `worktree_location` config value suppresses the mirror-parent heuristic | baseline | U | live | D5 |
+| T-LOC-06 | mirror-parent heuristic — parent is a linked worktree → fork mirrors the parent's observed placement pattern | topology=linked-worktree | F | live | D5; RESEARCH §4 |
+| T-LOC-07 | bare-at-root placement override — fork worktree placed as a child of the bare dir | topology=bare@bare | F | live | D5; RESEARCH §2.4 |
 
 ---
 
@@ -106,6 +135,26 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-MAT-01 | staged-only file → child index+worktree show `A `, content byte-identical (manifest oracle) | baseline | F | live | REQ-21; RESEARCH §2.2 step 1 |
+| T-MAT-02 | unstaged-only file → child worktree shows ` M`, index untouched | baseline | F | live | REQ-21; RESEARCH §2.2 step 2 |
+| T-MAT-03 | staged+unstaged edits to the same file → split preserved, child index/worktree shapes (`A `/`AM`/` M`) match the staged-vs-unstaged origin of each hunk | baseline | F | live | REQ-21; RESEARCH §2.2 |
+| T-MAT-04 | untracked files incl. nested directories → copied byte-for-byte, manifest oracle proves inner files present | baseline | F | live | REQ-21; RESEARCH §2.2 step 3 |
+| T-MAT-05 | ignored files, opt-in second pass → union of both `ls-files --others` passes copied | mode=exact+ignored | F | live | REQ-21; RESEARCH §2.2 step 3b |
+| T-MAT-06 | symlink, relative target → recreated verbatim via readlink, target stays relative | baseline | F | live | REQ-21; RESEARCH §2.2 |
+| T-MAT-07 | symlink, absolute target → recreated verbatim via readlink, target stays absolute | baseline | F | live | REQ-21; RESEARCH §2.2 |
+| T-MAT-08 | exec-bit-only change (no content diff) → permission bit preserved in child, content identical | baseline | F | live | REQ-21; RESEARCH §2.2 |
+| T-MAT-09 | binary file, staged → cached `--binary` diff applies with `--index`, child byte-identical | baseline | F | live | REQ-21; RESEARCH §2.2 step 1 |
+| T-MAT-10 | binary file, unstaged → uncached `--binary` diff applies without `--index`, child byte-identical | baseline | F | live | REQ-21; RESEARCH §2.2 step 2 |
+| T-MAT-11 | rename+edit → child reflects the rename with edited content; manifest oracle confirms old path absent and new path's content correct | baseline | F | live | REQ-21; RESEARCH §2.2 |
+| T-MAT-12 | intent-to-add file transported → cached diff uses `--ita-invisible-in-index`, applied via `apply --intent-to-add`, child shows ` A` not `??` (ITA-aware oracle) | baseline | F | live | REQ-21 (A3) |
+| T-MAT-13 | empty directory in parent → documented absence in child (git-visible state copy only; empty-dir expectation declared per mode) | baseline | F | live | REQ-21; spec §6.5 |
+| T-MAT-14 | submodule present → treated opaque, gitlink OID (mode-160000) compared, submodule contents pruned from manifest; fixture built with command-scoped `-c protocol.file.allow=always` | baseline | F | live | RESEARCH §2.1 step 6; spec §6.3; RESEARCH §4 |
+| T-MAT-15 | parent strictly read-only during materialize → full manifest+index snapshot before/after, byte-identical | baseline | F | live | REQ-21; spec §6.5 item 3 |
+| T-MAT-16 | linked-worktree × dirty-both-checkouts — distinct staged/unstaged/untracked state in both the parent worktree and the main checkout; only the parent worktree's state travels | topology=linked-worktree | F | live | spec §4 mandatory interaction set; REQ-21 |
+| T-MAT-17 | linked-worktree × exact+ignored — materialize plus the ignored pass are both scoped to the parent worktree only | topology=linked-worktree, mode=exact+ignored | F | live | spec §4 mandatory interaction set; REQ-21 |
+| T-MAT-18 | mode=exact full-materialize — staged+unstaged+untracked copied, ignored excluded | mode=exact | F | live | REQ-21 |
+| T-MAT-19 | mode=exact+ignored full-materialize — staged+unstaged+untracked+ignored all copied | mode=exact+ignored | F | live | REQ-21 |
+| T-MAT-20 | mode=no-state full-materialize — worktree at parent HEAD, no materialization, child status clean | mode=no-state | F | live | REQ-21; RESEARCH §4 |
 
 ---
 
@@ -118,6 +167,17 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-VER-01 | anchor check — `git -C <fork> rev-parse --verify HEAD` == recorded parent anchor commit | baseline | F | live | REQ-23; RESEARCH §4 ladder item 1 |
+| T-VER-02 | branch check — `git -C <fork> rev-parse --abbrev-ref HEAD` == expected new branch | baseline | F | live | REQ-23; RESEARCH §4 ladder item 2 |
+| T-VER-03 | worktree-list check — `git worktree list --porcelain` (at root) contains the fork path↔branch pair | baseline | F | live | REQ-23; RESEARCH §4 ladder item 3 |
+| T-VER-04 | exact-copy status check — child `status --porcelain=v1 -z` byte-equal to parent's (ignored excluded unless `--with-ignored`) | mode=exact | F | live | REQ-23; RESEARCH §4 ladder item 4 |
+| T-VER-05 | clean-from-HEAD status check — fork `status --porcelain` output is empty | mode=no-state | F | live | REQ-23; RESEARCH §4 ladder item 5 |
+| T-VER-06 | parent-untouched check — parent `status --porcelain -z` before == after | baseline | F | live | REQ-23; RESEARCH §4 ladder item 6 |
+| T-VER-07 | conditional check, branch≠default — plain@main topology asserts fork branch ≠ default branch | topology=plain@main | F | live | REQ-23; spec §5 |
+| T-VER-08 | conditional check, common-dir match — linked-worktree topology asserts fork's `git-common-dir` == parent's | topology=linked-worktree | F | live | REQ-23; spec §5 |
+| T-VER-09 | conditional check, detached-recorded — detached topology asserts the parent-detached flag is recorded and checked | topology=detached | F | live | REQ-23; spec §5 |
+| T-VER-10 | fault injection — non-idempotent clean filter on a staged new file → porcelain diverges → verify fails → rollback → exit 1, verify_failed (canary reference: G-FIX) | baseline | F | live | REQ-23; spec §5; spec §6.6 |
+| T-VER-11 | `--no-verify` → the verify ladder is skipped entirely, fork proceeds unverified | baseline | F | live | REQ-23 (D8) |
 
 ---
 
@@ -130,6 +190,12 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-RBK-01 | materialize failure → rollback removes the worktree, removes the branch only if it was created this call | baseline | F | live | REQ-22; RESEARCH §2.1 step 10 |
+| T-RBK-02 | rollback itself fails → exact manual-recovery command text emitted (`rm -rf "<worktree>" && git -C "<root>" branch -D "<branch>"`) | baseline | F | live | REQ-22; RESEARCH §2.1 step 10 |
+| T-RBK-03 | SIGINT mid-materialize (parent-side step-2 diff stall) → exit 130, clean rollback of partial work | baseline | F | live | REQ-22; spec §6.6 signal window |
+| T-RBK-04 | SIGTERM mid-materialize (parent-side step-2 diff stall) → exit 143, clean rollback of partial work | baseline | F | live | REQ-22; spec §6.6 signal window |
+| T-RBK-05 | producer-pipe-failure, verify on — fake `git` where `diff --cached` exits 1 with empty stdout → materialize fails, rollback runs, exit 1 | baseline | F | live | REQ-22; spec §5; spec §6.6 |
+| T-RBK-06 | producer-pipe-failure, verify off (`--no-verify`) — same fake failure → still fails, rollback runs, exit 1 | baseline | F | live | REQ-22; spec §5; spec §6.6 |
 
 ---
 
@@ -142,6 +208,12 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-REG-01 | registry write on fork → schema fields populated (name, branch, worktree path, agent, creation time) | baseline | U | live | REQ-41; D10 |
+| T-REG-02 | `list` output ordered by creation time — deterministic order asserted across repeated runs | baseline | U | live | D10 |
+| T-REG-03 | locked-write atomicity — concurrent writers serialize, no torn/corrupt registry entries | baseline | F | live | REQ-41; REQ-12 |
+| T-REG-04 | different-name concurrent race — two forks of one repo under different names both succeed, both entries present, bounded wait observed (≤~5s) | baseline | F | live | REQ-41 (A13) |
+| T-REG-05 | timeout row — lock held past the bound → registry_busy, fork rolled back with the manual-recovery message | baseline | F | live | REQ-41 (A13) |
+| T-REG-06 | registry ownership check feeds cleanup — `cleanup` refuses a target it didn't create unless `--force` | baseline | F | live | REQ-31; D12 |
 
 ---
 
@@ -166,6 +238,11 @@ Varying axes: none of the shared four vary (baseline pinned).
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
+| T-INC-01 | `.worktreeinclude` copies files it lists that are gitignored | baseline | F | live | REQ-24; RESEARCH §2.1 step 11 |
+| T-INC-02 | precedence — materialized copies win; `.worktreeinclude` skips a file that already exists in the fork | baseline | F | live | REQ-24; RESEARCH §2.1 step 11 |
+| T-INC-03 | setup hook (`.agent-fork/worktree-setup.sh`) runs with cwd = new worktree, env vars carrying repo root + worktree path | baseline | F | live | REQ-24; RESEARCH §2.1 step 12; spec §5 |
+| T-INC-04 | hook failure → non-fatal, stderr notice, fork still succeeds | baseline | F | live | REQ-24; RESEARCH §2.1 step 12 |
+| T-INC-05 | pipeline order — include/hook run after verify; their filesystem changes are excluded from the verify comparison | baseline | F | live | spec §5 |
 
 ---
 
