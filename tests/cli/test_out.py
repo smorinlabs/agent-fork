@@ -129,3 +129,18 @@ def test_non_c_locale_json_output_byte_identical(repo_scenario):
     Source: REQ-38 R9.4
     """
     raise NotImplementedError
+
+
+@pytest.mark.matrix("T-OUT-11")
+@pytest.mark.skip(reason="pending: T-OUT-11")
+def test_json_success_object_carries_req17_minimum_fields(repo_scenario):
+    """T-OUT-11 — claim.
+
+    Given:  a successful `fork -o json` invocation
+    Expect: the success object carries the REQ-17 minimum fields — `agent`,
+            `parent_session_id`, `fork.branch`, `fork.worktree`,
+            `fork.anchor_commit`, `fork.mode` (state-carry booleans),
+            `verification` (per-check results), `command`, `notices[]`
+    Source: REQ-17
+    """
+    raise NotImplementedError

@@ -19,7 +19,7 @@ def test_e1_claude_flag_combo_no_silent_noop():
     Given:  a real Claude CLI invoked non-interactively with `--resume <id>
             --fork-session --session-id <pre-pinned> -n <name>` combined
     Expect: all four flags take effect; none silently no-ops
-    Source: RESEARCH §7 E1; EXPERIMENTS.md
+    Source: RESEARCH §7 E1; (EXPERIMENTS.md, Phase B)
     """
     raise NotImplementedError
 
@@ -34,7 +34,7 @@ def test_e2_codex_cross_cwd_fork_explicit_id():
     Given:  `codex fork <explicit-uuid>` run cross-cwd, plus a `-C <worktree>` variant
     Expect: the explicit ID bypasses cwd filtering; the TUI cwd-change prompt behavior
             is documented
-    Source: RESEARCH §7 E2; RESEARCH §5.1 Q4; EXPERIMENTS.md
+    Source: RESEARCH §7 E2; RESEARCH §5.1 Q4; (EXPERIMENTS.md, Phase B)
     """
     raise NotImplementedError
 
@@ -48,7 +48,7 @@ def test_e3_claude_e2e_full_paste_command():
 
     Given:  the full paste command run in a real worktree
     Expect: full context recall, fresh UUID, parent transcript untouched
-    Source: RESEARCH §7 E3; EXPERIMENTS.md
+    Source: RESEARCH §7 E3; (EXPERIMENTS.md, Phase B)
     """
     raise NotImplementedError
 
