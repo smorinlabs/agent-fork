@@ -27,5 +27,9 @@ typecheck:
 test:
     uv run pytest
 
+# Validate TEST-MATRIX.md against the collected stub tree
+check-matrix:
+    uv run python scripts/check_matrix.py
+
 # Format, lint, typecheck, test
 all: fmt lint typecheck test

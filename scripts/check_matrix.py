@@ -173,12 +173,155 @@ def collect_items(repo_root: Path) -> list[Item]:
         return items
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Entry point: cross-check TEST-MATRIX.md against the collected stub tree.
+TIER_DIRS: dict[str, str] = {
+    "tests/unit": "U",
+    "tests/pipeline": "F",
+    "tests/cli": "C",
+    "tests/live": "R",
+    "tests/fixtures": "F",
+}
 
-    Skeleton phase: parsers only, full cross-check logic lands in Task 10.
+# Spec §7.4 check (3): E1-E6 must all be accounted for at these exact statuses.
+_EXPERIMENT_STATUS: dict[str, str] = {
+    "T-EXP-01": "live",
+    "T-EXP-02": "live",
+    "T-EXP-03": "live",
+    "T-EXP-04": "retired",
+    "T-EXP-05": "n/a",
+    "T-EXP-06": "tombstone",
+}
+
+
+def _tier_for_path(path: str, tier_dirs: dict[str, str]) -> str | None:
+    """Map a repo-relative item path to a tier via tier_dirs, None if out of scope."""
+    for prefix, tier in tier_dirs.items():
+        if path == prefix or path.startswith(prefix + "/"):
+            return tier
+    return None
+
+
+def run_checks(
+    groups: dict[str, Group], items: list[Item], tier_dirs: dict[str, str]
+) -> list[str]:
+    """Cross-check TEST-MATRIX.md groups/rows against collected pytest items.
+
+    Implements spec §7.4's five checks and returns one finding string per
+    violation, formatted "CHECK<n>: <message>". Empty list means clean.
     """
-    return 0
+    findings: list[str] = []
+
+    row_index: dict[str, Row] = {}
+    for group in groups.values():
+        row_index.update(group.rows)
+
+    items_by_id: dict[str, list[Item]] = {}
+    for item in items:
+        if item.matrix_id:
+            items_by_id.setdefault(item.matrix_id, []).append(item)
+
+    # CHECK1 direction 1: every live (or blocked) row has exactly one item.
+    for row_id, row in row_index.items():
+        if row.row_status in ("live", "blocked"):
+            count = len(items_by_id.get(row_id, []))
+            if count != 1:
+                findings.append(
+                    f"CHECK1: {row_id} has {count} collected items, expected exactly 1"
+                )
+
+    # CHECK1 direction 2 / CHECK4 / CHECK5: every in-scope collected item.
+    for item in items:
+        tier = _tier_for_path(item.path, tier_dirs)
+        if tier is None:
+            continue  # out of scope, e.g. tests/test_package.py
+        if not item.matrix_id or item.matrix_id not in row_index:
+            findings.append(
+                f"CHECK1: {item.nodeid} cites unknown matrix ID {item.matrix_id!r}"
+            )
+            continue
+        row = row_index[item.matrix_id]
+        if row.row_status in ("tombstone", "n/a"):
+            findings.append(
+                f"CHECK4: {item.nodeid} cites {row.row_status} row {item.matrix_id}"
+            )
+            continue
+        if row.tier != tier:
+            findings.append(
+                f"CHECK5: {item.nodeid} under tier {tier!r} cites {item.matrix_id} "
+                f"whose row tier is {row.tier!r}"
+            )
+
+    # CHECK2: lifecycle invariants (spec §7.2), live rows only.
+    for group in groups.values():
+        for row_id, row in group.rows.items():
+            if row.row_status != "live":
+                continue
+            for item in items_by_id.get(row_id, []):
+                reason = item.skip_reason or ""
+                if group.status == "pending":
+                    if not (
+                        reason.startswith("pending:") or reason.startswith("retired:")
+                    ):
+                        findings.append(
+                            f"CHECK2: {row_id} in pending group has non-pending skip "
+                            f"reason {item.skip_reason!r}"
+                        )
+                elif group.status in ("tdd", "done"):
+                    if reason.startswith("pending:"):
+                        findings.append(
+                            f"CHECK2: {row_id} in {group.status} group still has "
+                            f"lifecycle skip {item.skip_reason!r}"
+                        )
+
+    # CHECK3: experiment accounting (E1-E6). Drift-check runs unconditionally
+    # on whichever canonical IDs are present; "missing" only fires once at
+    # least two canonical IDs are present, so a synthetic test declaring a
+    # single unrelated experiment row (see
+    # test_check2_retired_and_requires_real_cli_skips_are_exempt) doesn't
+    # spuriously report the other five as missing.
+    present_experiments = [eid for eid in _EXPERIMENT_STATUS if eid in row_index]
+    for exp_id, expected_status in _EXPERIMENT_STATUS.items():
+        row = row_index.get(exp_id)
+        if row is None:
+            if len(present_experiments) >= 2:
+                findings.append(
+                    f"CHECK3: {exp_id} missing from TEST-MATRIX.md "
+                    f"(expected status {expected_status!r})"
+                )
+            continue
+        if row.row_status != expected_status:
+            findings.append(
+                f"CHECK3: {exp_id} status drifted (expected {expected_status!r}, "
+                f"got {row.row_status!r})"
+            )
+
+    return findings
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point: cross-check TEST-MATRIX.md against the collected stub tree."""
+    matrix_path = _CHECKER_ROOT / "docs" / "testing" / "TEST-MATRIX.md"
+    groups = parse_matrix(matrix_path.read_text())
+
+    try:
+        items = collect_items(_CHECKER_ROOT)
+    except CollectionError as exc:
+        print(exc)
+        return 1
+
+    relative_items = [
+        Item(
+            nodeid=item.nodeid,
+            path=str(Path(item.path).resolve().relative_to(_CHECKER_ROOT)),
+            matrix_id=item.matrix_id,
+            skip_reason=item.skip_reason,
+        )
+        for item in items
+    ]
+
+    findings = run_checks(groups, relative_items, TIER_DIRS)
+    for finding in findings:
+        print(finding)
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":
