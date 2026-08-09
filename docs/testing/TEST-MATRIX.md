@@ -22,7 +22,6 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -35,7 +34,6 @@ Varying axes: agent (claude/codex, must vary per §4); otherwise baseline pinned
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -48,7 +46,6 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -57,11 +54,10 @@ Status: pending
 
 Purpose: fork guards — branch/worktree/path collisions, mid-operation, not-a-repo, unborn HEAD (A2), unmerged index (A4), and race-loss classification (A1).
 
-Varying axes: topology (unborn(plain)/unborn(bare) for A2); otherwise baseline pinned.
+Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged fixture state for A4 (preflight refusal before materialize ever runs — exclusive to this group, never G-MAT); otherwise baseline pinned.
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -74,7 +70,6 @@ Varying axes: topology (the full set: plain@branch, plain@main, detached, linked
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -87,7 +82,6 @@ Varying axes: none of the shared four vary (pure unit-level logic, tier U); deta
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -100,7 +94,6 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -109,11 +102,10 @@ Status: pending
 
 Purpose: materialize — the staged→unstaged→untracked(+ignored) sequence, symlinks, exec-bit-only, binary, rename+edit, ITA (A3), nested untracked dirs, the empty-dir contract, and submodules-opaque.
 
-Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state inventory from §6.3 (staged, unstaged, untracked incl. nested dirs, ignored, symlink rel+abs, exec-bit-only, binary, rename+edit, ITA, markerless-unmerged, empty dirs, submodule); otherwise baseline pinned.
+Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state inventory from §6.3 (staged, unstaged, untracked incl. nested dirs, ignored, symlink rel+abs, exec-bit-only, binary, rename+edit, ITA, empty dirs, submodule); otherwise baseline pinned.
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -126,7 +118,6 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -139,7 +130,6 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -152,7 +142,6 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -165,7 +154,6 @@ Varying axes: none of the shared four vary (baseline pinned); CLI flag combinati
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -178,7 +166,6 @@ Varying axes: none of the shared four vary (baseline pinned).
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -191,7 +178,6 @@ Varying axes: agent (claude/codex, must vary per §4 — templates differ by age
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -204,7 +190,6 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -217,7 +202,6 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -230,7 +214,6 @@ Varying axes: agent (claude/codex, must vary per §4 — E1/E3 claude, E2 codex)
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
 
 ---
 
@@ -243,4 +226,3 @@ Varying axes: topology (builder-vs-spec verification spans the topology set); mo
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-|  |  |  |  |  |  |
