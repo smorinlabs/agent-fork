@@ -134,7 +134,7 @@ def test_non_c_locale_json_output_byte_identical(repo_scenario):
 @pytest.mark.matrix("T-OUT-11")
 @pytest.mark.skip(reason="pending: T-OUT-11")
 def test_json_success_object_carries_req17_minimum_fields(repo_scenario):
-    """T-OUT-11 — claim.
+    """T-OUT-11 — the -o json success object carries the REQ-17 minimum fields.
 
     Given:  a successful `fork -o json` invocation
     Expect: the success object carries the REQ-17 minimum fields — `agent`,
