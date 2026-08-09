@@ -10,7 +10,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · backend = git (jj reserved, no v1 values).
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
-- Total rows: 185 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 186 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 
 ---
 
@@ -253,6 +253,7 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-04 | different-name concurrent race — two forks of one repo under different names both succeed, both entries present, bounded wait observed (≤~5s) | baseline | F | live | REQ-41 (A13) |
 | T-REG-05 | timeout row — lock held past the bound → registry_busy, fork rolled back with the manual-recovery message | baseline | F | live | REQ-41 (A13) |
 | T-REG-06 | registry ownership check feeds cleanup — `cleanup` refuses a target it didn't create unless `--force` | baseline | F | live | REQ-31; D12 |
+| T-REG-07 | `list` renders registry entries (name, branch, worktree path, agent, worktree-still-exists) in creation-time order; `-o json` emits the stable schema | baseline | C | live | REQ-31; D10; REQ-17 |
 
 ---
 
