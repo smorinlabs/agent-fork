@@ -93,6 +93,7 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 | T-PRE-17 | resolved UUID without a flushed rollout refuses before mutation | agent=codex | U | live | REQ-46; D17 |
 | T-PRE-18 | app-server lookup follows pagination and only accepts an exact name | agent=codex | U | live | REQ-46; D17 |
 | T-PRE-19 | app-server notifications are tolerated and the subprocess is reaped | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-20 | an app-server notification flood is stopped by the pending-message bound | agent=codex | U | live | REQ-46; D17 |
 | T-PRE-06 | PRODUCT_GIT_MIN boundary — injected `git --version` just below 2.19.0 → the named check fails | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-07 | PRODUCT_GIT_MIN boundary — injected `git --version` at/above 2.19.0 → the named check passes | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-08 | A14 — below-2.19.0 `fork` refusal, exit 5, remedy names installed version/floor/upgrade path | baseline | F | live | REQ-19 (A14); PRODUCT-GIT-MIN-AUDIT |

@@ -218,6 +218,31 @@ def test_adapter_ignores_notifications_and_reaps(repo_scenario, tmp_path):
     assert list_named_threads(str(server), "hello", {}) == ()
 
 
+@pytest.mark.matrix("T-PRE-20")
+def test_adapter_bounds_notification_flood(repo_scenario, tmp_path, monkeypatch):
+    from agent_fork import codex_app_server
+    from agent_fork.errors import SessionResolutionUnavailableError
+
+    repo_scenario()
+    server = tmp_path / "codex"
+    server.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json,sys\n"
+        "for line in sys.stdin:\n"
+        " r=json.loads(line)\n"
+        " if 'id' not in r: continue\n"
+        " print(json.dumps({'method':'notice','params':{}}),flush=True)\n"
+        " result={} if r['id']==1 else {'data':[]}\n"
+        " print(json.dumps({'id':r['id'],'result':result}),flush=True)\n"
+    )
+    server.chmod(0o755)
+    monkeypatch.setattr(codex_app_server, "MAX_PENDING_MESSAGES", 1)
+    with pytest.raises(
+        SessionResolutionUnavailableError, match="pending-message limit"
+    ):
+        codex_app_server.list_named_threads(str(server), "hello", {})
+
+
 @pytest.mark.matrix("T-EMT-07")
 def test_resolved_name_emits_canonical_uuid(repo_scenario):
     from agent_fork.agents import AgentContext, build_launch_command

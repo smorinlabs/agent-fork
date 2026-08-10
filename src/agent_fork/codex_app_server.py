@@ -17,6 +17,7 @@ TIMEOUT = 5.0
 MAX_PAGES = 100
 MAX_RECORDS = 10_000
 MAX_STREAM_BYTES = 1_048_576
+MAX_PENDING_MESSAGES = 10_000
 PAGE_SIZE = 100
 
 
@@ -96,6 +97,10 @@ def list_named_threads(
                             ) from error
                         if isinstance(parsed, dict):
                             messages.append(parsed)
+                            if len(messages) > MAX_PENDING_MESSAGES:
+                                raise _failure(
+                                    "app-server exceeded its pending-message limit"
+                                )
             for index, message in enumerate(messages):
                 if message.get("id") == request_id:
                     return messages.pop(index)
