@@ -49,8 +49,8 @@ Phase C.5 — test architecture skeleton (gate: matrix + stub tree + checker gre
 
 Phase D — build (gate: everything green + reviews clean; every T preceded by its TS)
 - [x] Phase D fixture gate — G-FIX 24/24 green; sealed environment, topology worlds, manifest/index oracles, version canaries, PATH shim, pty/stall machinery, and hardened teardown reviewed
-- [ ] [P01-TS04] Config resolver tests: tri-state semantics + implication rule (REQ-13)
-- [ ] [P01-T08] Config resolver (port agent-deck Resolve() semantics verbatim)
+- [x] [P01-TS04] Config resolver tests: tri-state semantics + implication rule (REQ-13) — G-CFG 13/13 green
+- [x] [P01-T08] Config resolver — tri-state/A12 precedence, discovery boundaries, XDG env, and config set/validate implemented fresh from the locked behavior
 - [ ] [P01-TS05] Git detection matrix tests (RESEARCH §2.3 rows)
 - [ ] [P01-T09] Detection module
 - [ ] [P01-TS06] Guards + anchor + worktree-create tests (REQ-19, REQ-20)
