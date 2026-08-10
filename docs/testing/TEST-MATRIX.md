@@ -131,7 +131,7 @@ Varying axes: topology (the full set: plain@branch, plain@main, detached, linked
 ---
 
 ## G-NAM — Naming pipeline
-Status: pending
+Status: done
 
 Purpose: naming pipeline — sanitizer table, auto-name derivation including detached (A5), collision suffix vs explicit-name refusal, the 1000-cap, and name feed-through.
 

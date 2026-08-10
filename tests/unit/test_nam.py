@@ -7,7 +7,6 @@ import pytest
 
 
 @pytest.mark.matrix("T-NAM-01")
-@pytest.mark.skip(reason="pending: T-NAM-01")
 def test_sanitizer_rules_asserted_individually(repo_scenario):
     """T-NAM-01 — the sanitizer strips illegal chars, spaces, dashes, dots, and .lock.
 
@@ -17,11 +16,22 @@ def test_sanitizer_rules_asserted_individually(repo_scenario):
             each rule asserted individually
     Source: RESEARCH §2.4
     """
-    raise NotImplementedError
+    from agent_fork.naming import sanitize_name
+
+    cases = {
+        "Hello World": "hello-world",
+        "a..b": "ab",
+        "a~b^c:d?e*f[g\\h": "abcdefgh",
+        "a@{b": "ab",
+        "many---dashes": "many-dashes",
+        "...leading": "leading",
+        "topic.lock": "topic",
+    }
+    for raw, expected in cases.items():
+        assert sanitize_name(raw) == expected
 
 
 @pytest.mark.matrix("T-NAM-02")
-@pytest.mark.skip(reason="pending: T-NAM-02")
 def test_auto_name_derivation_bare_fork(repo_scenario):
     """T-NAM-02 — bare fork (no positional) derives <branch-slug>-<mmdd> at call time.
 
@@ -30,11 +40,21 @@ def test_auto_name_derivation_bare_fork(repo_scenario):
             run rebuilds a fresh world and reruns rather than reusing the stale date
     Source: D4; RESEARCH §2.4; spec §6.6
     """
-    raise NotImplementedError
+    from datetime import datetime
+
+    from agent_fork.naming import derive_auto_name
+
+    assert (
+        derive_auto_name("Feature/Auth", now=datetime(2026, 8, 10))
+        == "featureauth-0810"
+    )
+    assert (
+        derive_auto_name("Feature/Auth", now=datetime(2026, 8, 11))
+        == "featureauth-0811"
+    )
 
 
 @pytest.mark.matrix("T-NAM-03")
-@pytest.mark.skip(reason="pending: T-NAM-03")
 def test_a5_detached_head_auto_name(repo_scenario):
     """T-NAM-03 — A5 detached-HEAD auto-name derives detached-<short-sha>-<mmdd>.
 
@@ -43,11 +63,17 @@ def test_a5_detached_head_auto_name(repo_scenario):
             auto name
     Source: D4 (A5); spec §8 A5
     """
-    raise NotImplementedError
+    from datetime import datetime
+
+    from agent_fork.naming import derive_auto_name
+
+    assert (
+        derive_auto_name(None, detached_sha="abcdef123456", now=datetime(2026, 8, 10))
+        == "detached-abcdef1-0810"
+    )
 
 
 @pytest.mark.matrix("T-NAM-04")
-@pytest.mark.skip(reason="pending: T-NAM-04")
 def test_collision_suffix_escalates(repo_scenario):
     """T-NAM-04 — auto-name collision suffix escalates -2, -3, … until non-colliding.
 
@@ -55,11 +81,13 @@ def test_collision_suffix_escalates(repo_scenario):
     Expect: suffix escalates through -2, -3, … until a non-colliding name is found
     Source: D4; RESEARCH §2.4
     """
-    raise NotImplementedError
+    from agent_fork.naming import unique_auto_name
+
+    collisions = {"feature-0810", "feature-0810-2", "feature-0810-3"}
+    assert unique_auto_name("feature-0810", collisions.__contains__) == "feature-0810-4"
 
 
 @pytest.mark.matrix("T-NAM-05")
-@pytest.mark.skip(reason="pending: T-NAM-05")
 def test_explicit_colliding_name_refused_not_suffixed(repo_scenario):
     """T-NAM-05 — an explicit colliding name is refused, not auto-suffixed.
 
@@ -67,11 +95,18 @@ def test_explicit_colliding_name_refused_not_suffixed(repo_scenario):
     Expect: refusal; the name is passed through unmodified, no auto-suffix
     Source: D4; REQ-19
     """
-    raise NotImplementedError
+    from agent_fork.errors import ConflictError
+    from agent_fork.naming import resolve_name
+
+    with pytest.raises(ConflictError) as caught:
+        resolve_name(
+            "fix-auth", auto_base="unused", collides=lambda value: value == "fix-auth"
+        )
+    assert caught.value.code == "conflict_branch_exists"
+    assert "fix-auth" in str(caught.value)
 
 
 @pytest.mark.matrix("T-NAM-06")
-@pytest.mark.skip(reason="pending: T-NAM-06")
 def test_collision_suffix_search_hard_stops_at_1000(repo_scenario):
     """T-NAM-06 — the collision-suffix search hard-stops after 1000 attempts.
 
@@ -79,11 +114,22 @@ def test_collision_suffix_search_hard_stops_at_1000(repo_scenario):
     Expect: search hard-stops after 1000 attempts
     Source: D4; RESEARCH §2.4
     """
-    raise NotImplementedError
+    from agent_fork.errors import ConflictError
+    from agent_fork.naming import unique_auto_name
+
+    attempts = 0
+
+    def always_collides(_candidate):
+        nonlocal attempts
+        attempts += 1
+        return True
+
+    with pytest.raises(ConflictError):
+        unique_auto_name("busy", always_collides)
+    assert attempts == 1000
 
 
 @pytest.mark.matrix("T-NAM-07")
-@pytest.mark.skip(reason="pending: T-NAM-07")
 def test_derived_name_feeds_branch_worktree_and_display_name(repo_scenario):
     """T-NAM-07 — the derived name feeds the branch, worktree dir, and display name.
 
@@ -92,4 +138,10 @@ def test_derived_name_feeds_branch_worktree_and_display_name(repo_scenario):
             display name each carry the derived name, asserted individually
     Source: REQUIREMENTS §3.3; D6
     """
-    raise NotImplementedError
+    from agent_fork.naming import naming_plan
+
+    plan = naming_plan("fix-auth", branch_prefix="fork/")
+    assert plan.name == "fix-auth"
+    assert plan.branch == "fork/fix-auth"
+    assert plan.worktree_suffix == "fix-auth"
+    assert plan.display_name == "fix-auth"

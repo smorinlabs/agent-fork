@@ -15,3 +15,10 @@ class AgentDetectionError(AgentForkError):
 
     code = "agent_not_detected"
     exit_code = 3
+
+
+class ConflictError(AgentForkError):
+    """A branch, worktree, or other precondition collision."""
+
+    code = "conflict_branch_exists"
+    exit_code = 5
