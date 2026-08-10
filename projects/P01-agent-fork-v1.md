@@ -52,7 +52,7 @@ Phase D — build (gate: everything green + reviews clean; every T preceded by i
 - [x] [P01-TS04] Config resolver tests: tri-state semantics + implication rule (REQ-13) — G-CFG 13/13 green
 - [x] [P01-T08] Config resolver — tri-state/A12 precedence, discovery boundaries, XDG env, and config set/validate implemented fresh from the locked behavior
 - [ ] [P01-TS05] Git repository/topology detection matrix tests (RESEARCH §2.3 rows) — agent detection G-DET is complete; repository detection remains with anchor/topology work
-- [ ] [P01-T09] Detection module — agent/session detection complete (G-DET 5/5); Git repository detection remains
+- [x] [P01-T09] Detection module — agent/session detection plus PATH-resolved plain/linked/bare Git metadata and pre-mutation guard detection complete
 - [ ] [P01-TS06] Guards + anchor + worktree-create tests (REQ-19, REQ-20)
 - [ ] [P01-T10] Guards, parent-HEAD anchor, worktree create
 - [ ] [P01-TS07] Materialization fixture tests — §2.2 verbatim sequence; one case per RESEARCH §4 matrix row incl. symlink + exec-bit (REQ-21)

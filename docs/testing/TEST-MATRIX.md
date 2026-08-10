@@ -85,7 +85,7 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 ---
 
 ## G-GRD — Fork guards
-Status: pending
+Status: done
 
 Purpose: fork guards — branch/worktree/path collisions, mid-operation, not-a-repo, unborn HEAD (A2), unmerged index (A4), and race-loss classification (A1).
 

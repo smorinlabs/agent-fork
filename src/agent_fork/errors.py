@@ -22,3 +22,13 @@ class ConflictError(AgentForkError):
 
     code = "conflict_branch_exists"
     exit_code = 5
+
+
+class PreconditionError(AgentForkError):
+    """A stable-code refusal raised before an unsafe mutation."""
+
+    exit_code = 5
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
