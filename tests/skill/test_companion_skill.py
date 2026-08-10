@@ -67,6 +67,7 @@ def test_claude_invocation_passes_explicit_identity_and_json(tmp_path: Path) -> 
         "fork",
         "my-fork",
         "--with-ignored",
+        "--require-agent",
         "--agent",
         "claude",
         "--parent-session",
@@ -81,6 +82,7 @@ def test_codex_invocation_passes_explicit_identity_and_json(tmp_path: Path) -> N
     assert completed.returncode == 0
     assert argv == [
         "fork",
+        "--require-agent",
         "--agent",
         "codex",
         "--parent-session",
@@ -157,6 +159,7 @@ def test_destination_and_branch_options_pass_through_before_managed_identity(
         "Manual Worktree",
     ]
     assert argv[8:] == [
+        "--require-agent",
         "--agent",
         "codex",
         "--parent-session",
@@ -171,3 +174,10 @@ def test_new_passthrough_does_not_relax_managed_option_rejection(
     completed, argv = _run(tmp_path, "claude", "--worktree-name", "leaf", "--json")
     assert completed.returncode == 3
     assert argv == []
+
+
+def test_agent_mode_options_are_skill_managed(tmp_path: Path) -> None:
+    for option in ("--require-agent", "--no-agent"):
+        completed, argv = _run(tmp_path / option.removeprefix("--"), "claude", option)
+        assert completed.returncode == 3
+        assert argv == []

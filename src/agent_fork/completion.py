@@ -23,6 +23,8 @@ SHELLS = ("bash", "zsh", "fish")
 FORK_OPTIONS = (
     "--agent",
     "--parent-session",
+    "--require-agent",
+    "--no-agent",
     "--branch",
     "--worktree-dir",
     "--worktree-base-dir",

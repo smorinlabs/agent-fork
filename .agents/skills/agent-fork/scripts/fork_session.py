@@ -11,7 +11,15 @@ import sys
 from collections.abc import Mapping, Sequence
 
 INSTALL_HINT = "Install it with: uv tool install agent-fork"
-RESERVED_OPTIONS = ("--agent", "--parent-session", "--json", "--output", "-o")
+RESERVED_OPTIONS = (
+    "--agent",
+    "--parent-session",
+    "--require-agent",
+    "--no-agent",
+    "--json",
+    "--output",
+    "-o",
+)
 
 
 def detect_host(environment: Mapping[str, str]) -> tuple[str, str]:
@@ -85,6 +93,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         executable,
         "fork",
         *arguments,
+        "--require-agent",
         "--agent",
         agent,
         "--parent-session",

@@ -14,6 +14,7 @@ from agent_fork.models import ConfigValues, ResolvedConfig
 
 DEFAULT_BRANCH_PREFIX = "fork/"
 DEFAULT_WORKTREE_LOCATION = "sibling"
+DEFAULT_AGENT_MODE = "auto"
 CONFIG_RELATIVE_PATH = Path(".agent-fork/agent-fork_config.toml")
 XDG_RELATIVE_PATH = Path("agent-fork/agent-fork_config.toml")
 
@@ -22,6 +23,7 @@ _FORK_KEYS = {
     "with_ignored",
     "branch_prefix",
     "worktree_location",
+    "agent_mode",
     "verify",
     "copy",
 }
@@ -60,6 +62,7 @@ def resolve_config(
     ordered.append(
         ConfigValues(
             output=environment.get("AGENT_FORK_OUTPUT"),
+            agent_mode=environment.get("AGENT_FORK_AGENT_MODE"),
             config_path=(
                 Path(environment["AGENT_FORK_CONFIG"]).expanduser()
                 if environment.get("AGENT_FORK_CONFIG")
@@ -74,6 +77,7 @@ def resolve_config(
     branch_prefix = DEFAULT_BRANCH_PREFIX
     worktree_location = DEFAULT_WORKTREE_LOCATION
     worktree_location_explicit = False
+    agent_mode = DEFAULT_AGENT_MODE
     verify = True
     copy = False
     output = "table"
@@ -95,6 +99,8 @@ def resolve_config(
         if source.worktree_location is not None:
             worktree_location = source.worktree_location
             worktree_location_explicit = True
+        if source.agent_mode is not None:
+            agent_mode = source.agent_mode
         if source.verify is not None:
             verify = source.verify
         if source.copy is not None:
@@ -108,12 +114,16 @@ def resolve_config(
         if source.codex_extra_args is not None:
             codex_extra_args = source.codex_extra_args
 
+    if agent_mode not in {"auto", "strict", "git-only"}:
+        raise ConfigError("agent_mode must be auto, strict, or git-only")
+
     return ResolvedConfig(
         with_state=with_state,
         with_ignored=with_ignored,
         branch_prefix=branch_prefix,
         worktree_location=worktree_location,
         worktree_location_explicit=worktree_location_explicit,
+        agent_mode=agent_mode,
         verify=verify,
         copy=copy,
         output=output,
@@ -145,9 +155,17 @@ def load_config(path: Path) -> ConfigValues:
     for key in _BOOL_KEYS:
         if key in fork and not isinstance(fork[key], bool):
             raise ConfigError(f"invalid config {path}: fork.{key} must be boolean")
-    for key in {"branch_prefix", "worktree_location"}:
+    for key in {"branch_prefix", "worktree_location", "agent_mode"}:
         if key in fork and not isinstance(fork[key], str):
             raise ConfigError(f"invalid config {path}: fork.{key} must be a string")
+    if "agent_mode" in fork and fork["agent_mode"] not in {
+        "auto",
+        "strict",
+        "git-only",
+    }:
+        raise ConfigError(
+            f"invalid config {path}: fork.agent_mode must be auto, strict, or git-only"
+        )
     agents = document.get("agents", {})
     if not isinstance(agents, dict):
         raise ConfigError(f"invalid config {path}: [agents] must be a table")
@@ -251,6 +269,8 @@ def set_user_value(path: Path, key: str, value: str) -> None:
         lowered = value.lower()
         if lowered not in {"true", "false"}:
             raise ConfigError(f"{key} expects true or false")
+    if key == "agent_mode" and value not in {"auto", "strict", "git-only"}:
+        raise ConfigError("agent_mode expects auto, strict, or git-only")
     existing = load_config(path) if path.exists() else ConfigValues()
     values = {
         field: getattr(existing, field)

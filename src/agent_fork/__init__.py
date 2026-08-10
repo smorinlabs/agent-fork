@@ -1,4 +1,4 @@
-"""agent-fork: fork a running coding-agent session into a verified git worktree."""
+"""Create verified Git worktrees with optional coding-agent session integration."""
 
 from importlib.metadata import version
 

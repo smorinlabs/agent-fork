@@ -58,3 +58,59 @@ def test_explicit_flags_win_over_contradicting_env_signal(repo_scenario):
     )
     assert detected.agent == "claude"
     assert detected.parent_session_id == "explicit-claude"
+    without_env = detect_agent(
+        {}, explicit_agent="codex", explicit_parent_session="explicit-codex"
+    )
+    assert without_env.agent == "codex"
+    assert without_env.parent_session_id == "explicit-codex"
+
+
+@pytest.mark.matrix("T-DET-09")
+def test_auto_without_signals_selects_git_only(repo_scenario):
+    from agent_fork.agents import resolve_agent_mode
+
+    assert resolve_agent_mode("auto", {}) is None
+    assert (
+        resolve_agent_mode(
+            "git-only",
+            {
+                "CLAUDECODE": "1",
+                "CLAUDE_CODE_SESSION_ID": "claude",
+                "CODEX_THREAD_ID": "codex",
+            },
+        )
+        is None
+    )
+
+
+@pytest.mark.matrix("T-DET-10")
+def test_auto_with_one_signal_selects_agent(repo_scenario):
+    from agent_fork.agents import resolve_agent_mode
+
+    context = resolve_agent_mode(
+        "auto", {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "parent"}
+    )
+    assert context is not None and context.agent == "claude"
+
+
+@pytest.mark.matrix("T-DET-11")
+def test_strict_without_signals_refuses(repo_scenario):
+    from agent_fork.agents import resolve_agent_mode
+    from agent_fork.errors import AgentDetectionError
+
+    with pytest.raises(AgentDetectionError, match="no agent signal"):
+        resolve_agent_mode("strict", {})
+
+
+@pytest.mark.matrix("T-DET-12")
+def test_auto_with_dual_signals_refuses(repo_scenario):
+    from agent_fork.agents import resolve_agent_mode
+    from agent_fork.errors import AgentDetectionError
+
+    env = {
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude",
+        "CODEX_THREAD_ID": "codex",
+    }
+    with pytest.raises(AgentDetectionError, match="both Claude and Codex"):
+        resolve_agent_mode("auto", env)

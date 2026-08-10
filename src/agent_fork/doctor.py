@@ -49,7 +49,9 @@ def _version_check(
     )
 
 
-def run_doctor(cwd: Path, env: Mapping[str, str]) -> tuple[DoctorCheck, ...]:
+def run_doctor(
+    cwd: Path, env: Mapping[str, str], *, agent_mode: str | None = None
+) -> tuple[DoctorCheck, ...]:
     git = _version_check(
         "git PRODUCT_GIT_MIN",
         shutil.which("git", path=env.get("PATH")),
@@ -68,21 +70,50 @@ def run_doctor(cwd: Path, env: Mapping[str, str]) -> tuple[DoctorCheck, ...]:
         CODEX_ENV_MIN,
         env,
     )
-    signals = DoctorCheck(
-        "environment signals",
-        True,
-        "CLAUDECODE="
-        f"{env.get('CLAUDECODE', '<absent>')}, CLAUDE_CODE_SESSION_ID="
-        f"{'present' if env.get('CLAUDE_CODE_SESSION_ID') else 'absent'}, "
-        f"CODEX_THREAD_ID={'present' if env.get('CODEX_THREAD_ID') else 'absent'}",
-    )
     try:
         resolved = resolve_discovered_config(cwd, env)
+        selected_mode = agent_mode or resolved.agent_mode
         config = DoctorCheck(
             "config validity", True, f"valid ({resolved.config_path or 'defaults'})"
         )
     except ConfigError as error:
+        selected_mode = agent_mode or "auto"
         config = DoctorCheck("config validity", False, str(error))
+    claude_signal = env.get("CLAUDECODE") == "1" and bool(
+        env.get("CLAUDE_CODE_SESSION_ID")
+    )
+    codex_signal = bool(env.get("CODEX_THREAD_ID"))
+    ambiguous = claude_signal and codex_signal
+    missing_strict = selected_mode == "strict" and not (claude_signal or codex_signal)
+    signals_ok = selected_mode == "git-only" or not (ambiguous or missing_strict)
+    selected = (
+        "git-only"
+        if selected_mode == "git-only" or not (claude_signal or codex_signal)
+        else "ambiguous"
+        if ambiguous
+        else "claude"
+        if claude_signal
+        else "codex"
+    )
+    signals = DoctorCheck(
+        "environment signals",
+        signals_ok,
+        f"CLAUDECODE={env.get('CLAUDECODE', '<absent>')}, CLAUDE_CODE_SESSION_ID="
+        f"{'present' if env.get('CLAUDE_CODE_SESSION_ID') else 'absent'}, "
+        f"CODEX_THREAD_ID={'present' if env.get('CODEX_THREAD_ID') else 'absent'}, "
+        f"mode={selected_mode}, selected={selected}",
+    )
+
+    def optional(check: DoctorCheck) -> DoctorCheck:
+        return DoctorCheck(check.name, True, f"{check.detail} (optional)")
+
+    if selected_mode == "git-only" or not (claude_signal or codex_signal):
+        claude, codex = optional(claude), optional(codex)
+    elif not ambiguous:
+        if claude_signal:
+            codex = optional(codex)
+        else:
+            claude = optional(claude)
     state = Path(
         env.get(
             "XDG_STATE_HOME",

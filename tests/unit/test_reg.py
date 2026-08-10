@@ -23,6 +23,7 @@ def test_registry_write_populates_schema_fields(repo_scenario):
         "worktree": str(world.parent_path),
         "agent": "codex",
         "created_at": entry.created_at,
+        "mode": "agent",
     }
     parsed = datetime.fromisoformat(stored.created_at.replace("Z", "+00:00"))
     assert parsed.tzinfo == UTC
@@ -45,3 +46,32 @@ def test_list_output_ordered_by_creation_time_deterministically(repo_scenario):
     expected = ["a", "b", "z"]
     assert [item.name for item in read_registry(env=world.env)] == expected
     assert [item.name for item in read_registry(env=world.env)] == expected
+
+
+@pytest.mark.matrix("T-REG-08")
+def test_registry_mode_and_legacy_compatibility(repo_scenario):
+    import json
+
+    from agent_fork.models import RegistryEntry
+    from agent_fork.registry import read_registry, registry_path
+
+    world = repo_scenario()
+    path = registry_path(world.env)
+    path.parent.mkdir(parents=True)
+    legacy = RegistryEntry(
+        "old", "fork/old", str(world.parent_path), "claude", "2026-01-01T00:00:00Z"
+    ).to_dict()
+    legacy.pop("mode")
+    path.write_text(json.dumps({"version": 1, "forks": [legacy]}))
+    [stored] = read_registry(env=world.env)
+    assert stored.mode == "agent"
+    assert (
+        RegistryEntry.create(
+            name="plain",
+            branch="fork/plain",
+            worktree=world.parent_path,
+            agent=None,
+            mode="git-only",
+        ).to_dict()["mode"]
+        == "git-only"
+    )

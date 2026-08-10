@@ -9,7 +9,11 @@
 
 ## 1. Product scope
 
-One word inside a running coding-agent session forks the work: new branch + new worktree carrying the current file state, verified, and the **exact paste command** to continue in a forked session of the same agent in a new terminal. v1 agents: **Claude Code, Codex**. Isolation: **plain git worktree**. The tool cannot open terminals — the human pastes the final command (clipboard assist is the stretch).
+One word forks the work: a new branch + worktree carrying the current file state,
+verified, with adaptive integration when invoked inside a supported coding-agent
+session and a direct `cd` handoff in an ordinary terminal. v1 agents: **Claude
+Code, Codex**. Isolation: **plain git worktree**. The tool cannot open terminals
+— the human pastes the final command.
 
 Out of scope for v1: Docker/Flox isolation, Pi/OpenCode/Kilo (v2), Windows, jj backend, launching the forked session itself.
 
@@ -133,7 +137,7 @@ Port of RESEARCH §2 (agent-deck `forkWithStateWorktree` + `MaterializeWipFromPa
 
 ## 5. Per-agent launch commands (v1)
 
-- **REQ-26 Detection ladder** — Claude: `CLAUDECODE=1` ∧ `CLAUDE_CODE_SESSION_ID` (version from `AI_AGENT`). Codex: `CODEX_THREAD_ID` (≥0.95.0). **Amended 2026-08-08 (owner, test-architecture spec A7):** Pre-0.95.0 Codex fallback ladder removed: detection is `CODEX_THREAD_ID`-only; below-matrix versions refuse per D14/REQ-29. Ambiguity (both/none, no flags) → exit 3 with a clear message; skill always passes explicit flags anyway (REQ-02).
+- **REQ-26 Detection ladder** — Claude: `CLAUDECODE=1` ∧ `CLAUDE_CODE_SESSION_ID` (version from `AI_AGENT`). Codex: `CODEX_THREAD_ID` (≥0.95.0). **Amended 2026-08-08 (owner, test-architecture spec A7):** Pre-0.95.0 Codex fallback ladder removed: detection is `CODEX_THREAD_ID`-only; below-matrix versions refuse per D14/REQ-29. The strict detector refuses both/neither; D16/REQ-45 adds the outer adaptive selector that maps neither to Git-only in auto mode. The skill always passes explicit strict identity (REQ-02).
 - **REQ-27 Preflight (emit-for-human ⇒ check first, not emit-and-fail):** installed agent CLI present + version ≥ matrix (Claude: pinned-ID fork ≥2.0.73, warn <~2.1.1xx re #48835; Codex: fork ≥0.81.0, env ≥0.95.0) · Codex: parent rollout file flushed on disk (glob `sessions/*/*/*/rollout-*-<id>.jsonl`) before emitting (#756 lesson).
 - **REQ-28 Templates** (single-line, fully shell-quoted — uniformly, unlike agent-deck's two unquoted warts):
   - Claude: `cd '<worktree>' && claude --session-id '<pre-generated-uuid>' --resume '<parent-id>' --fork-session -n '<derived-name>'` (E1/E3 verified: pinned UUID, name, full context, and parent preservation all compose).
@@ -169,6 +173,7 @@ Port of RESEARCH §2 (agent-deck `forkWithStateWorktree` + `MaterializeWipFromPa
 - **REQ-42** Every emitted shell command is quoted defensively (shlex.quote equivalents) — REQ-28 note.
 - **REQ-43** Testability: **Amended 2026-08-08 (owner, test-architecture spec A10):** the CLI resolves `git` via PATH at each invocation — never a cached absolute path (canaried in the test suite).
 - **REQ-44** Partial worktree destination overrides (D15): derive the normal D5 path, then replace its parent with `--worktree-base-dir` and/or its leaf with `--worktree-name`. The partial flags compose; `--worktree-dir` is parser-incompatible with either. A relative base resolves from invocation cwd and must exist as a directory. A leaf is preserved exactly but must be one non-empty component (not `.`, `..`, absolute, slash/backslash/NUL-containing, or whitespace-only). Resolve the base once and do not follow an existing leaf symlink. Explicit resource collisions refuse without suffixing; auto-suffixing proceeds only when the next candidate changes each colliding resource. Existing invocations, exact-path behavior, configuration, registry, and JSON schemas remain compatible.
+- **REQ-45** Adaptive agent integration (D16): `[fork] agent_mode` is `auto` (default), `strict`, or `git-only`, with `AGENT_FORK_AGENT_MODE` and CLI precedence. `--require-agent` selects strict and `--no-agent` selects Git-only. A complete explicit agent/session pair works without environment signals and implies strict intent. Auto chooses Git-only only when neither signal exists; one signal chooses that agent; dual signals refuse. A detected agent that fails preflight never silently degrades. Git-only retains the complete Git/state/verify/include/hook/registry/rollback pipeline and emits `cd <worktree>`. Success JSON adds top-level `mode`; Git-only omits nullable agent/session identity and registry records `mode` with nullable `agent` while legacy records default to agent mode. Doctor makes unused agent CLIs informational in auto Git-only and explicit Git-only modes.
 
 ---
 
@@ -199,5 +204,6 @@ Full record with rationale, notes, and agent-deck reconciliation: **`DESIGN-DECI
 | D13 | Verb stays `cleanup` (waiver confirmed) |
 | D14 | ⚠ Preflight failure → refuse with diagnosis; handoff ladder deferred to v1.1+ (REQ-29) |
 | D15 | Independent worktree base/leaf overrides; exact destination remains exclusive (REQ-44) |
+| D16 | Adaptive agent integration with `auto`, `strict`, and `git-only` (REQ-45) |
 
 Queued for the implementation session: PROJECTS.md project creation (house process), git init + worktree discipline for this repo, live experiments E1–E3 (E4 retired per spec A8), conformance fixture scaffold (R9.14).

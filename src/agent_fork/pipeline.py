@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -34,7 +35,7 @@ class ForkRequest:
     destination: Path
     name: str
     branch: str
-    agent: AgentContext
+    agent: AgentContext | None
     with_state: bool = True
     with_ignored: bool = False
     verify: bool = True
@@ -64,11 +65,15 @@ def _git_version(env: Mapping[str, str]) -> str:
 
 def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
     """Execute the locked preflight-through-registry fork sequence."""
-    agent_check = preflight_agent(
-        request.agent,
-        env,
-        executable=request.agent_executable,
-        version_output=request.agent_version_output,
+    agent_check = (
+        preflight_agent(
+            request.agent,
+            env,
+            executable=request.agent_executable,
+            version_output=request.agent_version_output,
+        )
+        if request.agent is not None
+        else None
     )
     notices = list(
         preflight_git(
@@ -77,7 +82,8 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             verify=request.verify,
         )
     )
-    notices.extend(agent_check.notices)
+    if agent_check is not None:
+        notices.extend(agent_check.notices)
     validate_fork_guards(request.parent, request.branch, request.destination, env=env)
     parent_status = run_git(
         request.parent, ["status", "--porcelain=v1", "-z"], env=env
@@ -112,18 +118,23 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                 name=request.name,
                 branch=request.branch,
                 worktree=creation.path,
-                agent=request.agent.agent,
+                agent=request.agent.agent if request.agent is not None else None,
+                mode="agent" if request.agent is not None else "git-only",
             ),
             env=env,
         )
         return included.copied, hook_notices
 
     included, _ = run_with_rollback(creation, finish, env=env)
-    launch = build_launch_command(
-        request.agent,
-        worktree=creation.path,
-        name=request.name,
-        extra_args=request.extra_args,
-        child_session_id=request.child_session_id,
+    launch = (
+        build_launch_command(
+            request.agent,
+            worktree=creation.path,
+            name=request.name,
+            extra_args=request.extra_args,
+            child_session_id=request.child_session_id,
+        )
+        if request.agent is not None
+        else LaunchCommand(f"cd {shlex.quote(str(creation.path))}", None, ())
     )
     return ForkResult(creation, launch, tuple(notices), request.verify, included)

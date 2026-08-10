@@ -23,6 +23,7 @@
 | D7 | Config surface | **Trimmed schema** (see final schema below) | ★ `ch-12-a` |
 | D11 | Extra-args passthrough | **Ships in v1**: `[agents.<name>] extra_args` | ⚠ `ch-13-b` |
 | D15 | Partial worktree destination overrides | **Independent base and leaf flags; exact path remains exclusive** | ★ owner-approved 2026-08-10 |
+| D16 | Agent integration mode | **Adaptive `auto`; explicit `strict` and `git-only` controls** | ★ owner-approved 2026-08-10 |
 
 ## Decisions in detail
 
@@ -42,7 +43,7 @@ Default: sibling `<repo>-<branch-slug>`; when the parent is itself a linked work
 One identity across branch, worktree, and session. Claude: `-n '<fork-name>'` in the emitted command. Codex: names are a resume-time concept; the identity lives in the branch/worktree, and emitted output may note how to name the session. No `session_name_template` config key exists.
 
 ### D14 — v1 refuses when native fork is impossible (`ch-06-b` ⚠ went against)
-When preflight fails (agent CLI below the version matrix, Codex rollout not flushed, unknown/undetectable agent), v1 **refuses with a diagnosis**: what was detected, which requirement failed, the minimum version or missing artifact, and a pointer to `agent-fork doctor`. No handoff-file rung, no session-file copying. The worktree is **not** created on a preflight refusal (fail before mutation). *Consequence:* the fresh-session + `HANDOFF.md` degradation ladder moves to the v1.1+ roadmap; RESEARCH Q5 stays deferred until then. *Rationale (owner):* keep v1 honest and small — a fork that silently loses conversation context is a different product promise.
+When managed-agent preflight fails (agent CLI below the version matrix, Codex rollout not flushed, or a strict agent is undetectable), v1 **refuses with a diagnosis**: what was detected, which requirement failed, the minimum version or missing artifact, and a pointer to `agent-fork doctor`. No handoff-file rung, no session-file copying. The worktree is **not** created on a preflight refusal (fail before mutation). D16's intentional Git-only mode is not a fallback rung. *Consequence:* the fresh-session + `HANDOFF.md` degradation ladder moves to the v1.1+ roadmap; RESEARCH Q5 stays deferred until then. *Rationale (owner):* keep v1 honest and small — a fork that silently loses conversation context is a different product promise.
 
 ### D8 — Verification on by default (`ch-07-a` ★)
 The REQUIREMENTS §4 ladder runs after every fork; `--no-verify` skips. Failure ⇒ rollback + exit 1. This is agent-fork's deliberate improvement over agent-deck's runtime-unverified pipeline.
@@ -70,6 +71,7 @@ branch_prefix     = "fork/"
 worktree_location = "sibling"   # sibling | central | subdirectory | <path template>
 verify            = true
 copy              = false
+agent_mode         = "auto"      # auto | strict | git-only
 
 [agents.claude]
 extra_args = []                 # e.g. ["--model", "opus"] — appended to the emitted command
@@ -84,6 +86,18 @@ Dropped from agent-deck's `[fork]`: `docker`, the `worktree` toggle, `inherit_fr
 
 ### D15 — Independent worktree base and leaf overrides (owner-approved 2026-08-10)
 `--worktree-base-dir DIR` replaces only the parent of the D5-derived destination; `--worktree-name NAME` replaces only its final component, and the two compose. `--worktree-dir PATH` retains its exact-path behavior and cannot be combined with either partial override. Relative bases resolve from invocation cwd and must already be directories. Explicit leaves are preserved byte-for-byte but must be one non-empty, non-traversing path component. The base is resolved once while the leaf is joined lexically so an existing leaf symlink remains visible to collision guards. Explicit resource collisions refuse; automatic suffixing continues only when the next automatic name changes every colliding resource. No config or output schema is added.
+
+### D16 — Adaptive agent integration (owner-approved 2026-08-10)
+
+The default `agent_mode = "auto"` selects a managed agent fork when exactly one
+Claude or Codex session signal is present and otherwise creates a verified
+Git-only branch/worktree. `--require-agent` selects `strict`; `--no-agent`
+selects `git-only`. Explicit `--agent`/`--parent-session` inputs imply strict
+intent, and a complete explicit pair works without ambient session variables.
+Dual ambient signals remain ambiguous in auto/strict mode; explicit Git-only
+mode ignores them. Once auto detects an agent, agent preflight failure refuses
+without silently degrading. Git-only retains state carry, verification,
+includes, hooks, registry, and rollback and emits `cd <worktree>`.
 
 ## Resulting v1 surface (consolidated)
 

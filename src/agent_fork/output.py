@@ -20,8 +20,9 @@ def json_line(value: object) -> str:
 
 @dataclass(frozen=True)
 class ForkOutput:
-    agent: str
-    parent_session_id: str
+    agent: str | None
+    parent_session_id: str | None
+    mode: str
     name: str
     branch: str
     worktree: Path
@@ -34,8 +35,7 @@ class ForkOutput:
 
     def document(self) -> dict[str, object]:
         result: dict[str, object] = {
-            "agent": self.agent,
-            "parent_session_id": self.parent_session_id,
+            "mode": self.mode,
             "fork": {
                 "name": self.name,
                 "branch": self.branch,
@@ -50,6 +50,9 @@ class ForkOutput:
             "command": self.command,
             "notices": list(self.notices),
         }
+        if self.agent is not None:
+            result["agent"] = self.agent
+            result["parent_session_id"] = self.parent_session_id
         if self.agent == "codex":
             result["cwd_prompt_expected"] = False
         return result
@@ -62,6 +65,8 @@ class ForkOutput:
             f"branch: {self.branch}",
             f"worktree: {self.worktree}",
         ]
+        if self.mode == "git-only":
+            lines.insert(0, "mode: git-only")
         if self.notices:
             lines.append("notices: " + "; ".join(self.notices))
         lines.extend(("", self.command))

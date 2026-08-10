@@ -223,7 +223,7 @@ def test_help_documents_commands_options_and_exit_codes(repo_scenario):
     top = run_cli(["--help"], world.env, world.parent_path)
     assert top.returncode == 0 and top.stderr == b""
     for text in (
-        b"Fork the active coding-agent session",
+        b"adaptive coding-agent session integration",
         b"fork",
         b"Create a verified branch and worktree",
         b"cleanup",
@@ -470,3 +470,60 @@ def test_agent_metavar_does_not_change_unknown_agent_exit(repo_scenario):
     )
     assert completed.returncode == 3
     assert b"agent_not_detected" in completed.stderr
+
+
+@pytest.mark.matrix("T-CLI-21")
+def test_agent_mode_flags_are_mutually_exclusive(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    completed = run_cli(
+        ["fork", "x", "--require-agent", "--no-agent"],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 2
+
+
+@pytest.mark.matrix("T-CLI-22")
+def test_no_agent_conflicts_with_explicit_identity(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    completed = run_cli(
+        ["fork", "x", "--no-agent", "--agent", "codex", "--parent-session", "id"],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 2
+    assert b"--no-agent cannot be combined" in completed.stderr
+
+
+@pytest.mark.matrix("T-CLI-23")
+def test_default_auto_forks_git_only_without_session(repo_scenario):
+    import json
+
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    env = {
+        key: value
+        for key, value in world.env.items()
+        if key not in {"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"}
+    }
+    completed = run_cli(
+        ["fork", "terminal", "--no-with-state", "--json"],
+        env,
+        world.parent_path,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+    document = json.loads(completed.stdout)
+    assert document["mode"] == "git-only"
+    assert document["command"].startswith("cd ")
+    assert Path(document["fork"]["worktree"]).is_dir()
+    doctor_env = _doctor_env(world, agents=False)
+    for key in ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"):
+        doctor_env.pop(key, None)
+    doctor = run_cli(["doctor"], doctor_env, world.parent_path)
+    assert doctor.returncode == 0
+    assert b"selected=git-only" in doctor.stdout
