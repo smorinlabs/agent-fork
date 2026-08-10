@@ -103,7 +103,7 @@ cross-validation tests may increase the total.
 | Task 2 — A9 Git floor | complete | audit selects 2.19.0; four rows changed blocked → live; matrix green | `02d4c6f` | owner approved deferring T-PRE-06..09 red-green to full G-PRE Task 15 |
 | D2 — G-FIX | complete | all 24 rows green; 59 passed, 158 skipped overall; matrix, strict collection, lint, types, and oracle review green | Phase D branch | fixed absolute-path floor false-green and unmerged-stage index collapse during review |
 | D3 — mutation core | complete | foundations, G-GRD 14/14, G-ANC 8/8, G-MAT 20/20, G-VER 11/11, and G-RBK 6/6 green; 150 passed, 67 skipped overall | Phase D branch | exact state, verification, producer failure, rollback, and real SIGINT/SIGTERM stall paths proven across supported topologies |
-| D4 — integration | in progress | G-REG 7/7, G-PRE 10/10, G-EMT 6/6, and G-INC 5/5 green; real E1–E3 rerun passes; 178 passed, 39 skipped overall | Phase D branch | normative fork pipeline, registry, preflight, templates, includes, and non-fatal hooks green against synthetic and real CLIs |
+| D4 — integration | in progress | G-REG 7/7, G-PRE 10/10, G-EMT 6/6, G-INC 5/5, and G-CLN 15/15 green; real E1–E3 rerun passes; 193 passed, 24 skipped overall | Phase D branch | normative fork/cleanup lifecycle, registry ownership, guards, consent, session preservation, templates, includes, and hooks green |
 | D5 — conformance | pending | — | — | — |
 | D6 — final Phase D gate | pending | — | final Phase D PR | owner review required |
 

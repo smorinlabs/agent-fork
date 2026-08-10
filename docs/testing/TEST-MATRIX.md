@@ -261,7 +261,7 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 ---
 
 ## G-CLN — Cleanup
-Status: pending
+Status: done
 
 Purpose: cleanup — targets, guards, `--force`/`--yes`/`--no-input` semantics, the consent prompt (pty), and never-delete-session-files.
 

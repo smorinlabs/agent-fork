@@ -31,6 +31,13 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command")
     listing = commands.add_parser("list")
     listing.add_argument("-o", "--output", choices=("text", "json"), default="text")
+    cleanup = commands.add_parser("cleanup")
+    cleanup.add_argument("target")
+    cleanup.add_argument("--force", action="store_true")
+    cleanup.add_argument("--keep-branch", action="store_true")
+    cleanup.add_argument("--yes", action="store_true")
+    cleanup.add_argument("--no-input", action="store_true")
+    cleanup.add_argument("--dry-run", action="store_true")
     config = commands.add_parser("config")
     actions = config.add_subparsers(dest="config_action", required=True)
     setter = actions.add_parser("set")
@@ -46,6 +53,41 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     environment = dict(os.environ)
     try:
+        if args.command == "cleanup":
+            from agent_fork.cleanup import cleanup, resolve_cleanup_target
+
+            plan = resolve_cleanup_target(
+                args.target, cwd=Path.cwd(), env=environment, force=args.force
+            )
+            if not args.dry_run and not args.yes:
+                if args.no_input:
+                    print(
+                        "cleanup requires --yes when --no-input is set", file=sys.stderr
+                    )
+                    return 2
+                print(
+                    f"Remove {plan.render(keep_branch=args.keep_branch)}? [y/N] ",
+                    end="",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                answer = sys.stdin.readline().strip().lower()
+                if answer not in {"y", "yes"}:
+                    print("cleanup cancelled", file=sys.stderr)
+                    return 2
+            result = cleanup(
+                plan,
+                cwd=Path.cwd(),
+                env=environment,
+                force=args.force,
+                keep_branch=args.keep_branch,
+                dry_run=args.dry_run,
+            )
+            prefix = "would " if args.dry_run else ""
+            print(prefix + plan.render(keep_branch=args.keep_branch))
+            for notice in result.notices:
+                print(notice)
+            return 0
         if args.command == "list":
             from agent_fork.registry import read_registry
 
@@ -90,6 +132,11 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as error:
         print(error, file=sys.stderr)
         return 2
+    except Exception as error:
+        from agent_fork.errors import AgentForkError
+
+        print(error, file=sys.stderr)
+        return error.exit_code if isinstance(error, AgentForkError) else 1
     _parser().print_help()
     return 0
 
