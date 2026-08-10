@@ -4,7 +4,7 @@
 - **Trunk:** [PROJECTS.md](../PROJECTS.md)
 - **Spec:** [REQUIREMENTS.md](../REQUIREMENTS.md) — REQ-01..42, pinned to CLI Design Standard v1.4.14
 - **Design:** [DESIGN-DECISIONS.md](../DESIGN-DECISIONS.md) — D1–D14 locked 2026-07-21
-- **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — Phase C gate deliverable, awaiting owner approval
+- **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — owner-approved 2026-08-10
 - **Tracking:** [CONFORMANCE.md](../CONFORMANCE.md) — applicability map + waivers
 - **Prior art:** [RESEARCH.md](../RESEARCH.md) — agent-deck port source map; [recipes leaf](../research/reference/agent-session-fork-cli-recipes-2026-07-21.md)
 
@@ -39,7 +39,7 @@ Phase B — live experiments (gate: EXPERIMENTS.md + updated launch templates)
 - [x] [P01-T06] Record EXPERIMENTS.md; update REQ-28 / RESEARCH §7 / recipes leaf with findings
 
 Phase C — implementation plan (gate: plan review)
-- [ ] [P01-T07] Task breakdown via superpowers:writing-plans, dependency-ordered, each task naming its failing-test-first
+- [x] [P01-T07] Task breakdown via superpowers:writing-plans, dependency-ordered, each task naming its failing-test-first — owner-approved 2026-08-10; landed in PR #6
 
 Phase C.5 — test architecture skeleton (gate: matrix + stub tree + checker green)
 - [x] [P01-TS16] Test architecture spec + matrix authored (docs/testing/TEST-MATRIX.md, 190 rows, 18 groups) — spec docs/superpowers/specs/2026-08-08-test-architecture-design.md
@@ -69,7 +69,7 @@ Phase D — build (gate: everything green + reviews clean; every T preceded by i
 - [ ] [P01-TS13] Machine output + error catalog tests (REQ-16, REQ-17, R7.8/R7.12)
 - [ ] [P01-T17] Output layer (`-o json`, stream separation, error objects)
 - [ ] [P01-TS14] Conformance fixtures in CI (R9.14: help shape, streams, exit codes, `--json`, bare/unknown invocation)
-- [ ] [P01-T18] GitHub Actions CI green from the start — check-matrix + strict-collection CI job moves to implementation start (spec §7.6); T18 keeps the full R9.14 conformance job
+- [ ] [P01-T18] GitHub Actions CI green from the start — implementation-start matrix + strict-collection job landed in Phase D Task 1; T18 remains reserved for the full R9.14 conformance job
 
 Phase E — ship v0.1.0 (gate: released + installable)
 - [ ] [P01-T19] cli-standards audit vs built binary; fix/waive; CONFORMANCE.md audit row

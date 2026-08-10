@@ -1,7 +1,7 @@
 # agent-fork v1 — Phase D implementation plan
 
 **Date:** 2026-08-10  
-**Status:** Phase C gate deliverable — awaiting owner approval  
+**Status:** Owner-approved 2026-08-10 — Phase D execution contract
 **Scope:** Phase D only; stop before Phase E and Phase F  
 **Goal contract:** `docs/goals/agent-fork-v1-implementation.md`
 
