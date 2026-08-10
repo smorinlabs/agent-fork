@@ -356,6 +356,11 @@ def run_checks(
                             f"CHECK2: {row_id} in {group.status} group still has "
                             f"lifecycle skip {item.skip_reason!r}"
                         )
+                    elif reason and not reason.startswith("requires_real_cli:"):
+                        findings.append(
+                            f"CHECK2: {row_id} in {group.status} group has skip "
+                            f"reason {item.skip_reason!r}, which is not exempt"
+                        )
 
     # CHECK3: experiment accounting (E1-E6). Drift-check runs unconditionally
     # on whichever canonical IDs are present. "Missing" fires at 0 canonical

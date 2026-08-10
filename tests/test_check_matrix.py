@@ -206,6 +206,27 @@ def test_check2_retired_and_requires_real_cli_skips_are_exempt():
     assert run_checks(groups, items, TIER_DIRS, enforce_experiments=False) == []
 
 
+def test_check2_tdd_rejects_non_whitelisted_skip_reason():
+    groups = _group("G-EXP", "tdd", [_row("T-EXP-01", tier="R")])
+    items = _item(
+        "T-EXP-01",
+        path="tests/live/test_exp.py",
+        skip="temporary convenience skip",
+    )
+    findings = run_checks(groups, items, TIER_DIRS, enforce_experiments=False)
+    assert any("CHECK2" in finding and "not exempt" in finding for finding in findings)
+
+
+def test_check2_tdd_allows_requires_real_cli_skip_reason():
+    groups = _group("G-EXP", "tdd", [_row("T-EXP-01", tier="R")])
+    items = _item(
+        "T-EXP-01",
+        path="tests/live/test_exp.py",
+        skip="requires_real_cli: claude executable not found",
+    )
+    assert run_checks(groups, items, TIER_DIRS, enforce_experiments=False) == []
+
+
 def test_check1_item_citing_unknown_id_fails():
     groups = _group("G-CFG", "pending", [_row("T-CFG-01")])
     items = _item("T-CFG-01") + [

@@ -313,8 +313,8 @@ Varying axes: agent (claude/codex, must vary per §4 — templates differ by age
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
-| T-EMT-01 | Claude fixed prefix byte-exact — `cd '<worktree>' && claude --session-id "<uuid>" --resume <parent-id> --fork-session` (the `-n '<name>'` cell is pending-E1) | agent=claude | U | live | REQ-28; DESIGN-DECISIONS |
-| T-EMT-02 | Codex fixed prefix byte-exact — `cd '<worktree>' && codex fork <parent-thread-id>` (the `-C`/cwd-prompt cells are pending-E2) | agent=codex | U | live | REQ-28; DESIGN-DECISIONS |
+| T-EMT-01 | Claude template byte-exact — `cd '<worktree>' && claude --session-id '<uuid>' --resume '<parent-id>' --fork-session -n '<name>'` (E1 verified) | agent=claude | U | live | REQ-28; EXPERIMENTS E1 |
+| T-EMT-02 | Codex template byte-exact — `codex fork '<parent-thread-id>' -C '<worktree>'` (E2 verified; suppresses cwd prompt) | agent=codex | U | live | REQ-28; EXPERIMENTS E2 |
 | T-EMT-03 | uniform quoting — a worktree path containing a space, a single quote, `$`, and `;` is each individually verified quoted safely | baseline | U | live | REQ-42; RESEARCH §3.1 |
 | T-EMT-04 | `extra_args` — an element containing a space, a quote, `$`, and `;` is each individually shell-quoted at emission | baseline | U | live | REQ-13 D11; DESIGN-DECISIONS D11 |
 | T-EMT-05 | `extra_args` values are visible in `--dry-run` output | agent=claude | U | live | REQ-13 D11; REQ-18 |
@@ -334,7 +334,7 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-01 | stdout carries only the requested result; all progress/diagnostics/prompts go to stderr | baseline | C | live | REQ-16 |
 | T-OUT-02 | human-format output ends with the paste command as the final stdout block | baseline | C | live | REQ-16 |
 | T-OUT-03 | TTY does not change the output format (pty row) | baseline | C | live | REQ-16; spec §6.6 |
-| T-OUT-04 | `-o json` includes the `cwd_prompt_expected` field for Codex | agent=codex | C | live | REQ-17; RESEARCH §5.1 Q4 |
+| T-OUT-04 | `-o json` includes `cwd_prompt_expected: false` for Codex because the E2-locked `-C` template suppresses the prompt | agent=codex | C | live | REQ-17; EXPERIMENTS E2 |
 | T-OUT-05 | `-o json` omits the `cwd_prompt_expected` field for Claude | agent=claude | C | live | REQ-17; RESEARCH §5.1 Q4 |
 | T-OUT-06 | error object shape on stderr — single `{"error":{"code","message"}}` under any machine format | baseline | C | live | REQ-17 |
 | T-OUT-07 | every stable error code (`conflict_branch_exists`, `parent_mid_operation`, `session_not_found`, `verify_failed`, `repo_no_commits`, `unmerged_index`, `registry_busy`) round-trips correctly in the `-o json` error object — asserted individually | baseline | C | live | REQ-17 |
@@ -370,7 +370,7 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 ---
 
 ## G-EXP — Live experiments
-Status: pending
+Status: done
 
 Purpose: live experiments — E1 (Claude flag combo), E2 (Codex cross-cwd + `-C`), E3 (Claude E2E); E4 retired (A8).
 

@@ -1,56 +1,273 @@
-"""G-EXP — Live experiments (tier R; E1-E3 additionally require a real agent CLI).
+"""G-EXP — Phase B experiments against the real Claude and Codex CLIs."""
 
-E5 (n/a, absorbed into G-MAT/G-VER core TDD) and E6 (tombstone, pre-0.95 Codex
-fallback disambiguation) get no stub.
+from __future__ import annotations
 
-Matrix: docs/testing/TEST-MATRIX.md §G-EXP.
-"""
+import fcntl
+import hashlib
+import json
+import os
+import re
+import select
+import shutil
+import struct
+import subprocess
+import termios
+import time
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
+
+CLAUDE = shutil.which("claude")
+CODEX = shutil.which("codex")
+ANSI = re.compile(rb"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+
+
+def _run(
+    args: list[str], cwd: Path, *, stdout: Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    if stdout is None:
+        return subprocess.run(
+            args,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=True,
+        )
+    with stdout.open("w") as target:
+        return subprocess.run(
+            args,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=target,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=180,
+            check=True,
+        )
+
+
+def _git_repo(root: Path) -> tuple[Path, Path]:
+    repo = root / "repo"
+    child = root / "child-worktree"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "exp@example.invalid"], cwd=repo, check=True
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Agent Fork Experiment"], cwd=repo, check=True
+    )
+    (repo / "seed.txt").write_text("seed\n")
+    subprocess.run(["git", "add", "seed.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "seed"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "-qb", "exp-child", str(child)], cwd=repo, check=True
+    )
+    return repo, child
+
+
+def _claude_transcript(cwd: Path, session_id: str) -> Path:
+    encoded = re.sub(r"[^a-zA-Z0-9]", "-", str(cwd))
+    config_dir = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
+    return config_dir / "projects" / encoded / f"{session_id}.jsonl"
+
+
+@dataclass(frozen=True)
+class ClaudeForkResult:
+    parent_id: str
+    child_id: str
+    token: str
+    name: str
+    child: Path
+    parent_hash_before: str
+    parent_hash_after: str
+    child_output: dict[str, object]
+    child_transcript: str
+
+
+@pytest.fixture(scope="module")
+def claude_fork(tmp_path_factory: pytest.TempPathFactory) -> ClaudeForkResult:
+    if CLAUDE is None:
+        pytest.skip("requires_real_cli: claude executable not found")
+    root = tmp_path_factory.mktemp("claude-fork")
+    repo, child = _git_repo(root)
+    parent_id, child_id = str(uuid.uuid4()), str(uuid.uuid4())
+    token = f"AFORK-{uuid.uuid4()}"
+    name = f"agent-fork-e1-{uuid.uuid4().hex[:8]}"
+    parent_prompt = (
+        f"Remember this exact token for a later fork: {token}. Reply only PARENT_READY."
+    )
+    parent_out, child_out = root / "parent.json", root / "child.json"
+    _run(
+        [
+            CLAUDE,
+            "--session-id",
+            parent_id,
+            "-p",
+            parent_prompt,
+            "--output-format",
+            "json",
+            "--max-turns",
+            "1",
+        ],
+        repo,
+        stdout=parent_out,
+    )
+    parent_transcript = _claude_transcript(repo, parent_id)
+    before = hashlib.sha256(parent_transcript.read_bytes()).hexdigest()
+    _run(
+        [
+            CLAUDE,
+            "--session-id",
+            child_id,
+            "--resume",
+            parent_id,
+            "--fork-session",
+            "-n",
+            name,
+            "-p",
+            "Reply only with the exact token I asked you to remember earlier.",
+            "--output-format",
+            "json",
+            "--max-turns",
+            "1",
+        ],
+        child,
+        stdout=child_out,
+    )
+    return ClaudeForkResult(
+        parent_id=parent_id,
+        child_id=child_id,
+        token=token,
+        name=name,
+        child=child,
+        parent_hash_before=before,
+        parent_hash_after=hashlib.sha256(parent_transcript.read_bytes()).hexdigest(),
+        child_output=json.loads(child_out.read_text()),
+        child_transcript=_claude_transcript(child, child_id).read_text(),
+    )
+
+
+def _pty_capture(args: list[str], cwd: Path, *, settle: float = 5.0) -> str:
+    master, slave = os.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 100, 0, 0))
+    env = os.environ.copy()
+    env["TERM"] = "xterm-256color"
+    process = subprocess.Popen(
+        args,
+        cwd=cwd,
+        env=env,
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        start_new_session=True,
+    )
+    os.close(slave)
+    output = bytearray()
+    deadline = time.monotonic() + settle
+    sent_enter = False
+    try:
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([master], [], [], 0.2)
+            if ready:
+                try:
+                    output.extend(os.read(master, 65536))
+                except OSError:
+                    break
+            plain = ANSI.sub(b"", output)
+            if (
+                b"Do" in plain
+                and b"you" in plain
+                and b"trust" in plain
+                and not sent_enter
+            ):
+                os.write(master, b"\r")
+                sent_enter = True
+            if b"Choose working directory" in plain or b"Thread forked from" in plain:
+                break
+            if process.poll() is not None and not ready:
+                break
+    finally:
+        if process.poll() is None:
+            os.write(master, b"\x03\x03")
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                process.wait(timeout=5)
+        os.close(master)
+    return ANSI.sub(b"", output).decode(errors="replace")
 
 
 @pytest.mark.matrix("T-EXP-01")
 @pytest.mark.requires_real_cli
-@pytest.mark.skip(reason="pending: T-EXP-01")
-def test_e1_claude_flag_combo_no_silent_noop():
-    """T-EXP-01 — E1 — the Claude flag combo runs together with no flag silently
-    no-oping.
-
-    Given:  a real Claude CLI invoked non-interactively with `--resume <id>
-            --fork-session --session-id <pre-pinned> -n <name>` combined
-    Expect: all four flags take effect; none silently no-ops
-    Source: RESEARCH §7 E1; (EXPERIMENTS.md, Phase B)
-    """
-    raise NotImplementedError
+@pytest.mark.skipif(
+    CLAUDE is None, reason="requires_real_cli: claude executable not found"
+)
+def test_e1_claude_flag_combo_no_silent_noop(claude_fork: ClaudeForkResult):
+    assert f'"sessionId":"{claude_fork.child_id}"' in claude_fork.child_transcript
+    assert f'"customTitle":"{claude_fork.name}"' in claude_fork.child_transcript
+    assert f'"agentName":"{claude_fork.name}"' in claude_fork.child_transcript
 
 
 @pytest.mark.matrix("T-EXP-02")
 @pytest.mark.requires_real_cli
-@pytest.mark.skip(reason="pending: T-EXP-02")
-def test_e2_codex_cross_cwd_fork_explicit_id():
-    """T-EXP-02 — E2 — Codex cross-cwd fork with an explicit thread ID bypasses cwd
-    filtering.
-
-    Given:  `codex fork <explicit-uuid>` run cross-cwd, plus a `-C <worktree>` variant
-    Expect: the explicit ID bypasses cwd filtering; the TUI cwd-change prompt behavior
-            is documented
-    Source: RESEARCH §7 E2; RESEARCH §5.1 Q4; (EXPERIMENTS.md, Phase B)
-    """
-    raise NotImplementedError
+@pytest.mark.skipif(
+    CODEX is None, reason="requires_real_cli: codex executable not found"
+)
+def test_e2_codex_cross_cwd_fork_explicit_id(tmp_path: Path):
+    assert CODEX is not None
+    repo, child = _git_repo(tmp_path)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    events = tmp_path / "parent.jsonl"
+    _run(
+        [
+            CODEX,
+            "exec",
+            "--json",
+            "--sandbox",
+            "read-only",
+            "Reply only CODEX_PARENT_READY. Do not run tools.",
+        ],
+        repo,
+        stdout=events,
+    )
+    thread_id = next(
+        json.loads(line)["thread_id"]
+        for line in events.read_text().splitlines()
+        if json.loads(line).get("type") == "thread.started"
+    )
+    common = [
+        CODEX,
+        "fork",
+        thread_id,
+        "-c",
+        "check_for_update_on_startup=false",
+        "--no-alt-screen",
+        "--dangerously-bypass-hook-trust",
+    ]
+    plain = _pty_capture(common, foreign)
+    assert str(repo) in plain and str(foreign) in plain
+    with_cd = _pty_capture([*common, "-C", str(child)], foreign)
+    assert "child-worktr" in with_cd
+    assert str(foreign) not in with_cd
 
 
 @pytest.mark.matrix("T-EXP-03")
 @pytest.mark.requires_real_cli
-@pytest.mark.skip(reason="pending: T-EXP-03")
-def test_e3_claude_e2e_full_paste_command():
-    """T-EXP-03 — E3 — the full Claude paste command run E2E recalls full context in a
-    fresh session.
-
-    Given:  the full paste command run in a real worktree
-    Expect: full context recall, fresh UUID, parent transcript untouched
-    Source: RESEARCH §7 E3; (EXPERIMENTS.md, Phase B)
-    """
-    raise NotImplementedError
+@pytest.mark.skipif(
+    CLAUDE is None, reason="requires_real_cli: claude executable not found"
+)
+def test_e3_claude_e2e_full_paste_command(claude_fork: ClaudeForkResult):
+    assert claude_fork.child_output["session_id"] == claude_fork.child_id
+    assert claude_fork.child_output["result"] == claude_fork.token
+    assert claude_fork.parent_hash_before == claude_fork.parent_hash_after
+    assert claude_fork.token in claude_fork.child_transcript
 
 
 @pytest.mark.matrix("T-EXP-04")
