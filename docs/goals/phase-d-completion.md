@@ -101,7 +101,7 @@ cross-validation tests may increase the total.
 |---|---|---|---|---|
 | Task 1 — blocking CI | landed | 35 passed, 182 skipped; matrix, strict collection, local gates and CI green | PR #7 / `f87987b` | none open |
 | Task 2 — A9 Git floor | complete | audit selects 2.19.0; four rows changed blocked → live; matrix green | `02d4c6f` | owner approved deferring T-PRE-06..09 red-green to full G-PRE Task 15 |
-| D2 — G-FIX | pending | — | — | — |
+| D2 — G-FIX | complete | all 24 rows green; 59 passed, 158 skipped overall; matrix, strict collection, lint, types, and oracle review green | Phase D branch | fixed absolute-path floor false-green and unmerged-stage index collapse during review |
 | D3 — mutation core | pending | — | — | — |
 | D4 — integration | pending | — | — | — |
 | D5 — conformance | pending | — | — | — |

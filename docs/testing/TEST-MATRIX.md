@@ -388,7 +388,7 @@ Varying axes: agent (claude/codex, must vary per §4 — E1/E3 claude, E2 codex)
 ---
 
 ## G-FIX — Fixture layer
-Status: pending
+Status: done
 
 Purpose: the fixture layer itself — builder-vs-spec verification, oracle mutation rows, the env-seal assertion, git-version canaries, the shim-interception canary, the realpath rule.
 

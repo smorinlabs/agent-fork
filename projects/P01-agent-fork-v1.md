@@ -48,6 +48,7 @@ Phase C.5 — test architecture skeleton (gate: matrix + stub tree + checker gre
 - [x] [P01-T24] check-matrix drift guard + just check-matrix
 
 Phase D — build (gate: everything green + reviews clean; every T preceded by its TS)
+- [x] Phase D fixture gate — G-FIX 24/24 green; sealed environment, topology worlds, manifest/index oracles, version canaries, PATH shim, pty/stall machinery, and hardened teardown reviewed
 - [ ] [P01-TS04] Config resolver tests: tri-state semantics + implication rule (REQ-13)
 - [ ] [P01-T08] Config resolver (port agent-deck Resolve() semantics verbatim)
 - [ ] [P01-TS05] Git detection matrix tests (RESEARCH §2.3 rows)
