@@ -34,7 +34,8 @@
 | Date | Standard version | Mode | Result |
 |---|---|---|---|
 | 2026-07-21 | 1.4.14 | plan | Interface spec seeded into REQUIREMENTS.md §3; no code exists yet; fixtures (R9.14) deferred to implementation start |
-| 2026-08-10 | 1.4.14 | Phase D implementation | CLI, row matrix, adversarial fixtures, and disposable wheel install green; release channels remain gated to Phase E |
+| 2026-08-10 | 1.4.14 | Phase D implementation | CLI, row matrix, adversarial fixtures, and disposable wheel install green; companion skill and release channels remain gated to Phases E and F |
+| 2026-08-10 | 1.4.14 | Phase E companion skill | Shared Claude/Codex skill, deterministic JSON orchestration, failure contracts, and real dual-host paste-command demos green; release channels remain gated to Phase F |
 
 ## Phase D requirement trace
 
@@ -46,10 +47,10 @@ open implementation finding.
 | Requirement | Disposition | Phase D evidence |
 |---|---|---|
 | REQ-01 | Implemented | CLI owns repository detection through cleanup; G-GRD..G-CLN |
-| REQ-02 | Deferred | Companion skill orchestration is Phase F; CLI explicit flags are implemented and tested |
+| REQ-02 | Implemented | Phase E skill detects the host/session and passes explicit identity to the CLI; focused tests plus real Claude/Codex demos |
 | REQ-03 | Implemented | G-DET explicit precedence and Claude/Codex fallback detection |
-| REQ-04 | Implemented / skill deferred | G-OUT stable JSON contract; Phase F skill will consume it |
-| REQ-05 | Deferred | Claude/Codex skill placement belongs to Phase F and was not started |
+| REQ-04 | Implemented | Skill consumes and validates G-OUT JSON, then renders the returned command; malformed output fails diagnostically |
+| REQ-05 | Implemented | Canonical `.agents/skills/agent-fork` artifact is shared through `.claude/skills/agent-fork`; missing CLI emits install hint |
 | REQ-06 | Implemented | T-CLI-01 bare help, exit 0 |
 | REQ-07 | Implemented + waived | `cleanup` service/command; R2.1 waiver above |
 | REQ-08 | Implemented | Boolean negations, kebab-case, reserved shorts, and no-abbreviation regression |
@@ -80,7 +81,7 @@ open implementation finding.
 | REQ-33 | Implemented | Consent, no-input, force separation, PTY prompt, dry-run |
 | REQ-34 | Implemented | T-CLN-12 external session file invariant and resumability notice |
 | REQ-35 | Implemented | Python floor, minimal dependencies, wheel, and console entry point clean-install |
-| REQ-36 | Deferred | Publishing/release automation and channel validation are Phase E |
+| REQ-36 | Deferred | Publishing/release automation and channel validation are Phase F |
 | REQ-37 | Implemented | MIT license present; fresh implementation uses behavioral corpus only |
 | REQ-38 | Implemented for Phase D | Doctor, locale, signals/SIGPIPE, SemVer/deprecation docs, telemetry statement, blocking conformance CI |
 | REQ-39 | Implemented | Flox/uv/just/ruff/ty development environment and gates |

@@ -1,6 +1,6 @@
 # Goal: complete agent-fork v1 through the Phase D gate
 
-> Active execution contract: [finish Phase D and stop before Phase E](phase-d-completion.md).
+> Active execution contract: [complete the Phase E companion skill](phase-e-companion-skill.md).
 
 ## Objective
 
@@ -85,8 +85,8 @@ conflict to the owner.
 
 ## Explicit exclusions
 
-- Phase E release, publishing, PyPI/TestPyPI, Homebrew, or release-please work.
-- Phase F companion skill.
+- Phase E companion skill.
+- Phase F release, publishing, PyPI/TestPyPI, Homebrew, or release-please work.
 - Handoff-file degradation ladder.
 - `--clean` alias.
 - jj backend.

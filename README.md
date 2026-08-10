@@ -4,9 +4,27 @@
 staged, unstaged, and untracked state, verifies the copy, and prints the exact
 command for continuing the current Claude Code or Codex conversation there.
 
-The CLI is implemented for v0.1.0 but remains pre-release until the Phase E
+The CLI is implemented for v0.1.0 but remains pre-release until the Phase F
 release gate. It requires Python 3.11+, Git 2.19+, Claude Code 2.0.73+ or Codex
 0.95+ (Codex native `fork` itself requires 0.81+).
+
+## Companion skill
+
+The repository includes one canonical Agent Skills artifact at
+`.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`; Claude
+Code discovers the same artifact through `.claude/skills/agent-fork` as
+`/agent-fork`.
+
+From an active agent session, invoke it with an optional fork name:
+
+```text
+$agent-fork my-experiment   # Codex
+/agent-fork my-experiment   # Claude Code
+```
+
+The skill requires `agent-fork` on `PATH`, delegates all repository mechanics
+to `agent-fork fork --json`, and returns a command to paste into a fresh
+terminal. Until Phase F publishes v0.1.0, use the CLI from a source checkout.
 
 ## Usage
 

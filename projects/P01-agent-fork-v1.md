@@ -72,14 +72,14 @@ Phase D — build (gate: everything green + reviews clean; every T preceded by i
 - [x] [P01-TS14] Conformance fixtures in CI (R9.14: help shape, streams, exit codes, `--json`, bare/unknown invocation) — blocking job plus closed-fd/SIGPIPE and disposable wheel-install checks implemented and green locally
 - [x] [P01-T18] GitHub Actions CI green from the start — implementation-start matrix + strict collection landed in Phase D Task 1; final R9.14 conformance and clean-install jobs green in PR #8
 
-Phase E — ship v0.1.0 (gate: released + installable)
+Phase E — companion skill (gate: end-to-end demo)
+- [x] [P01-TS15] Acceptance: real `/agent-fork` and `$agent-fork` invocations created verified disposable forks; emitted commands returned `PHASE_E_CLAUDE_PASTE_OK` and `PHASE_E_CODEX_PASTE_OK`
+- [x] [P01-T22] `agent-fork` skill via skill-creator — shared Claude/Codex placement, explicit env identity, validated `--json` contract, ambiguity refusal, and install hint green
+
+Phase F — ship v0.1.0 (gate: released + installable)
 - [ ] [P01-T19] cli-standards audit vs built binary; fix/waive; CONFORMANCE.md audit row
 - [ ] [P01-T20] Release plumbing: release-please, PyPI + TestPyPI trusted publishing, Homebrew tap
 - [ ] [P01-T21] Cut v0.1.0 replacing the PyPI placeholder; verify `uv tool install` + `pipx install`
-
-Phase F — companion skill (gate: end-to-end demo)
-- [ ] [P01-TS15] Acceptance: one word in a real Claude Code session → verified fork + working paste command; same for Codex
-- [ ] [P01-T22] `agent-fork` skill via skill-create (env detection, `--json` contract, install hint)
 
 - [x] Regression Test Status — Phase D final suite 218 passed with only retired T-EXP-04 skipped; conformance fixtures and clean-install checks green in PR #8
 
