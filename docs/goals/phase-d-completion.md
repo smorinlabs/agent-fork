@@ -2,7 +2,7 @@
 
 **Created:** 2026-08-10
 **Runtime goal:** `019fea2f-91cc-71b1-b29d-a43dfe4137b2`
-**Status:** active
+**Status:** owner review
 **Branch:** `feat/phase-d-implementation`
 **Worktree:** `/work/agent-fork-phase-d`
 
@@ -39,8 +39,8 @@ Homebrew work, or the Phase F companion skill.
 - The Phase D branch starts at `f87987b`.
 - Tasks 2–21 are complete on the Phase D branch; all 18 matrix groups are
   `done` and the local suite is at 218 passed with only retired T-EXP-04 skipped.
-- Task 22 local evidence is green. The remaining D6 actions are the single final
-  pull request, its blocking CI checks, and owner review.
+- Task 22 evidence is green in final Phase D PR #8. The only remaining D6 action
+  is owner review.
 
 ## Required execution loop
 
@@ -106,7 +106,7 @@ cross-validation tests may increase the total.
 | D3 — mutation core | complete | foundations, G-GRD 14/14, G-ANC 8/8, G-MAT 20/20, G-VER 11/11, and G-RBK 6/6 green; 150 passed, 67 skipped overall | Phase D branch | exact state, verification, producer failure, rollback, and real SIGINT/SIGTERM stall paths proven across supported topologies |
 | D4 — integration | complete | all integration/command groups through G-CLI 12/12 green; real E1–E3 rerun passes; 216 passed, 1 retired skip overall | Phase D branch | full v1 command tree, fork/cleanup lifecycle, doctor, completions, human/JSON output, and stable exits green |
 | D5 — conformance | complete | all 37 CLI/conformance tests plus disposable sdist/wheel install and packaged entry-point smoke green; blocking CI job configured | Phase D branch | requirements trace found and fixed branch/path overrides, help topic, subparser abbreviation, hook env namespace, and clipboard-order gaps |
-| D6 — final Phase D gate | pending | 218 passed, 1 retired skip; matrix and strict collection green; clean sdist/wheel install green; adversarial rollback/race sweep passed 5 consecutive runs; real E1–E3 passed in 23.18s; whole-branch whitespace check green | final Phase D PR pending | local evidence complete; CI and owner review required |
+| D6 — final Phase D gate | owner review | 218 passed, 1 retired skip; matrix and strict collection green; clean sdist/wheel install green; adversarial rollback/race sweep passed 5 consecutive runs; real E1–E3 passed in 23.18s; whole-branch whitespace check and blocking CI green | PR #8 | no open implementation findings; owner review required |
 
 ## Terminal action
 
