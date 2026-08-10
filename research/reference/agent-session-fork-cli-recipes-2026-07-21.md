@@ -2,11 +2,11 @@
 type: terminal
 status: current
 created: 2026-07-21
-updated: 2026-07-21
-library_version: claude-code 2.1.216 / codex-cli 0.144.6 (pi 0.80.6, opencode 1.18.3, kilo 7.4.11 noted)
+updated: 2026-08-09
+library_version: claude-code 2.1.220 / codex-cli 0.147.0 (pi 0.80.6, opencode 1.18.3, kilo 7.4.11 noted)
 confidence: high
 confidence_basis: official docs cross-checked against changelogs, upstream PRs, binary help/strings, and live scoping tests on local binaries; 3-vote adversarial verification (23 confirmed, 2 refuted, 0 unverified); Q5/Q6 gaps stated explicitly rather than papered over
-verified_example: false   # Q1 scoping live-verified; the full paste-command E2E is still on the experiment list below
+verified_example: true   # Phase B E1-E3 live-verified in the isolated guest; see EXPERIMENTS.md
 assumptions: single-user local terminal, macOS/Linux, default CLAUDE_CONFIG_DIR/CODEX_HOME
 sources: [https://code.claude.com/docs/en/sessions, https://code.claude.com/docs/en/cli-reference, https://platform.claude.com/docs/en/agent-sdk/sessions, https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md, https://github.com/openai/codex/pull/10096, https://github.com/openai/codex/pull/8994, https://developers.openai.com/codex/cli/reference, https://github.com/asheshgoplani/agent-deck]
 origin_prompt: ../topics/01-session-fork-resume-cli-mechanics/prompts/00-fork-resume-mechanics.prompt.md
@@ -19,7 +19,7 @@ origin_prompt: ../topics/01-session-fork-resume-cli-mechanics/prompts/00-fork-re
 ### Claude Code — the emit command
 
 ```bash
-cd '<worktree>' && claude --session-id "<pre-generated-uuid>" --resume <parent-session-id> --fork-session -n '<derived-name>'
+cd '<worktree>' && claude --session-id '<pre-generated-uuid>' --resume '<parent-session-id>' --fork-session -n '<derived-name>'
 ```
 
 - Works cross-directory **because** the worktree belongs to the same repo: `--resume <id>`
@@ -36,11 +36,10 @@ cd '<worktree>' && claude --session-id "<pre-generated-uuid>" --resume <parent-s
 - Min versions: fork+pinned-ID ≥2.0.73; worktree-scoped resume reliable ≥~2.1.1xx (#48835
   failed older); `/add-dir`-based discovery ≥2.1.118.
 
-### Codex — the emit command (one open hazard)
+### Codex — the emit command
 
 ```bash
-cd '<worktree>' && codex fork <parent-thread-id>
-# candidate alternative (unverified): codex fork <parent-thread-id> -C '<worktree>'
+codex fork '<parent-thread-id>' -C '<worktree>'
 ```
 
 - `codex fork <uuid>` = documented Stable; transcript copied, parent preserved.
@@ -48,12 +47,9 @@ cd '<worktree>' && codex fork <parent-thread-id>
   Pre-0.95.0 fallback: newest `~/.codex/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl`, or
   probe the codex process's open fds (walk up own process tree → `lsof -p`/`/proc/<pid>/fd`,
   agent-deck's method).
-- **HAZARD (unresolved):** pickers are cwd-filtered (`--all` overrides); whether an
-  explicit SESSION_ID bypasses filtering is undocumented, and a **TUI cwd-change prompt**
-  ("Use session directory (…" / "Use current directory (…") fires when the launch dir ≠
-  the session's recorded cwd — the pasted command may stop at an interactive prompt.
-  The prompt is benign for a human-paste flow (they pick "current directory") but must
-  be documented in the emitted output; whether `-C` pre-empts it needs the live test.
+- Phase B E2 verified that an explicit SESSION_ID bypasses cwd filtering. A foreign-cwd
+  launch without `-C` fires the session/current-directory chooser; `-C <worktree>` both
+  selects the worktree and suppresses that chooser, so it is mandatory in the v1 template.
 - Min versions: fork ≥0.81.0; `CODEX_THREAD_ID` ≥0.95.0; trustworthy `fork --last` ≥0.129.0.
   Preflight the installed binary (agent-deck instead emits-and-lets-it-fail; a
   print-for-human CLI should check first).
@@ -71,9 +67,8 @@ cd '<worktree>' && codex fork <parent-thread-id>
 
 ## Minimal example
 
-Not yet run end-to-end (see experiments). The Claude command shape is production-proven
-verbatim in agent-deck (`instance.go` ~7358): `cd '<wt>' && exec claude --session-id
-"<uuid>" --resume <parent> --fork-session`.
+The Claude command and Codex `-C` variant were run end-to-end in Phase B; see
+`EXPERIMENTS.md` for the versions, procedure, and assertions.
 
 ## Gotchas
 
@@ -85,15 +80,10 @@ verbatim in agent-deck (`instance.go` ~7358): `cd '<wt>' && exec claude --sessio
 - Both: quote every interpolated value (agent-deck has two unquoted-interpolation warts —
   Claude workDir, Codex resume id — do not replicate).
 
-## Live experiments still required
+## Live experiments
 
-1. Claude: `-n` combined with `--resume --fork-session --session-id` in one invocation.
-2. Codex: explicit-UUID fork from foreign cwd (does it bypass cwd filtering?); `-C`
-   behavior; whether the cwd-change prompt still fires with `-C`.
-3. .jsonl-copy fallback for unrelated dirs (different *encoded project dir*) — does the
-   copied session resume; smoke-test per Claude version.
-4. Claude fork E2E: full paste command in a real worktree; assert full context recall +
-   fresh UUID.
+E1-E3 are resolved in `EXPERIMENTS.md`. The `.jsonl` fallback experiment is retired
+until v1.1 (A8/D14); state fidelity is core pipeline TDD rather than a live experiment.
 
 ## Currency notes
 

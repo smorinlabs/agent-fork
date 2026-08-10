@@ -33,10 +33,10 @@ Phase A — repo bootstrap (gate: repo live + PROJECTS.md)
 - [x] [P01-T05] PROJECTS.md via project harness + repo welcome announcement
 
 Phase B — live experiments (gate: EXPERIMENTS.md + updated launch templates)
-- [ ] [P01-TS01] E1: Claude flag combo `--resume --fork-session --session-id -n` as `requires_real_cli` test (REQ-28) — authored as T-EXP-01..03 stubs (skeleton phase); flip G-EXP to tdd at Phase B
-- [ ] [P01-TS02] E2: Codex explicit-UUID fork from foreign cwd; `-C` behavior; cwd-prompt (REQ-28) — authored as T-EXP-01..03 stubs (skeleton phase); flip G-EXP to tdd at Phase B
-- [ ] [P01-TS03] E3: Claude full paste-command E2E in a real worktree (context recall, fresh UUID, parent untouched) — authored as T-EXP-01..03 stubs (skeleton phase); flip G-EXP to tdd at Phase B
-- [ ] [P01-T06] Record EXPERIMENTS.md; update REQ-28 / RESEARCH §7 / recipes leaf with findings
+- [x] [P01-TS01] E1: Claude flag combo `--resume --fork-session --session-id -n` as `requires_real_cli` test (REQ-28) — passed on Claude Code 2.1.220; G-EXP done
+- [x] [P01-TS02] E2: Codex explicit-UUID fork from foreign cwd; `-C` behavior; cwd-prompt (REQ-28) — passed on Codex CLI 0.147.0; `-C` suppresses the cwd-choice prompt
+- [x] [P01-TS03] E3: Claude full paste-command E2E in a real worktree (context recall, fresh UUID, parent untouched) — passed on Claude Code 2.1.220
+- [x] [P01-T06] Record EXPERIMENTS.md; update REQ-28 / RESEARCH §7 / recipes leaf with findings
 
 Phase C — implementation plan (gate: plan review)
 - [ ] [P01-T07] Task breakdown via superpowers:writing-plans, dependency-ordered, each task naming its failing-test-first

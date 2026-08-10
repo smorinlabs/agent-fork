@@ -219,10 +219,10 @@ Provenance: 103-agent deep-research run, 21 sources, 25 claims through 3-vote ad
 
 ```bash
 # Claude Code (host session discovered via $CLAUDE_CODE_SESSION_ID):
-cd '<worktree>' && claude --session-id "<pre-generated-uuid>" --resume <parent-id> --fork-session -n '<derived-name>'   # -n pending E1
+cd '<worktree>' && claude --session-id '<pre-generated-uuid>' --resume '<parent-id>' --fork-session -n '<derived-name>'
 
 # Codex (host session discovered via $CODEX_THREAD_ID, ≥0.95.0):
-cd '<worktree>' && codex fork <parent-thread-id>          # -C variant + cwd-prompt behavior pending E2
+codex fork '<parent-thread-id>' -C '<worktree>'
 ```
 
 Minimum-version matrix: Claude — pinned-ID fork ≥2.0.73, reliable worktree-scoped resume ≥~2.1.1xx; Codex — fork ≥0.81.0, `CODEX_THREAD_ID` ≥0.95.0, trustworthy `--last` ≥0.129.0. agent-fork should **preflight** installed versions (agent-deck instead emits-and-recovers; wrong trade-off for a print-for-human CLI) and, for Codex, verify the parent rollout file is flushed (`sessions/*/*/*/rollout-*-<id>.jsonl`) before emitting — agent-deck's #756 lesson.
@@ -241,16 +241,18 @@ Minimum-version matrix: Claude — pinned-ID fork ≥2.0.73, reliable worktree-s
 
 ---
 
-## 7. Live experiments still required `[OPEN]`
+## 7. Live experiments `[RESOLVED 2026-08-09]`
 
 (Consolidated with the deep-research run's closing list. Q1's worktree-scoping test was already run live by the research pass — dropped from this list.)
 
-- **E1 — Claude flag combo**: `--resume <id> --fork-session --session-id <pre-pinned> -n <name>` in one non-interactive invocation — does any flag silently no-op?
-- **E2 — Codex cross-cwd fork**: `codex fork <explicit-uuid>` from a foreign cwd (does explicit ID bypass cwd filtering? #20165 suggests yes for resume); `-C <worktree>` behavior; does the TUI cwd-change prompt still fire with `-C`? Goal: a fully non-interactive (or documented-one-prompt) paste command.
-- **E3 — Claude fork E2E**: full paste command in a real worktree; assert full context recall + fresh UUID + parent transcript untouched.
-- **E4 — .jsonl-copy last-resort** (unrelated-directory fallback): copy into a *different encoded project dir* and resume — smoke test per Claude version (agent-deck only validated same-path/different-config-root).
-- **E5 — State fidelity**: run the §2.2 sequence on a repo with staged+unstaged+untracked+ignored+symlink+exec-bit files; assert byte-equal porcelain status (the §4 verification ladder).
-- **E6 — Codex pre-0.95.0 fallback** (only if we decide to support old Codex): two concurrent sessions in one cwd — is newest-rollout ambiguous, and does the process-fd probe disambiguate?
+- **E1 — passed (Claude Code 2.1.220):** all four flags compose; `-n` persists as the fork's custom title and agent name.
+- **E2 — passed (Codex CLI 0.147.0):** an explicit UUID is found from a foreign cwd. Without `-C`, Codex prompts to choose session vs current directory. With `-C <worktree>`, it opens in the worktree and the cwd-choice prompt does not fire. The v1 template therefore uses `-C`.
+- **E3 — passed (Claude Code 2.1.220):** the full worktree paste command recalled an exact parent token, used the pinned fresh UUID, copied full history, and left the parent transcript byte-for-byte unchanged.
+- **E4 — retired until v1.1** per A8/D14.
+- **E5 — absorbed into G-MAT/G-VER** as Phase C core TDD.
+- **E6 — tombstoned** with the pre-0.95 Codex ladder per A7.
+
+Raw procedure and evidence are recorded in `EXPERIMENTS.md`; executable coverage is T-EXP-01..03.
 
 ---
 
