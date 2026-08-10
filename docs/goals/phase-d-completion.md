@@ -100,7 +100,7 @@ cross-validation tests may increase the total.
 | Checkpoint | State | Evidence | Commit/PR | Findings |
 |---|---|---|---|---|
 | Task 1 — blocking CI | landed | 35 passed, 182 skipped; matrix, strict collection, local gates and CI green | PR #7 / `f87987b` | none open |
-| Task 2 — A9 Git floor | in progress | audit selects 2.19.0; four rows changed blocked → live; matrix green | Phase D branch | lifecycle conflict: Task 2 requires partial G-PRE unskip while checker requires group-atomic transition |
+| Task 2 — A9 Git floor | complete | audit selects 2.19.0; four rows changed blocked → live; matrix green | `02d4c6f` | owner approved deferring T-PRE-06..09 red-green to full G-PRE Task 15 |
 | D2 — G-FIX | pending | — | — | — |
 | D3 — mutation core | pending | — | — | — |
 | D4 — integration | pending | — | — | — |
