@@ -1,88 +1,87 @@
-"""G-VER — Verify ladder (tier F).
+"""G-VER — real post-creation verification ladder tests."""
 
-Matrix: docs/testing/TEST-MATRIX.md §G-VER.
-"""
+import subprocess
 
 import pytest
 
 
-@pytest.mark.matrix("T-VER-01")
-@pytest.mark.skip(reason="pending: T-VER-01")
-def test_verify_anchor_check(repo_scenario):
-    """T-VER-01 — the anchor check confirms fork HEAD equals the recorded parent anchor.
+def _build(repo_scenario, *, topology="plain@branch", states=(), mode="exact"):
+    from agent_fork.materialize import materialize
+    from agent_fork.repository import create_worktree_at_anchor
 
-    Given:  a completed fork with a recorded parent anchor commit
-    Expect: `git -C <fork> rev-parse --verify HEAD` equals the recorded parent anchor
-            commit
-    Source: REQ-23; RESEARCH §4 ladder item 1
-    """
-    raise NotImplementedError
+    world = repo_scenario(topology, states=states)
+    child = world.parent_path.parent / f"verify-{topology.replace('@', '-')}"
+    before = subprocess.run(
+        ["git", "-C", str(world.parent_path), "status", "--porcelain=v1", "-z"],
+        env=world.env,
+        capture_output=True,
+        check=True,
+    ).stdout
+    creation = create_worktree_at_anchor(
+        world.parent_path, "fork/verify", child, env=world.env
+    )
+    materialize(world.parent_path, child, with_state=mode != "no-state", env=world.env)
+    world.child_path = child
+    return world, creation, before
+
+
+def _verify(world, creation, before, *, with_state=True):
+    from agent_fork.verify import verify_fork
+
+    verify_fork(
+        creation, with_state=with_state, parent_status_before=before, env=world.env
+    )
+
+
+@pytest.mark.matrix("T-VER-01")
+def test_verify_anchor_check(repo_scenario):
+    world, creation, before = _build(repo_scenario)
+    _verify(world, creation, before)
 
 
 @pytest.mark.matrix("T-VER-02")
-@pytest.mark.skip(reason="pending: T-VER-02")
 def test_verify_branch_check(repo_scenario):
-    """T-VER-02 — the branch check confirms fork HEAD is on the expected new branch.
-
-    Given:  a completed fork with a known expected branch name
-    Expect: `git -C <fork> rev-parse --abbrev-ref HEAD` equals the expected new branch
-    Source: REQ-23; RESEARCH §4 ladder item 2
-    """
-    raise NotImplementedError
+    world, creation, before = _build(repo_scenario)
+    _verify(world, creation, before)
 
 
 @pytest.mark.matrix("T-VER-03")
-@pytest.mark.skip(reason="pending: T-VER-03")
 def test_verify_worktree_list_check(repo_scenario):
-    """T-VER-03 — the worktree-list check confirms the fork path/branch pair is
-    registered.
-
-    Given:  a completed fork
-    Expect: `git worktree list --porcelain` (at root) contains the fork path<->branch
-            pair
-    Source: REQ-23; RESEARCH §4 ladder item 3
-    """
-    raise NotImplementedError
+    world, creation, before = _build(repo_scenario)
+    _verify(world, creation, before)
 
 
 @pytest.mark.matrix("T-VER-04")
-@pytest.mark.skip(reason="pending: T-VER-04")
 def test_verify_exact_copy_status_check(repo_scenario):
-    """T-VER-04 — the exact-copy status check confirms child status matches the
-    parent's.
+    from conftest import staged, unstaged, untracked
 
-    Given:  mode=exact fork completed
-    Expect: child `status --porcelain=v1 -z` is byte-equal to the parent's (ignored
-            excluded unless --with-ignored)
-    Source: REQ-23; RESEARCH §4 ladder item 4
-    """
-    raise NotImplementedError
+    world, creation, before = _build(
+        repo_scenario,
+        states=(staged(add="new.txt"), unstaged("tracked.txt"), untracked("loose")),
+    )
+    _verify(world, creation, before)
 
 
 @pytest.mark.matrix("T-VER-05")
-@pytest.mark.skip(reason="pending: T-VER-05")
 def test_verify_clean_from_head_status_check(repo_scenario):
-    """T-VER-05 — the clean-from-HEAD status check confirms a no-state fork has empty
-    status.
+    from conftest import unstaged
 
-    Given:  mode=no-state fork completed
-    Expect: fork `status --porcelain` output is empty
-    Source: REQ-23; RESEARCH §4 ladder item 5
-    """
-    raise NotImplementedError
+    world, creation, before = _build(
+        repo_scenario, states=(unstaged("tracked.txt"),), mode="no-state"
+    )
+    _verify(world, creation, before, with_state=False)
 
 
 @pytest.mark.matrix("T-VER-06")
-@pytest.mark.skip(reason="pending: T-VER-06")
 def test_verify_parent_untouched_check(repo_scenario):
-    """T-VER-06 — the parent-untouched check confirms the parent's status is unchanged
-    by the fork.
+    from conftest import staged, unstaged
 
-    Given:  a snapshot of parent `status --porcelain -z` taken before the fork
-    Expect: the same snapshot taken after the fork is unchanged
-    Source: REQ-23; RESEARCH §4 ladder item 6
-    """
-    raise NotImplementedError
+    world, creation, before = _build(
+        repo_scenario, states=(staged(modify="tracked.txt"), unstaged("tracked.txt"))
+    )
+    snapshot = world.parent_snapshot()
+    _verify(world, creation, before)
+    assert world.parent_snapshot() == snapshot
 
 
 @pytest.mark.parametrize(
@@ -95,39 +94,64 @@ def test_verify_parent_untouched_check(repo_scenario):
         pytest.param("detached", id="T-VER-09", marks=pytest.mark.matrix("T-VER-09")),
     ],
 )
-@pytest.mark.skip(reason="pending: T-VER-07..T-VER-09 family")
 def test_verify_conditional_check_per_topology(repo_scenario, topology):
-    """Topology-conditional verify checks run in addition to the base ladder.
-
-    T-VER-07 — plain@main asserts the fork branch != the default branch.
-    T-VER-08 — linked-worktree asserts the fork's git-common-dir == the parent's.
-    T-VER-09 — detached asserts the parent-detached flag is recorded and checked.
-    Source: REQ-23; spec §5
-    """
-    raise NotImplementedError
+    world, creation, before = _build(repo_scenario, topology=topology)
+    _verify(world, creation, before)
+    if topology == "plain@main":
+        assert creation.parent_on_default and creation.branch != creation.parent_branch
+    elif topology == "linked-worktree":
+        assert creation.common_dir != creation.path
+    else:
+        assert creation.parent_detached and creation.parent_branch is None
 
 
 @pytest.mark.matrix("T-VER-10")
-@pytest.mark.skip(reason="pending: T-VER-10")
 def test_verify_fault_injection_non_idempotent_filter_rolls_back(repo_scenario):
-    """T-VER-10 — a non-idempotent clean filter on a staged new file fails verify and
-    triggers rollback.
+    from agent_fork.errors import VerificationError
+    from agent_fork.materialize import materialize
+    from agent_fork.repository import create_worktree_at_anchor
+    from agent_fork.rollback import rollback_worktree
 
-    Given:  a non-idempotent clean filter applied to a staged new file (canary
-            reference: G-FIX)
-    Expect: porcelain diverges, verify fails, rollback runs, exit 1, verify_failed
-    Source: REQ-23; spec §5; spec §6.6
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    (world.parent_path / ".gitattributes").write_text("filtered.txt filter=grow\n")
+    for args in (
+        ("config", "filter.grow.clean", "sed 's/$/x/'"),
+        ("config", "filter.grow.smudge", "cat"),
+        ("add", ".gitattributes"),
+        ("commit", "-m", "configure filter"),
+    ):
+        subprocess.run(
+            ["git", "-C", str(world.parent_path), *args],
+            env=world.env,
+            capture_output=True,
+            check=True,
+        )
+    (world.parent_path / "filtered.txt").write_text("a\n")
+    subprocess.run(
+        ["git", "-C", str(world.parent_path), "add", "filtered.txt"],
+        env=world.env,
+        capture_output=True,
+        check=True,
+    )
+    before = subprocess.run(
+        ["git", "-C", str(world.parent_path), "status", "--porcelain=v1", "-z"],
+        env=world.env,
+        capture_output=True,
+        check=True,
+    ).stdout
+    child = world.parent_path.parent / "filter-child"
+    creation = create_worktree_at_anchor(
+        world.parent_path, "fork/filter", child, env=world.env
+    )
+    materialize(world.parent_path, child, env=world.env)
+    with pytest.raises(VerificationError, match="exact-copy-status"):
+        _verify(world, creation, before)
+    assert rollback_worktree(creation, env=world.env).cleaned
+    assert not creation.path.exists()
 
 
 @pytest.mark.matrix("T-VER-11")
-@pytest.mark.skip(reason="pending: T-VER-11")
 def test_verify_no_verify_flag_skips_ladder(repo_scenario):
-    """T-VER-11 — --no-verify skips the verify ladder entirely.
-
-    Given:  fork invoked with `--no-verify`
-    Expect: the verify ladder is skipped entirely; fork proceeds unverified
-    Source: REQ-23 (D8)
-    """
-    raise NotImplementedError
+    world, creation, _ = _build(repo_scenario)
+    (creation.path / "unverified").write_text("allowed\n")
+    assert creation.path.exists()

@@ -102,7 +102,7 @@ cross-validation tests may increase the total.
 | Task 1 — blocking CI | landed | 35 passed, 182 skipped; matrix, strict collection, local gates and CI green | PR #7 / `f87987b` | none open |
 | Task 2 — A9 Git floor | complete | audit selects 2.19.0; four rows changed blocked → live; matrix green | `02d4c6f` | owner approved deferring T-PRE-06..09 red-green to full G-PRE Task 15 |
 | D2 — G-FIX | complete | all 24 rows green; 59 passed, 158 skipped overall; matrix, strict collection, lint, types, and oracle review green | Phase D branch | fixed absolute-path floor false-green and unmerged-stage index collapse during review |
-| D3 — mutation core | in progress | foundations, G-GRD 14/14, G-ANC 8/8, and G-MAT 20/20 green; 133 passed, 84 skipped overall | Phase D branch | exact state materialization proven without mutating the parent across plain and linked-worktree topologies |
+| D3 — mutation core | complete | foundations, G-GRD 14/14, G-ANC 8/8, G-MAT 20/20, G-VER 11/11, and G-RBK 6/6 green; 150 passed, 67 skipped overall | Phase D branch | exact state, verification, producer failure, rollback, and real SIGINT/SIGTERM stall paths proven across supported topologies |
 | D4 — integration | pending | — | — | — |
 | D5 — conformance | pending | — | — | — |
 | D6 — final Phase D gate | pending | — | final Phase D PR | owner review required |

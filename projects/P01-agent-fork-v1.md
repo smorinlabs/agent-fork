@@ -57,8 +57,8 @@ Phase D — build (gate: everything green + reviews clean; every T preceded by i
 - [x] [P01-T10] Guards, parent-HEAD anchor, atomic worktree create — PATH-resolved Git, metadata, and race-loss mapping implemented
 - [x] [P01-TS07] Materialization fixture tests — §2.2 verbatim sequence; one case per RESEARCH §4 matrix row incl. symlink + exec-bit (REQ-21) — G-MAT 20/20 green
 - [x] [P01-T11] Materialize (staged → unstaged → untracked [+ignored]) — exact, exact+ignored, and no-state preserve the declared Git-visible state
-- [ ] [P01-TS08] Verification ladder + rollback tests (REQ-22, REQ-23)
-- [ ] [P01-T12] Verify ladder + rollback
+- [x] [P01-TS08] Verification ladder + rollback tests (REQ-22, REQ-23) — G-VER 11/11 and G-RBK 6/6 green, including real filter divergence, producer failure, and signal stalls
+- [x] [P01-T12] Verify ladder + rollback — typed verification failure, precise cleanup, exact manual recovery, and SIGINT/SIGTERM exit mapping implemented
 - [ ] [P01-TS09] Registry locking/concurrency tests (REQ-41)
 - [ ] [P01-T13] Fork registry in XDG state (REQ-12)
 - [ ] [P01-TS10] Agent detection/preflight/template tests incl. extra_args quoting boundary (REQ-26..30, D11)

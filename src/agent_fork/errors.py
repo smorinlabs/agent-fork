@@ -32,3 +32,10 @@ class PreconditionError(AgentForkError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+class VerificationError(AgentForkError):
+    """A created fork failed one or more post-materialization checks."""
+
+    code = "verify_failed"
+    exit_code = 1

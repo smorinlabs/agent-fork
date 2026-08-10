@@ -201,7 +201,7 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 ---
 
 ## G-VER — Verify ladder
-Status: pending
+Status: done
 
 Purpose: verify ladder — the 6 base checks plus per-topology conditional checks (branch≠default on main; common-dir match in worktrees; detached recorded); fault-injection rows.
 
@@ -224,7 +224,7 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 ---
 
 ## G-RBK — Rollback & signals
-Status: pending
+Status: done
 
 Purpose: rollback and signals — materialize-failure rollback, the manual-recovery path, SIGINT/SIGTERM → 130/143; sole owner of the producer-pipe-failure rows.
 
