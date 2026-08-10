@@ -19,6 +19,9 @@ jobs:
           enable-cache: true
       - uses: extractions/setup-just@v3
 
+      - name: Install completion syntax checkers
+        run: sudo apt-get update && sudo apt-get install --yes zsh fish
+
       - name: Check matrix coverage and lifecycle
         run: just check-matrix
       - name: Check strict pytest collection

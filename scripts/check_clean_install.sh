@@ -13,4 +13,11 @@ test "$version_output" = "agent-fork 0.1.0"
 "$check_root/venv/bin/agent-fork" --help | grep -q '^usage: agent-fork'
 "$check_root/venv/bin/agent-fork" | grep -q '^usage: agent-fork'
 "$check_root/venv/bin/agent-fork" completion bash | grep -q agent-fork
+"$check_root/venv/bin/agent-fork" completion bash | bash -n
+if command -v zsh >/dev/null; then
+  "$check_root/venv/bin/agent-fork" completion zsh | zsh -n
+fi
+if command -v fish >/dev/null; then
+  "$check_root/venv/bin/agent-fork" completion fish | fish -n
+fi
 "$check_root/venv/bin/python" -c 'import agent_fork.cli'

@@ -2,6 +2,39 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ErrorSpec:
+    exit_code: int
+    meaning: str
+
+
+ERROR_CATALOG: dict[str, ErrorSpec] = {
+    "runtime_error": ErrorSpec(1, "unexpected runtime or materialization failure"),
+    "verify_failed": ErrorSpec(1, "fork verification failed"),
+    "registry_busy": ErrorSpec(1, "registry lock wait expired"),
+    "config_error": ErrorSpec(2, "configuration is invalid or unsupported"),
+    "agent_not_detected": ErrorSpec(3, "agent identity is missing or ambiguous"),
+    "session_not_found": ErrorSpec(3, "agent session or rollout is unavailable"),
+    "cleanup_target_unknown": ErrorSpec(3, "cleanup target is not registered or found"),
+    "conflict_branch_exists": ErrorSpec(5, "fork branch already exists"),
+    "conflict_branch_worktree": ErrorSpec(5, "branch is attached to a worktree"),
+    "conflict_worktree_path": ErrorSpec(5, "worktree destination already exists"),
+    "parent_mid_operation": ErrorSpec(5, "parent repository is mid-operation"),
+    "repo_no_commits": ErrorSpec(5, "repository has no commit to fork"),
+    "unmerged_index": ErrorSpec(5, "repository index has unresolved conflicts"),
+    "not_git_repository": ErrorSpec(5, "invocation path is not a Git repository"),
+    "git_version_unsupported": ErrorSpec(5, "installed Git is below the product floor"),
+    "invalid_branch": ErrorSpec(5, "explicit branch name is invalid"),
+    "invalid_worktree_base": ErrorSpec(5, "worktree base is not an existing directory"),
+    "invalid_worktree_name": ErrorSpec(5, "worktree leaf is not one safe component"),
+    "cleanup_target_is_cwd": ErrorSpec(5, "cleanup target contains the invoking cwd"),
+    "cleanup_dirty_worktree": ErrorSpec(5, "cleanup target has uncommitted changes"),
+    "cleanup_unpushed_commits": ErrorSpec(5, "cleanup target has unpushed commits"),
+}
+
 
 class AgentForkError(Exception):
     """Base class for failures intended to cross the CLI boundary."""
@@ -30,6 +63,8 @@ class PreconditionError(AgentForkError):
     exit_code = 5
 
     def __init__(self, code: str, message: str):
+        if code not in ERROR_CATALOG:
+            raise ValueError(f"uncataloged precondition error code: {code}")
         super().__init__(message)
         self.code = code
 

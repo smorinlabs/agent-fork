@@ -11,6 +11,9 @@
         "pkg-path": "codex",
         "pkg-group": "agents"
       },
+      "fish": {
+        "pkg-path": "fish"
+      },
       "git": {
         "pkg-path": "git"
       },
@@ -26,6 +29,9 @@
       },
       "uv": {
         "pkg-path": "uv"
+      },
+      "zsh": {
+        "pkg-path": "zsh"
       }
     },
     "hook": {
@@ -283,6 +289,130 @@
       "priority": 5
     },
     {
+      "attr_path": "fish",
+      "broken": false,
+      "derivation": "/nix/store/jzzsayphrqsawgcii84xnr4p3l5m211m-fish-4.8.0.drv",
+      "description": "Smart and user-friendly command line shell",
+      "install_id": "fish",
+      "license": "GPL-2.0-only",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "fish-4.8.0",
+      "pname": "fish",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T03:12:55.833569Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "4.8.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/b8rng7dynl9fd6r0yqnkf3x5skm4zxnx-fish-4.8.0-doc",
+        "out": "/nix/store/8riw4cfkd3jyvf46s7hvlx0yk06x9abv-fish-4.8.0"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "fish",
+      "broken": false,
+      "derivation": "/nix/store/bhnjkwf10z9x10n976g1vzchwf6ay51p-fish-4.8.0.drv",
+      "description": "Smart and user-friendly command line shell",
+      "install_id": "fish",
+      "license": "GPL-2.0-only",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "fish-4.8.0",
+      "pname": "fish",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T03:41:22.743832Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "4.8.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/c0av8nh5yrm2jdkawqqqdmcbqc9q9bf2-fish-4.8.0-doc",
+        "out": "/nix/store/rnfbw59ipllqa6ccp5m62wigfwybb8ad-fish-4.8.0"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "fish",
+      "broken": false,
+      "derivation": "/nix/store/qs27y7kcd781im3436iy2kbk36vh37q3-fish-4.8.0.drv",
+      "description": "Smart and user-friendly command line shell",
+      "install_id": "fish",
+      "license": "GPL-2.0-only",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "fish-4.8.0",
+      "pname": "fish",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T04:09:01.301226Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "4.8.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/gxi7av0rh6i1ap5yr52906c7j0pjc167-fish-4.8.0-doc",
+        "out": "/nix/store/cc1xm8bbh3syfyycxbbdp9rxfkpijawc-fish-4.8.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "fish",
+      "broken": false,
+      "derivation": "/nix/store/2igj811m9naqcrdzmyw6xczia9nk1gs8-fish-4.8.0.drv",
+      "description": "Smart and user-friendly command line shell",
+      "install_id": "fish",
+      "license": "GPL-2.0-only",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "fish-4.8.0",
+      "pname": "fish",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T04:40:25.489909Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "4.8.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/fzzxcn3li7vd7jf37ck09bifymw68xms-fish-4.8.0-doc",
+        "out": "/nix/store/61aq2696hrasji4myn5cbybl7vm2mzny-fish-4.8.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
       "attr_path": "git",
       "broken": false,
       "derivation": "/nix/store/069n5wanw16hbl2bq66mphw0nwf8d45y-git-2.54.0.drv",
@@ -303,6 +433,7 @@
       "unfree": false,
       "version": "2.54.0",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -397,6 +528,7 @@
       "unfree": false,
       "version": "2.54.0",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -699,6 +831,7 @@
       "unfree": false,
       "version": "3.13.13",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {
@@ -791,6 +924,7 @@
       "unfree": false,
       "version": "3.13.13",
       "outputs_to_install": [
+        "out",
         "out",
         "out"
       ],
@@ -917,6 +1051,142 @@
       ],
       "outputs": {
         "out": "/nix/store/cgvijxnmydknslkl368k4j4j43akvl8b-uv-0.11.25"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "zsh",
+      "broken": false,
+      "derivation": "/nix/store/gn5lfnlk6r6sijw0qcqjc9kk6ym4qqzr-zsh-5.9.1.drv",
+      "description": "Z shell",
+      "install_id": "zsh",
+      "license": "MIT-Modern-Variant",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "zsh-5.9.1",
+      "pname": "zsh",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T03:15:56.132468Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "5.9.1",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/vngaykigd2h6fdh0p45xm4qnfkfxs3iv-zsh-5.9.1-doc",
+        "info": "/nix/store/zyc3ph6609nh64mpf341x0sldyn1mp94-zsh-5.9.1-info",
+        "man": "/nix/store/mjvwl4y3fwqsj8d9gx6azv3d9nfw8bd7-zsh-5.9.1-man",
+        "out": "/nix/store/843cj2afdhq4qqykcrxq003sa4y6h797-zsh-5.9.1"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "zsh",
+      "broken": false,
+      "derivation": "/nix/store/schr6lww4azska2z1y13j1gav7gpyzrv-zsh-5.9.1.drv",
+      "description": "Z shell",
+      "install_id": "zsh",
+      "license": "MIT-Modern-Variant",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "zsh-5.9.1",
+      "pname": "zsh",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T03:45:11.399515Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "5.9.1",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/rqf3wckm3bil41f7wilmspknf44q241r-zsh-5.9.1-doc",
+        "info": "/nix/store/dcx31z5c939cpzifw93p81xnai63kljf-zsh-5.9.1-info",
+        "man": "/nix/store/2v2pwh1zlbxl8xw57qdkfl1crr5cbp1r-zsh-5.9.1-man",
+        "out": "/nix/store/dppwrnl3m8mxprh2xaryp7rmmlvn1q8z-zsh-5.9.1"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "zsh",
+      "broken": false,
+      "derivation": "/nix/store/gcjvxrzzz4n0vzgc24ns8b62115mj1fh-zsh-5.9.1.drv",
+      "description": "Z shell",
+      "install_id": "zsh",
+      "license": "MIT-Modern-Variant",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "zsh-5.9.1",
+      "pname": "zsh",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T04:12:45.963046Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "5.9.1",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/xdigwsprdxgv9c9yiscfbn03xdpx00sv-zsh-5.9.1-doc",
+        "info": "/nix/store/qa0qdi7iawn4z4ikjpmrxsvx06jd8rh8-zsh-5.9.1-info",
+        "man": "/nix/store/0kxkrx37g3rwlmcqqjy8fm88x7kc44jy-zsh-5.9.1-man",
+        "out": "/nix/store/31wmx92gvbk32dnmgnjq16dd7bnjpf53-zsh-5.9.1"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "zsh",
+      "broken": false,
+      "derivation": "/nix/store/19dmdz0sbcs802dq7n1hgn4djbc72kdl-zsh-5.9.1.drv",
+      "description": "Z shell",
+      "install_id": "zsh",
+      "license": "MIT-Modern-Variant",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "zsh-5.9.1",
+      "pname": "zsh",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T04:44:34.715221Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "5.9.1",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/383ydhgpdy36acch2xljfs0p6ifnhrk9-zsh-5.9.1-doc",
+        "info": "/nix/store/pc8kh4vi3iw62466wg3mdi1bq2p319va-zsh-5.9.1-info",
+        "man": "/nix/store/j952b399c41g5i81rc9x30w26wc7fx46-zsh-5.9.1-man",
+        "out": "/nix/store/lcx7c9rfkqzfpa5kwh69yiad2wm06a0l-zsh-5.9.1"
       },
       "system": "x86_64-linux",
       "group": "toplevel",

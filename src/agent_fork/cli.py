@@ -8,6 +8,7 @@ import os
 import signal
 import subprocess
 import sys
+import traceback
 from importlib.metadata import version
 from pathlib import Path
 from typing import cast
@@ -30,76 +31,220 @@ def _user_config_path(environment: dict[str, str]) -> Path:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agent-fork", allow_abbrev=False)
+    parser = argparse.ArgumentParser(
+        prog="agent-fork",
+        allow_abbrev=False,
+        description=(
+            "Fork the active coding-agent session into a verified Git branch and "
+            "worktree."
+        ),
+        epilog=(
+            "Exit codes:\n"
+            "  0 success\n"
+            "  1 runtime or verification failure\n"
+            "  2 usage error or required prompt disabled\n"
+            "  3 agent/session/target not found\n"
+            "  5 conflict or precondition refusal\n"
+            "  130/143 interrupted by SIGINT/SIGTERM"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "-V",
         "--version",
         action="version",
         version=f"agent-fork {version('agent-fork')}",
     )
-    parser.add_argument("-v", "--verbose", action="count", default=0)
-    parser.add_argument("-q", "--quiet", action="store_true")
-    parser.add_argument("--config", type=Path)
-    parser.add_argument("--debug", action="store_true")
+    parser.add_argument(
+        "-v", "--verbose", action="count", default=0, help="Increase diagnostics"
+    )
+    parser.add_argument(
+        "-q", "--quiet", action="store_true", help="Suppress optional diagnostics"
+    )
+    parser.add_argument("--config", type=Path, help="Use exactly this TOML config")
+    parser.add_argument(
+        "--debug", action="store_true", help="Include debugging diagnostics"
+    )
     commands = parser.add_subparsers(dest="command")
-    fork = commands.add_parser("fork", allow_abbrev=False)
-    fork.add_argument("name", nargs="?")
-    fork.add_argument("--agent")
-    fork.add_argument("--parent-session")
-    fork.add_argument("--branch")
-    fork.add_argument("--worktree-dir", type=Path)
-    fork.add_argument("--worktree-base-dir", type=Path)
-    fork.add_argument("--worktree-name")
-    fork.add_argument(
-        "--with-state", action=argparse.BooleanOptionalAction, default=None
+    fork = commands.add_parser(
+        "fork",
+        allow_abbrev=False,
+        help="Create a verified branch and worktree",
+        description="Create a verified branch and worktree carrying the current state.",
     )
     fork.add_argument(
-        "--with-ignored", action=argparse.BooleanOptionalAction, default=None
+        "name",
+        nargs="?",
+        metavar="NAME",
+        help="Fork identity; derived from the current branch when omitted",
     )
-    fork.add_argument("--verify", action=argparse.BooleanOptionalAction, default=None)
-    fork.add_argument("--force", action="store_true")
-    fork.add_argument("--dry-run", action="store_true")
-    fork.add_argument("--copy", action=argparse.BooleanOptionalAction, default=None)
-    fork.add_argument("-o", "--output", choices=("table", "text", "json"), default=None)
-    fork.add_argument("--json", action="store_true")
-    listing = commands.add_parser("list", allow_abbrev=False)
+    fork.add_argument(
+        "--agent",
+        metavar="{claude,codex}",
+        help="Host agent (claude or codex); detected when omitted",
+    )
+    fork.add_argument(
+        "--parent-session",
+        metavar="ID",
+        help="Parent session/thread ID; detected when omitted",
+    )
+    fork.add_argument("--branch", metavar="BRANCH", help="Explicit fork branch name")
+    fork.add_argument(
+        "--worktree-dir",
+        type=Path,
+        metavar="PATH",
+        help="Use this exact worktree destination",
+    )
+    fork.add_argument(
+        "--worktree-base-dir",
+        type=Path,
+        metavar="DIRECTORY",
+        help="Replace only the derived worktree parent directory",
+    )
+    fork.add_argument(
+        "--worktree-name",
+        metavar="COMPONENT",
+        help="Replace only the derived worktree directory name",
+    )
+    fork.add_argument(
+        "--with-state",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Carry staged, unstaged, and untracked state (default: enabled)",
+    )
+    fork.add_argument(
+        "--with-ignored",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Also carry ignored files (default: disabled)",
+    )
+    fork.add_argument(
+        "--verify",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Verify the completed fork (default: enabled)",
+    )
+    fork.add_argument(
+        "--force", action="store_true", help="Override only the Git-version floor"
+    )
+    fork.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview every planned local mutation without changing anything",
+    )
+    fork.add_argument(
+        "--copy",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Copy the paste command to the clipboard",
+    )
+    fork.add_argument(
+        "-o",
+        "--output",
+        choices=("table", "text", "json"),
+        default=None,
+        help="Select result format",
+    )
+    fork.add_argument("--json", action="store_true", help="Alias for --output json")
+    listing = commands.add_parser(
+        "list",
+        allow_abbrev=False,
+        help="List forks created by agent-fork",
+        description="List registered forks in deterministic creation order.",
+    )
     listing.add_argument(
-        "-o", "--output", choices=("table", "text", "json"), default="table"
+        "-o",
+        "--output",
+        choices=("table", "text", "json"),
+        default="table",
+        help="Select result format",
     )
-    listing.add_argument("--json", action="store_true")
-    cleanup = commands.add_parser("cleanup", allow_abbrev=False)
-    cleanup.add_argument("target")
-    cleanup.add_argument("--force", action="store_true")
-    cleanup.add_argument("--keep-branch", action="store_true")
-    cleanup.add_argument("--yes", action="store_true")
-    cleanup.add_argument("--no-input", action="store_true")
-    cleanup.add_argument("--dry-run", action="store_true")
+    listing.add_argument("--json", action="store_true", help="Alias for --output json")
+    cleanup = commands.add_parser(
+        "cleanup",
+        allow_abbrev=False,
+        help="Remove a registered fork",
+        description="Remove a fork worktree and, by default, its branch.",
+        epilog="Safety: Never remove the invoking working directory.",
+    )
     cleanup.add_argument(
-        "-o", "--output", choices=("table", "text", "json"), default="table"
+        "target", metavar="TARGET", help="Fork name, branch, or worktree path"
     )
-    cleanup.add_argument("--json", action="store_true")
-    doctor = commands.add_parser("doctor", allow_abbrev=False)
+    cleanup.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow unregistered, dirty, or unpushed targets",
+    )
+    cleanup.add_argument(
+        "--keep-branch", action="store_true", help="Remove only the worktree"
+    )
+    cleanup.add_argument(
+        "--yes", action="store_true", help="Confirm removal non-interactively"
+    )
+    cleanup.add_argument(
+        "--no-input", action="store_true", help="Never prompt for confirmation"
+    )
+    cleanup.add_argument(
+        "--dry-run", action="store_true", help="Print the removal plan only"
+    )
+    cleanup.add_argument(
+        "-o",
+        "--output",
+        choices=("table", "text", "json"),
+        default="table",
+        help="Select result format",
+    )
+    cleanup.add_argument("--json", action="store_true", help="Alias for --output json")
+    doctor = commands.add_parser(
+        "doctor",
+        allow_abbrev=False,
+        help="Diagnose Git, agent, config, and XDG readiness",
+    )
     doctor.add_argument(
-        "-o", "--output", choices=("table", "text", "json"), default="table"
+        "-o",
+        "--output",
+        choices=("table", "text", "json"),
+        default="table",
+        help="Select result format",
     )
-    doctor.add_argument("--json", action="store_true")
-    completion = commands.add_parser("completion", allow_abbrev=False)
-    completion.add_argument("shell", choices=("bash", "zsh", "fish"))
-    help_command = commands.add_parser("help", allow_abbrev=False)
-    help_command.add_argument("topic", nargs="?")
-    config = commands.add_parser("config", allow_abbrev=False)
+    doctor.add_argument("--json", action="store_true", help="Alias for --output json")
+    completion = commands.add_parser(
+        "completion", allow_abbrev=False, help="Generate shell completion"
+    )
+    completion.add_argument(
+        "shell", choices=("bash", "zsh", "fish"), help="Shell syntax to generate"
+    )
+    help_command = commands.add_parser(
+        "help", allow_abbrev=False, help="Show help for a command"
+    )
+    help_command.add_argument("topic", nargs="?", help="Command to explain")
+    config = commands.add_parser(
+        "config", allow_abbrev=False, help="Inspect or update configuration"
+    )
     actions = config.add_subparsers(dest="config_action", required=True)
-    setter = actions.add_parser("set", allow_abbrev=False)
-    setter.add_argument("key")
-    setter.add_argument("value")
-    actions.add_parser("validate", allow_abbrev=False)
-    viewer = actions.add_parser("view", allow_abbrev=False)
-    viewer.add_argument(
-        "-o", "--output", choices=("table", "text", "json"), default="table"
+    viewer = actions.add_parser(
+        "view", allow_abbrev=False, help="Show effective configuration"
     )
-    viewer.add_argument("--json", action="store_true")
-    getter = actions.add_parser("get", allow_abbrev=False)
-    getter.add_argument("key")
+    viewer.add_argument(
+        "-o",
+        "--output",
+        choices=("table", "text", "json"),
+        default="table",
+        help="Select result format",
+    )
+    viewer.add_argument("--json", action="store_true", help="Alias for --output json")
+    getter = actions.add_parser(
+        "get", allow_abbrev=False, help="Get one effective configuration value"
+    )
+    getter.add_argument("key", help="Configuration key")
+    setter = actions.add_parser(
+        "set", allow_abbrev=False, help="Set a user configuration value"
+    )
+    setter.add_argument("key", help="Configuration key")
+    setter.add_argument("value", help="New value")
+    actions.add_parser(
+        "validate", allow_abbrev=False, help="Validate effective configuration"
+    )
     return parser
 
 
@@ -352,6 +497,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     environment = dict(os.environ)
     try:
+        if args.verbose and not args.quiet:
+            print(f"agent-fork: command={args.command or 'help'}", file=sys.stderr)
+            if args.verbose > 1:
+                print(f"agent-fork: cwd={Path.cwd()}", file=sys.stderr)
         if args.command == "help":
             parser = _parser()
             if args.topic is None:
@@ -369,18 +518,9 @@ def main(argv: list[str] | None = None) -> int:
             selected.print_help()
             return 0
         if args.command == "completion":
-            scripts = {
-                "bash": (
-                    "complete -W 'fork cleanup list doctor config completion help' "
-                    "agent-fork"
-                ),
-                "zsh": "compdef '_arguments *::command:->cmds' agent-fork",
-                "fish": (
-                    "complete -c agent-fork -f -a "
-                    "'fork cleanup list doctor config completion help'"
-                ),
-            }
-            print(scripts[args.shell])
+            from agent_fork.completion import render_completion
+
+            print(render_completion(args.shell), end="")
             return 0
         if args.command == "doctor":
             from agent_fork.doctor import run_doctor
@@ -536,6 +676,8 @@ def main(argv: list[str] | None = None) -> int:
 
             print(render_error(error, machine=True), file=sys.stderr)
         else:
+            if args.debug:
+                traceback.print_exc()
             print(error, file=sys.stderr)
         return 2
     except Exception as error:
@@ -546,6 +688,8 @@ def main(argv: list[str] | None = None) -> int:
             bool(getattr(args, "json", False))
             or getattr(args, "output", None) == "json"
         )
+        if args.debug and not machine:
+            traceback.print_exc()
         print(render_error(error, machine=machine), file=sys.stderr)
         return error.exit_code if isinstance(error, AgentForkError) else 1
     _parser().print_help()

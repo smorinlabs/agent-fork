@@ -9,17 +9,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_fork.errors import AgentForkError
+from agent_fork.errors import ERROR_CATALOG, AgentForkError
 
-STABLE_ERROR_CODES = (
-    "conflict_branch_exists",
-    "parent_mid_operation",
-    "session_not_found",
-    "verify_failed",
-    "repo_no_commits",
-    "unmerged_index",
-    "registry_busy",
-)
+STABLE_ERROR_CODES = tuple(ERROR_CATALOG)
 
 
 def json_line(value: object) -> str:
