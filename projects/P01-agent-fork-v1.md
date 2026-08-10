@@ -4,7 +4,7 @@
 - **Trunk:** [PROJECTS.md](../PROJECTS.md)
 - **Spec:** [REQUIREMENTS.md](../REQUIREMENTS.md) — REQ-01..42, pinned to CLI Design Standard v1.4.14
 - **Design:** [DESIGN-DECISIONS.md](../DESIGN-DECISIONS.md) — D1–D14 locked 2026-07-21
-- **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — owner-approved 2026-08-10
+- **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — owner-approved 2026-08-10; [worktree destination controls](../docs/superpowers/plans/2026-08-10-worktree-destination-controls.md) — draft 2026-08-10
 - **Tracking:** [CONFORMANCE.md](../CONFORMANCE.md) — applicability map + waivers
 - **Prior art:** [RESEARCH.md](../RESEARCH.md) — agent-deck port source map; [recipes leaf](../research/reference/agent-session-fork-cli-recipes-2026-07-21.md)
 
@@ -75,6 +75,19 @@ Phase D — build (gate: everything green + reviews clean; every T preceded by i
 Phase E — companion skill (gate: end-to-end demo)
 - [x] [P01-TS15] Acceptance: real `/agent-fork` and `$agent-fork` invocations created verified disposable forks; emitted commands returned `PHASE_E_CLAUDE_PASTE_OK` and `PHASE_E_CODEX_PASTE_OK`
 - [x] [P01-T22] `agent-fork` skill via skill-creator — shared Claude/Codex placement, explicit env identity, validated `--json` contract, ambiguity refusal, and install hint green
+
+Phase E.5 — separable worktree destination controls (gate: D15 + TDD implementation + compatibility proof)
+- [x] [P01-T30] SDD/TDD implementation plan with matrix IDs, dependency order, adversarial checks, and WTD-G0..G5 gates authored for owner review
+- [ ] [P01-TS18] Approve D15 and add T-LOC-08..17, T-NAM-08..12, T-CLI-13..14, T-OUT-12..13 to the leading matrix
+- [ ] [P01-T25] Implement and validate pure base-directory/leaf-name composition
+- [ ] [P01-TS19] Add parser, precondition, relative-base, and dry-run tests
+- [ ] [P01-T26] Wire `--worktree-base-dir` and `--worktree-name` with exact-path mutual exclusion
+- [ ] [P01-TS20] Add derived-versus-explicit collision provenance tests
+- [ ] [P01-T27] Implement resource-aware automatic-name collision planning
+- [ ] [P01-TS21] Add topology, pipeline, output, registry, rollback, and cleanup tests
+- [ ] [P01-T28] Complete downstream integration without schema expansion
+- [ ] [P01-TS22] Add companion-skill passthrough and managed-option protection tests
+- [ ] [P01-T29] Close documentation, conformance, full gates, and real-agent proof
 
 Phase F — ship v0.1.0 (gate: released + installable)
 - [ ] [P01-T19] cli-standards audit vs built binary; fix/waive; CONFORMANCE.md audit row
