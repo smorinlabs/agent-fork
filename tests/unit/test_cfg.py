@@ -172,3 +172,40 @@ def test_env_vars_applied_to_config_path_and_output_format(repo_scenario):
     )
     assert resolved.config_path == path.resolve()
     assert resolved.output == "json"
+
+
+@pytest.mark.matrix("T-CFG-14")
+def test_agent_mode_defaults_to_auto(repo_scenario):
+    from agent_fork.config import resolve_config
+
+    assert resolve_config().agent_mode == "auto"
+
+
+@pytest.mark.matrix("T-CFG-15")
+def test_agent_mode_precedence(repo_scenario):
+    from agent_fork.config import resolve_config
+
+    resolved = resolve_config(
+        sources=({"agent_mode": "git-only"},),
+        env={"AGENT_FORK_AGENT_MODE": "strict"},
+        flags={"agent_mode": "auto"},
+    )
+    assert resolved.agent_mode == "auto"
+    assert (
+        resolve_config(
+            sources=({"agent_mode": "git-only"},),
+            env={"AGENT_FORK_AGENT_MODE": "strict"},
+        ).agent_mode
+        == "strict"
+    )
+
+
+@pytest.mark.matrix("T-CFG-16")
+def test_invalid_agent_mode_is_config_error(repo_scenario):
+    from agent_fork.config import ConfigError, load_config
+
+    world = repo_scenario()
+    path = world.parent_path / "bad.toml"
+    path.write_text('[fork]\nagent_mode = "sometimes"\n')
+    with pytest.raises(ConfigError, match="auto, strict, or git-only"):
+        load_config(path)

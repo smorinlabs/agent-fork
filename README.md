@@ -2,11 +2,14 @@
 
 `agent-fork` creates a Git branch and linked worktree carrying the current
 staged, unstaged, and untracked state, verifies the copy, and prints the exact
-command for continuing the current Claude Code or Codex conversation there.
+command for continuing the current Claude Code or Codex conversation there. In
+a normal terminal it creates the same verified branch/worktree and prints a
+`cd` command without requiring an agent CLI.
 
 The CLI is implemented for v0.1.0 but remains pre-release until the Phase F
-release gate. It requires Python 3.11+, Git 2.19+, Claude Code 2.0.73+ or Codex
-0.95+ (Codex native `fork` itself requires 0.81+).
+release gate. It requires Python 3.11+ and Git 2.19+. Managed session forks
+additionally require Claude Code 2.0.73+ or Codex 0.95+ (Codex native `fork`
+itself requires 0.81+).
 
 ## Companion skill
 
@@ -28,10 +31,12 @@ terminal. Until Phase F publishes v0.1.0, use the CLI from a source checkout.
 
 ## Usage
 
-Run inside the agent session whose conversation should be forked:
+Run inside an agent session or an ordinary terminal:
 
 ```bash
-agent-fork fork review-auth
+agent-fork fork review-auth                 # auto-detect agent or Git-only
+agent-fork fork terminal-copy --no-agent    # explicitly Git-only
+agent-fork fork session-copy --require-agent
 agent-fork fork review-auth --with-ignored
 agent-fork fork --no-with-state --dry-run
 agent-fork fork review-auth -o json
@@ -39,7 +44,7 @@ agent-fork fork experiment --branch review/manual \
   --worktree-base-dir /work/forks --worktree-name 'Manual Worktree'
 ```
 
-The agent and parent session are normally detected from
+The default `auto` mode detects the agent and parent session from
 `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`. They can be supplied explicitly:
 
 ```bash
@@ -47,6 +52,12 @@ agent-fork fork review-auth \
   --agent claude --parent-session '<session-uuid>' \
   --branch review/auth --worktree-dir '../auth-review'
 ```
+
+`--agent` with an explicit `--parent-session` works without either environment
+variable and implies strict agent behavior. `--require-agent` refuses unless a
+single usable session is available; `--no-agent` ignores agent signals. Set the
+default with `[fork] agent_mode = "auto" | "strict" | "git-only"` or
+`AGENT_FORK_AGENT_MODE`.
 
 `--worktree-dir` selects one exact destination. Alternatively,
 `--worktree-base-dir` and `--worktree-name` independently replace the parent

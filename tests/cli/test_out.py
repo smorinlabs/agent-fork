@@ -398,3 +398,27 @@ def test_config_failure_json_uses_specific_code_and_exit_2(repo_scenario):
     )
     assert completed.returncode == 2 and completed.stdout == b""
     assert json.loads(completed.stderr)["error"]["code"] == "config_error"
+
+
+@pytest.mark.matrix("T-OUT-17")
+def test_git_only_json_omits_agent_identity(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    completed = run_cli(
+        ["fork", "plain-json", "--no-agent", "--no-with-state", "--json"],
+        world.env,
+        world.parent_path,
+    )
+    document = json.loads(completed.stdout)
+    assert document["mode"] == "git-only"
+    assert "agent" not in document and "parent_session_id" not in document
+
+
+@pytest.mark.matrix("T-OUT-18")
+def test_agent_json_preserves_identity_and_mode(repo_scenario):
+    _, _, completed = _fork(repo_scenario, "agent-json", output="json")
+    document = json.loads(completed.stdout)
+    assert document["mode"] == "agent"
+    assert document["agent"] == "claude"
+    assert document["parent_session_id"] == PARENT

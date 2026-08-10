@@ -251,3 +251,33 @@ def detect_agent(
     if claude:
         return AgentContext(agent="claude", parent_session_id=claude_id or "")
     return AgentContext(agent="codex", parent_session_id=codex_id or "")
+
+
+def resolve_agent_mode(
+    mode: str,
+    env: Mapping[str, str],
+    *,
+    explicit_agent: str | None = None,
+    explicit_parent_session: str | None = None,
+) -> AgentContext | None:
+    """Select managed-agent or Git-only behavior without unsafe fallback."""
+    if mode not in {"auto", "strict", "git-only"}:
+        raise ValueError(f"unknown agent mode: {mode}")
+    explicit = explicit_agent is not None or explicit_parent_session is not None
+    if mode == "git-only":
+        if explicit:
+            raise AgentDetectionError(
+                "--no-agent cannot be combined with --agent or --parent-session"
+            )
+        return None
+    if explicit:
+        return detect_agent(
+            env,
+            explicit_agent=explicit_agent,
+            explicit_parent_session=explicit_parent_session,
+        )
+    claude = env.get("CLAUDECODE") == "1" and bool(env.get("CLAUDE_CODE_SESSION_ID"))
+    codex = bool(env.get("CODEX_THREAD_ID"))
+    if mode == "auto" and not claude and not codex:
+        return None
+    return detect_agent(env)

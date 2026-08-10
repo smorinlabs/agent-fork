@@ -15,6 +15,7 @@ class ConfigValues:
     with_ignored: bool | None = None
     branch_prefix: str | None = None
     worktree_location: str | None = None
+    agent_mode: str | None = None
     verify: bool | None = None
     copy: bool | None = None
     output: str | None = None
@@ -32,6 +33,7 @@ class ResolvedConfig:
     branch_prefix: str
     worktree_location: str
     worktree_location_explicit: bool
+    agent_mode: str
     verify: bool
     copy: bool
     output: str
@@ -53,15 +55,22 @@ class RegistryEntry:
     name: str
     branch: str
     worktree: str
-    agent: str
+    agent: str | None
     created_at: str
+    mode: str = "agent"
 
     @classmethod
     def create(
-        cls, *, name: str, branch: str, worktree: Path, agent: str
+        cls,
+        *,
+        name: str,
+        branch: str,
+        worktree: Path,
+        agent: str | None,
+        mode: str = "agent",
     ) -> RegistryEntry:
         created = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-        return cls(name, branch, str(worktree.resolve()), agent, created)
+        return cls(name, branch, str(worktree.resolve()), agent, created, mode)
 
     def to_dict(self, *, include_exists: bool = False) -> dict[str, object]:
         value: dict[str, object] = {
@@ -70,6 +79,7 @@ class RegistryEntry:
             "worktree": self.worktree,
             "agent": self.agent,
             "created_at": self.created_at,
+            "mode": self.mode,
         }
         if include_exists:
             value["worktree_exists"] = Path(self.worktree).exists()

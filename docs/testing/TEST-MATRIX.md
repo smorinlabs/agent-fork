@@ -39,6 +39,9 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 | T-CFG-11 | A6 — in a linked worktree, the project-config walk-up boundary is the worktree's own root, not the main checkout's | topology=linked-worktree | F | live | REQ-12 (A6); spec §8 A6 |
 | T-CFG-12 | `config set` followed by `config validate` round-trips a written value through the CLI | baseline | C | live | REQUIREMENTS §3.2 |
 | T-CFG-13 | `--config <path>` replaces discovery entirely — the walk-up/XDG/system chain is not consulted | baseline | F | live | REQ-12 |
+| T-CFG-14 | `agent_mode` defaults to `auto` | baseline | U | live | REQ-45; D16 |
+| T-CFG-15 | agent-mode precedence is CLI > environment > config > `auto` | baseline | U | live | REQ-45; D16 |
+| T-CFG-16 | invalid configured agent mode is rejected as `config_error` | baseline | U | live | REQ-45; D16 |
 
 ---
 
@@ -59,6 +62,10 @@ Varying axes: agent (claude/codex, must vary per §4); otherwise baseline pinned
 | T-DET-06 | tombstone — pre-0.95 Codex fallback: own-process-ancestry walk | agent=codex | F | tombstone | RESEARCH §3.2 (A7) |
 | T-DET-07 | tombstone — pre-0.95 Codex fallback: open-fd probe | agent=codex | F | tombstone | RESEARCH §3.2 (A7) |
 | T-DET-08 | tombstone — pre-0.95 Codex fallback: newest-rollout disk scan | agent=codex | F | tombstone | RESEARCH §3.2 (A7) |
+| T-DET-09 | auto mode with no session signals selects Git-only mode | baseline | U | live | REQ-45; D16 |
+| T-DET-10 | auto mode with exactly one session signal selects that agent | agent=claude | U | live | REQ-45; D16 |
+| T-DET-11 | strict mode with no session signal refuses with exit 3 | baseline | U | live | REQ-45; D16 |
+| T-DET-12 | auto mode with both session signals refuses as ambiguous | baseline | U | live | REQ-45; D16 |
 
 ---
 
@@ -272,6 +279,7 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-05 | timeout row — lock held past the bound → registry_busy, fork rolled back cleanly (`cleaned up` reported; the manual-recovery command appears only if that rollback itself fails, per REQ-22) | baseline | F | live | REQ-41 (A13); REQ-22 |
 | T-REG-06 | registry ownership check feeds cleanup — `cleanup` refuses a target it didn't create unless `--force` | baseline | F | live | REQ-31; D12 |
 | T-REG-07 | `list` renders registry entries (name, branch, worktree path, agent, worktree-still-exists) in creation-time order; `-o json` emits the stable schema | baseline | C | live | REQ-31; D10; REQ-17 |
+| T-REG-08 | registry records mode and reads legacy records without mode as agent mode | baseline | U | live | REQ-45; D16 |
 
 ---
 
@@ -362,6 +370,8 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-14 | production boundary-code inventory exactly matches the authoritative error catalog | baseline | C | live | CLI Design Standard R7.12; P01-T19 follow-up |
 | T-OUT-15 | every catalog entry renders its JSON code and carries its documented exit family | baseline | C | live | CLI Design Standard R6/R7.12; P01-T19 follow-up |
 | T-OUT-16 | handled configuration failure emits `config_error` with exit 2 under JSON output | baseline | C | live | CLI Design Standard R6/R7.8; P01-T19 follow-up |
+| T-OUT-17 | Git-only JSON reports `mode=git-only` and omits agent/session fields | baseline | C | live | REQ-45; D16 |
+| T-OUT-18 | managed-agent JSON reports `mode=agent` and preserves agent/session fields | agent=claude | C | live | REQ-45; D16 |
 
 ---
 
@@ -394,6 +404,9 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-18 | Fish completion has semantic parity and passes syntax validation when Fish is installed | baseline | C | live | CLI Design Standard R9.1; P01-T19 follow-up |
 | T-CLI-19 | semantic metavariables, config-view output help, and read-first config action order match the approved contract | baseline | C | live | CLI Design Standard R3/R7.9; P01-T19 follow-up |
 | T-CLI-20 | display-only agent enum metadata preserves unknown-agent exit 3 behavior | baseline | C | live | REQ-03/REQ-11; P01-T19 follow-up |
+| T-CLI-21 | `--require-agent` and `--no-agent` are mutually exclusive | baseline | C | live | REQ-45; D16 |
+| T-CLI-22 | `--no-agent` conflicts with explicit agent/session inputs | baseline | C | live | REQ-45; D16 |
+| T-CLI-23 | a real fork outside an agent succeeds in default auto mode as Git-only | baseline | C | live | REQ-45; D16 |
 
 ---
 

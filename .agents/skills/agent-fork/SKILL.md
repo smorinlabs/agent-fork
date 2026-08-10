@@ -17,7 +17,7 @@ Destination options may be passed through independently, for example
 `--branch review/manual --worktree-base-dir /work/forks --worktree-name manual`.
 The skill preserves their order and spelling; the CLI validates their semantics.
 
-The script detects Claude Code from `CLAUDECODE=1` plus
+The script selects the CLI's strict agent mode, then detects Claude Code from `CLAUDECODE=1` plus
 `CLAUDE_CODE_SESSION_ID`, or Codex from `CODEX_THREAD_ID`. It passes the detected
 agent and session explicitly to `agent-fork fork --json`. If the CLI is absent,
 show its installation hint and stop.

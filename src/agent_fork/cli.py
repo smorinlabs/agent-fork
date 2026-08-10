@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -35,8 +36,8 @@ def _parser() -> argparse.ArgumentParser:
         prog="agent-fork",
         allow_abbrev=False,
         description=(
-            "Fork the active coding-agent session into a verified Git branch and "
-            "worktree."
+            "Create a verified Git branch and worktree, with adaptive coding-agent "
+            "session integration."
         ),
         epilog=(
             "Exit codes:\n"
@@ -87,6 +88,17 @@ def _parser() -> argparse.ArgumentParser:
         "--parent-session",
         metavar="ID",
         help="Parent session/thread ID; detected when omitted",
+    )
+    agent_mode = fork.add_mutually_exclusive_group()
+    agent_mode.add_argument(
+        "--require-agent",
+        action="store_true",
+        help="Require an unambiguous supported agent session",
+    )
+    agent_mode.add_argument(
+        "--no-agent",
+        action="store_true",
+        help="Create only the Git branch and worktree",
     )
     fork.add_argument("--branch", metavar="BRANCH", help="Explicit fork branch name")
     fork.add_argument(
@@ -208,6 +220,9 @@ def _parser() -> argparse.ArgumentParser:
         help="Select result format",
     )
     doctor.add_argument("--json", action="store_true", help="Alias for --output json")
+    doctor_mode = doctor.add_mutually_exclusive_group()
+    doctor_mode.add_argument("--require-agent", action="store_true")
+    doctor_mode.add_argument("--no-agent", action="store_true")
     completion = commands.add_parser(
         "completion", allow_abbrev=False, help="Generate shell completion"
     )
@@ -278,10 +293,11 @@ def _path_for_name(info, config, name, branch, environment, args=None, cwd=None)
 
 def _fork_cli(args, environment: dict[str, str]) -> int:
     from agent_fork.agents import (
+        LaunchCommand,
         build_launch_command,
-        detect_agent,
         preflight_agent,
         preflight_git,
+        resolve_agent_mode,
     )
     from agent_fork.config import resolve_discovered_config
     from agent_fork.git import run_git
@@ -308,13 +324,23 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             "verify": args.verify,
             "copy": args.copy,
             "output": "json" if args.json else args.output,
+            "agent_mode": (
+                "strict"
+                if args.require_agent
+                or args.agent is not None
+                or args.parent_session is not None
+                else "git-only"
+                if args.no_agent
+                else None
+            ),
         }.items()
         if value is not None
     }
     config = resolve_discovered_config(
         cwd, environment, explicit_path=args.config, flags=flags
     )
-    context = detect_agent(
+    context = resolve_agent_mode(
+        config.agent_mode,
         environment,
         explicit_agent=args.agent,
         explicit_parent_session=args.parent_session,
@@ -409,16 +435,23 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     )
     extra_args = (
         config.claude_extra_args
-        if context.agent == "claude"
+        if context is not None and context.agent == "claude"
         else config.codex_extra_args
+        if context is not None
+        else ()
     )
-    launch = build_launch_command(
-        context, worktree=destination, name=name, extra_args=extra_args
+    launch = (
+        build_launch_command(
+            context, worktree=destination, name=name, extra_args=extra_args
+        )
+        if context is not None
+        else LaunchCommand(f"cd {shlex.quote(str(destination))}", None, ())
     )
     output_kind = "json" if args.json else (args.output or config.output)
 
     if args.dry_run:
-        preflight_agent(context, environment)
+        if context is not None:
+            preflight_agent(context, environment)
         git_version = subprocess.run(
             ["git", "--version"], env=environment, capture_output=True, text=True
         ).stdout
@@ -463,8 +496,9 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     if config.copy:
         notices.extend(copy_to_clipboard(result.launch.command))
     presented = ForkOutput(
-        agent=context.agent,
-        parent_session_id=context.parent_session_id,
+        agent=context.agent if context is not None else None,
+        parent_session_id=context.parent_session_id if context is not None else None,
+        mode="agent" if context is not None else "git-only",
         name=name,
         branch=branch,
         worktree=result.creation.path,
@@ -495,6 +529,12 @@ def main(argv: list[str] | None = None) -> int:
             "--worktree-dir cannot be combined with --worktree-base-dir or "
             "--worktree-name"
         )
+    if (
+        args.command == "fork"
+        and args.no_agent
+        and (args.agent is not None or args.parent_session is not None)
+    ):
+        parser.error("--no-agent cannot be combined with --agent or --parent-session")
     environment = dict(os.environ)
     try:
         if args.verbose and not args.quiet:
@@ -526,7 +566,14 @@ def main(argv: list[str] | None = None) -> int:
             from agent_fork.doctor import run_doctor
             from agent_fork.output import json_line
 
-            checks = run_doctor(Path.cwd(), environment)
+            doctor_mode = (
+                "strict"
+                if args.require_agent
+                else "git-only"
+                if args.no_agent
+                else None
+            )
+            checks = run_doctor(Path.cwd(), environment, agent_mode=doctor_mode)
             machine = args.json or args.output == "json"
             if machine:
                 print(
@@ -624,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
                     exists = "yes" if Path(item.worktree).exists() else "no"
                     print(
                         f"{item.name}\t{item.branch}\t{item.worktree}\t"
-                        f"{item.agent}\t{exists}"
+                        f"{item.agent or item.mode}\t{exists}"
                     )
             return 0
         if args.command == "config" and args.config_action == "set":
@@ -644,6 +691,7 @@ def main(argv: list[str] | None = None) -> int:
                     "with_ignored": resolved.with_ignored,
                     "branch_prefix": resolved.branch_prefix,
                     "worktree_location": resolved.worktree_location,
+                    "agent_mode": resolved.agent_mode,
                     "verify": resolved.verify,
                     "copy": resolved.copy,
                     "output": resolved.output,

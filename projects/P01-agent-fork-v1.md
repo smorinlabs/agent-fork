@@ -90,6 +90,7 @@ Phase E.5 — separable worktree destination controls (gate: D15 + TDD implement
 - [x] [P01-T29] Close documentation, conformance, full gates, and real-agent proof — 246 passed/1 retired skip, clean install, disposable Codex fork and orphan-free cleanup green
 
 Phase F — ship v0.1.0 (gate: released + installable)
+- [x] [P01-T31] Adaptive terminal/agent operation (D16/REQ-45) — `auto`, `strict`, and `git-only` modes; mode-aware doctor/output/registry; strict companion skill; full TDD gates green
 - [x] [P01-T19] CLI Design Standard v1.4.14 audit and approved second-level hardening — semantic help/diagnostics, authoritative error catalog, functional Bash/Zsh/Fish completions, and installed-wheel checks green; existing R2.1 waiver unchanged; no new waivers
 - [ ] [P01-T20] Release plumbing: release-please, PyPI + TestPyPI trusted publishing, Homebrew tap
 - [ ] [P01-T21] Cut v0.1.0 replacing the PyPI placeholder; verify `uv tool install` + `pipx install`
