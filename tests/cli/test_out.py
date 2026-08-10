@@ -263,3 +263,71 @@ def test_json_success_object_carries_req17_minimum_fields(repo_scenario):
     )
     assert configured_result.returncode == 0
     assert "--model 'claude future'" in json.loads(configured_result.stdout)["command"]
+
+
+@pytest.mark.matrix("T-OUT-12")
+def test_dry_run_reports_composed_destination_without_mutation(repo_scenario):
+    world = repo_scenario("plain@main")
+    base = world.parent_path.parent / "fork base"
+    base.mkdir()
+    from conftest import run_cli
+
+    completed = run_cli(
+        [
+            "fork",
+            "identity",
+            "--worktree-base-dir",
+            str(base),
+            "--worktree-name",
+            "Exact Leaf",
+            "--dry-run",
+        ],
+        _agent_env(world),
+        world.parent_path,
+    )
+    destination = base / "Exact Leaf"
+    assert completed.returncode == 0
+    assert f"worktree: create {destination}".encode() in completed.stdout
+    assert not destination.exists()
+
+
+@pytest.mark.matrix("T-OUT-13")
+def test_human_and_json_report_same_composed_path(repo_scenario):
+    first = repo_scenario("plain@main")
+    base = first.parent_path.parent / "forks"
+    base.mkdir()
+    from conftest import run_cli
+
+    human = run_cli(
+        [
+            "fork",
+            "human-path",
+            "--worktree-base-dir",
+            str(base),
+            "--worktree-name",
+            "Human Leaf",
+        ],
+        _agent_env(first),
+        first.parent_path,
+    )
+    assert human.returncode == 0
+    assert str(base / "Human Leaf").encode() in human.stdout
+
+    second = repo_scenario("plain@main")
+    base2 = second.parent_path.parent / "forks"
+    base2.mkdir()
+    machine = run_cli(
+        [
+            "fork",
+            "json-path",
+            "--worktree-base-dir",
+            str(base2),
+            "--worktree-name",
+            "JSON Leaf",
+            "--json",
+        ],
+        _agent_env(second),
+        second.parent_path,
+    )
+    assert machine.returncode == 0
+    assert json.loads(machine.stdout)["fork"]["worktree"] == str(base2 / "JSON Leaf")

@@ -78,16 +78,16 @@ Phase E — companion skill (gate: end-to-end demo)
 
 Phase E.5 — separable worktree destination controls (gate: D15 + TDD implementation + compatibility proof)
 - [x] [P01-T30] SDD/TDD implementation plan with matrix IDs, dependency order, adversarial checks, and WTD-G0..G5 gates authored for owner review
-- [ ] [P01-TS18] Approve D15 and add T-LOC-08..17, T-NAM-08..12, T-CLI-13..14, T-OUT-12..13 to the leading matrix
-- [ ] [P01-T25] Implement and validate pure base-directory/leaf-name composition
-- [ ] [P01-TS19] Add parser, precondition, relative-base, and dry-run tests
-- [ ] [P01-T26] Wire `--worktree-base-dir` and `--worktree-name` with exact-path mutual exclusion
-- [ ] [P01-TS20] Add derived-versus-explicit collision provenance tests
-- [ ] [P01-T27] Implement resource-aware automatic-name collision planning
-- [ ] [P01-TS21] Add topology, pipeline, output, registry, rollback, and cleanup tests
-- [ ] [P01-T28] Complete downstream integration without schema expansion
-- [ ] [P01-TS22] Add companion-skill passthrough and managed-option protection tests
-- [ ] [P01-T29] Close documentation, conformance, full gates, and real-agent proof
+- [x] [P01-TS18] Approve D15 and add T-LOC-08..17, T-NAM-08..12, T-CLI-13..14, T-OUT-12..13 to the leading matrix
+- [x] [P01-T25] Implement and validate pure base-directory/leaf-name composition
+- [x] [P01-TS19] Add parser, precondition, relative-base, and dry-run tests
+- [x] [P01-T26] Wire `--worktree-base-dir` and `--worktree-name` with exact-path mutual exclusion
+- [x] [P01-TS20] Add derived-versus-explicit collision provenance tests
+- [x] [P01-T27] Implement resource-aware automatic-name collision planning
+- [x] [P01-TS21] Add topology, pipeline, output, registry, rollback, and cleanup tests
+- [x] [P01-T28] Complete downstream integration without schema expansion
+- [x] [P01-TS22] Add companion-skill passthrough and managed-option protection tests
+- [x] [P01-T29] Close documentation, conformance, full gates, and real-agent proof — 246 passed/1 retired skip, clean install, disposable Codex fork and orphan-free cleanup green
 
 Phase F — ship v0.1.0 (gate: released + installable)
 - [ ] [P01-T19] cli-standards audit vs built binary; fix/waive; CONFORMANCE.md audit row

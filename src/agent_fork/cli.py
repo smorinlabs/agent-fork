@@ -48,6 +48,8 @@ def _parser() -> argparse.ArgumentParser:
     fork.add_argument("--parent-session")
     fork.add_argument("--branch")
     fork.add_argument("--worktree-dir", type=Path)
+    fork.add_argument("--worktree-base-dir", type=Path)
+    fork.add_argument("--worktree-name")
     fork.add_argument(
         "--with-state", action=argparse.BooleanOptionalAction, default=None
     )
@@ -101,14 +103,14 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _path_for_name(info, config, name, branch, environment):
-    from agent_fork.location import derive_worktree_path
+def _path_for_name(info, config, name, branch, environment, args=None, cwd=None):
+    from agent_fork.location import compose_worktree_destination, derive_worktree_path
 
     root = info.worktree_root or info.common_dir
     data = Path(
         environment.get("XDG_DATA_HOME", Path(environment["HOME"]) / ".local/share")
     )
-    return derive_worktree_path(
+    derived = derive_worktree_path(
         root,
         branch,
         name,
@@ -118,6 +120,14 @@ def _path_for_name(info, config, name, branch, environment):
         parent_is_linked=info.linked_worktree,
         bare_at_root=info.bare,
         location_explicit=config.worktree_location_explicit,
+    )
+    if args is None or args.worktree_dir is not None:
+        return derived
+    return compose_worktree_destination(
+        derived,
+        invocation_cwd=cwd or Path.cwd(),
+        base_dir=args.worktree_base_dir,
+        worktree_name=args.worktree_name,
     )
 
 
@@ -180,21 +190,57 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     anchor = resolve_anchor(info.parent_path, env=environment)
     auto = derive_auto_name(parent_branch, detached_sha=anchor)
 
-    def collides(candidate: str) -> bool:
+    def candidate_resources(candidate: str):
         plan = naming_plan(candidate, branch_prefix=config.branch_prefix)
-        destination = _path_for_name(info, config, candidate, plan.branch, environment)
+        branch = args.branch or plan.branch
+        destination = (
+            args.worktree_dir.expanduser().resolve()
+            if args.worktree_dir is not None
+            else _path_for_name(
+                info, config, candidate, branch, environment, args=args, cwd=cwd
+            )
+        )
+        return branch, destination
+
+    def collision_state(candidate: str):
+        branch, destination = candidate_resources(candidate)
         branch_exists = (
             run_git(
                 parent_path,
-                ["show-ref", "--verify", "--quiet", f"refs/heads/{plan.branch}"],
+                ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
                 env=environment,
                 check=False,
             ).returncode
             == 0
         )
-        return branch_exists or destination.exists() or destination.is_symlink()
+        return branch_exists, destination.exists() or destination.is_symlink()
 
     if args.name is None:
+
+        def collides(candidate: str) -> bool:
+            branch_collision, path_collision = collision_state(candidate)
+            if not (branch_collision or path_collision):
+                return False
+            next_name = f"{auto}-2" if candidate == auto else None
+            if next_name is None:
+                prefix = f"{auto}-"
+                suffix = candidate.removeprefix(prefix)
+                next_name = f"{auto}-{int(suffix) + 1}"
+            branch, destination = candidate_resources(candidate)
+            next_branch, next_destination = candidate_resources(next_name)
+            from agent_fork.errors import PreconditionError
+
+            if branch_collision and next_branch == branch:
+                raise PreconditionError(
+                    "conflict_branch_exists", f"branch already exists: {branch}"
+                )
+            if path_collision and next_destination == destination:
+                raise PreconditionError(
+                    "conflict_worktree_path",
+                    f"worktree destination already exists: {destination}",
+                )
+            return True
+
         name = unique_auto_name(auto, collides)
     else:
         name = sanitize_name(args.name)
@@ -214,7 +260,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     destination = (
         args.worktree_dir.expanduser().resolve()
         if args.worktree_dir is not None
-        else _path_for_name(info, config, name, branch, environment)
+        else _path_for_name(info, config, name, branch, environment, args=args, cwd=cwd)
     )
     extra_args = (
         config.claude_extra_args
@@ -293,7 +339,17 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
 def main(argv: list[str] | None = None) -> int:
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if (
+        args.command == "fork"
+        and args.worktree_dir is not None
+        and (args.worktree_base_dir is not None or args.worktree_name is not None)
+    ):
+        parser.error(
+            "--worktree-dir cannot be combined with --worktree-base-dir or "
+            "--worktree-name"
+        )
     environment = dict(os.environ)
     try:
         if args.command == "help":

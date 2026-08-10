@@ -1,12 +1,21 @@
 # Worktree destination controls — SDD/TDD implementation plan
 
 **Date:** 2026-08-10
-**Status:** Draft for owner approval
+**Status:** Implemented; WTD-G5 evidence complete 2026-08-10
 **Scope:** Phase E.5 only; add separable worktree base-directory and leaf-name
 controls, preserve existing behavior, and stop before Phase F release work
 **Project:** P01 — agent-fork v1
 
 ## 1. Outcome
+
+### 0. Pre-implementation adversarial review
+
+The owner-approved plan was challenged before code changes. Four amendments are
+binding: validate the non-rectangular exact-vs-partial conflict immediately
+after parsing; decide collision mutability from consecutive fully composed
+resource plans; resolve an explicit base once but never resolve/follow its leaf;
+and use stable precondition errors `invalid_worktree_base` and
+`invalid_worktree_name` before mutation.
 
 Add two optional `fork` flags:
 
@@ -499,6 +508,29 @@ Final evidence must state:
 - Signal or verification failure after creation: rollback removes only the
   created worktree/branch and never the explicit base.
 - Concurrent forks targeting the same composed destination: exactly one wins.
+
+## 8. Completion evidence and post-implementation adversarial review
+
+The completed diff was reviewed again from the parser, path-containment,
+collision-provenance, rollback, output, and skill boundaries. One test-quality
+finding was corrected: the original fixed-collision integration test supplied a
+positional name and therefore did not exercise auto-name planning. It now uses
+bare auto-name mode and proves both a fixed existing branch and a fixed exact
+destination refuse immediately without a suffix. No unresolved implementation
+finding remains.
+
+WTD-G5 evidence:
+
+- `flox activate -- just all`: green, 246 passed and only retired T-EXP-04 skipped;
+- `just check-matrix`, `just strict-collect` (247 items), `just clean-install`,
+  `git diff --check`: green;
+- disposable real Codex fork created branch `test/phase-e5-manual` at the exact
+  composed `/tmp/agent-fork-wtd-proof.LoQGae/manual-directory` and emitted
+  `codex fork <parent-id> -C <that-path>`; force cleanup removed the worktree,
+  branch, registry entry, and test-owned base, leaving an empty registry;
+- old path derivation and `--worktree-dir` tests remain green; no lifecycle skip,
+  config key, registry field, or JSON field was added;
+- no release, publication, or Phase F work began.
 - Cleanup invoked from outside and from inside the target; cwd guard remains.
 
 ## 8. Commit and review checkpoints

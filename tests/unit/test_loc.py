@@ -3,6 +3,8 @@
 Matrix: docs/testing/TEST-MATRIX.md §G-LOC.
 """
 
+from pathlib import Path
+
 import pytest
 
 
@@ -129,3 +131,73 @@ def test_explicit_worktree_location_suppresses_mirror_parent_heuristic(repo_scen
     )
     assert explicit_sibling.parent == world.repo_root.parent
     assert explicit_sibling.parent != world.parent_path.parent
+
+
+@pytest.mark.parametrize(
+    ("base", "leaf", "expected"),
+    [
+        pytest.param(
+            "base",
+            None,
+            "base/derived",
+            id="T-LOC-08",
+            marks=pytest.mark.matrix("T-LOC-08"),
+        ),
+        pytest.param(
+            None,
+            "Exact Name",
+            "original/Exact Name",
+            id="T-LOC-09",
+            marks=pytest.mark.matrix("T-LOC-09"),
+        ),
+        pytest.param(
+            "base",
+            "Exact Name",
+            "base/Exact Name",
+            id="T-LOC-10",
+            marks=pytest.mark.matrix("T-LOC-10"),
+        ),
+    ],
+)
+def test_partial_destination_composition(repo_scenario, base, leaf, expected):
+    from agent_fork.location import compose_worktree_destination
+
+    root = repo_scenario().parent_path.parent
+    (root / "base").mkdir()
+    derived = root / "original/derived"
+    value = compose_worktree_destination(
+        derived,
+        invocation_cwd=root,
+        base_dir=Path(base) if base else None,
+        worktree_name=leaf,
+    )
+    assert value == root / expected
+
+
+@pytest.mark.matrix("T-LOC-11")
+def test_invalid_explicit_worktree_leaf_inventory(repo_scenario):
+    from agent_fork.errors import PreconditionError
+    from agent_fork.location import validate_worktree_name
+
+    for value in ("", "   ", ".", "..", "a/b", "a\\b", "a\0b", "/absolute"):
+        with pytest.raises(PreconditionError) as caught:
+            validate_worktree_name(value)
+        assert caught.value.code == "invalid_worktree_name"
+
+
+@pytest.mark.matrix("T-LOC-14")
+def test_template_destination_can_replace_parent_and_leaf(repo_scenario):
+    from agent_fork.location import compose_worktree_destination, derive_worktree_path
+
+    root = repo_scenario().parent_path
+    base = root.parent / "base"
+    base.mkdir()
+    derived = derive_worktree_path(
+        root, "fork/topic", "topic", "{repo-root}/custom/{branch}"
+    )
+    assert (
+        compose_worktree_destination(
+            derived, invocation_cwd=root, base_dir=base, worktree_name="leaf"
+        )
+        == base / "leaf"
+    )

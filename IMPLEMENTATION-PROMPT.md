@@ -18,7 +18,7 @@ In precedence order (paths as given):
 6. `CONFORMANCE.md` — applicability map + the one standing waiver (R2.1 `cleanup`).
 7. `research/reference/agent-session-fork-cli-recipes-2026-07-21.md` — the distilled per-agent fork recipes with version gates and gotchas.
 
-Key locked facts: Python ≥3.11, `uv`-based packaging; PyPI + TestPyPI names **already reserved** (`0.0.0.dev0` placeholders — PEP 541 makes shipping a real v0.1.0 time-sensitive); v1 agents are Claude Code + Codex only; v1 refuses when native fork is impossible (D14 — no fallback ladder); `[agents.<name>] extra_args` ships in v1 (D11 — individually shell-quoted).
+Key locked facts: Python ≥3.11, `uv`-based packaging; PyPI + TestPyPI names **already reserved** (`0.0.0.dev0` placeholders — PEP 541 makes shipping a real v0.1.0 time-sensitive); v1 agents are Claude Code + Codex only; v1 refuses when native fork is impossible (D14 — no fallback ladder); `[agents.<name>] extra_args` ships in v1 (D11 — individually shell-quoted). Post-Phase-E amendment D15 adds independent `--worktree-base-dir`/`--worktree-name` composition while retaining exclusive exact `--worktree-dir`; Phase E.5 completes and gates this compatibility increment before Phase F.
 
 ## 2. Method — non-negotiable
 

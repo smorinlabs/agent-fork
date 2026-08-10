@@ -13,6 +13,10 @@ worktree, verification, rollback, registry, and launch-command mechanics.
 3. Preserve the script's error text. Do not retry with guessed session IDs, fallback transcript searches, or hand-written Git commands.
 4. On success, present the script output prominently and tell the user to paste the final command into a fresh terminal.
 
+Destination options may be passed through independently, for example
+`--branch review/manual --worktree-base-dir /work/forks --worktree-name manual`.
+The skill preserves their order and spelling; the CLI validates their semantics.
+
 The script detects Claude Code from `CLAUDECODE=1` plus
 `CLAUDE_CODE_SESSION_ID`, or Codex from `CODEX_THREAD_ID`. It passes the detected
 agent and session explicitly to `agent-fork fork --json`. If the CLI is absent,

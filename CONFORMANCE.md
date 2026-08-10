@@ -89,6 +89,7 @@ open implementation finding.
 | REQ-41 | Implemented | Atomic registry replacement, advisory timeout/death, concurrent forks, Git race |
 | REQ-42 | Implemented | G-EMT hostile shell execution with `shlex.quote` per element |
 | REQ-43 | Implemented | Sole PATH-resolved Git primitive plus shim canary/fault injection |
+| REQ-44 | Implemented | G-LOC-08..17, G-NAM-08..12, T-CLI-13..14, and T-OUT-12..13 cover independent destination composition, validation, collisions, and output compatibility |
 
 ## Phase D decision trace
 
@@ -108,6 +109,7 @@ open implementation finding.
 | D12 | Implemented | Registry targeting, force guard boundary, separate consent |
 | D13 | Implemented + waived | `cleanup` name retained under R2.1 waiver |
 | D14 | Implemented | Native-fork impossibility refuses diagnostically before mutation |
+| D15 | Implemented | Independent base/leaf overrides compose after D5 derivation; exact paths remain parser-exclusive |
 
 ## Blocking conformance evidence
 

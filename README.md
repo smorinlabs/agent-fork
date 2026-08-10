@@ -35,6 +35,8 @@ agent-fork fork review-auth
 agent-fork fork review-auth --with-ignored
 agent-fork fork --no-with-state --dry-run
 agent-fork fork review-auth -o json
+agent-fork fork experiment --branch review/manual \
+  --worktree-base-dir /work/forks --worktree-name 'Manual Worktree'
 ```
 
 The agent and parent session are normally detected from
@@ -45,6 +47,12 @@ agent-fork fork review-auth \
   --agent claude --parent-session '<session-uuid>' \
   --branch review/auth --worktree-dir '../auth-review'
 ```
+
+`--worktree-dir` selects one exact destination. Alternatively,
+`--worktree-base-dir` and `--worktree-name` independently replace the parent
+and leaf of the configured/default destination and may be combined. An explicit
+base must already exist. The exact-path flag cannot be mixed with either partial
+override.
 
 Other commands:
 

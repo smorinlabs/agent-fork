@@ -129,3 +129,45 @@ def test_malformed_cli_json_is_diagnostic(tmp_path: Path) -> None:
     completed, _ = _run(tmp_path, "codex", shim_mode="invalid")
     assert completed.returncode == 1
     assert "Invalid agent-fork JSON output" in completed.stderr
+
+
+def test_destination_and_branch_options_pass_through_before_managed_identity(
+    tmp_path: Path,
+) -> None:
+    completed, argv = _run(
+        tmp_path,
+        "codex",
+        "experiment",
+        "--branch",
+        "review/manual",
+        "--worktree-base-dir",
+        "/work/forks",
+        "--worktree-name",
+        "Manual Worktree",
+    )
+    assert completed.returncode == 0
+    assert argv[:8] == [
+        "fork",
+        "experiment",
+        "--branch",
+        "review/manual",
+        "--worktree-base-dir",
+        "/work/forks",
+        "--worktree-name",
+        "Manual Worktree",
+    ]
+    assert argv[8:] == [
+        "--agent",
+        "codex",
+        "--parent-session",
+        "codex-parent",
+        "--json",
+    ]
+
+
+def test_new_passthrough_does_not_relax_managed_option_rejection(
+    tmp_path: Path,
+) -> None:
+    completed, argv = _run(tmp_path, "claude", "--worktree-name", "leaf", "--json")
+    assert completed.returncode == 3
+    assert argv == []

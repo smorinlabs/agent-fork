@@ -146,6 +146,11 @@ Varying axes: none of the shared four vary (pure unit-level logic, tier U); deta
 | T-NAM-05 | an explicit name that collides with an existing branch/worktree is passed through unmodified — refusal, not an auto-suffix | baseline | U | live | D4; REQ-19 |
 | T-NAM-06 | 1000-cap — the collision-suffix search hard-stops after 1000 attempts | baseline | U | live | D4; RESEARCH §2.4 |
 | T-NAM-07 | the derived name feeds the fork branch (`<branch_prefix><name>`), the worktree directory, and the session display name — each feed-through asserted individually for one fork | baseline | U | live | REQUIREMENTS §3.3; D6 |
+| T-NAM-08 | defaults still feed all identities unchanged | baseline | U | live | D15; REQ-44 |
+| T-NAM-09 | explicit branch/leaf do not change fork or session display name | baseline | U | live | D15; REQ-44 |
+| T-NAM-10 | derived-resource collision advances automatic name | baseline | U | live | D15; REQ-44 |
+| T-NAM-11 | explicit branch/path collision refuses without suffix | baseline | C | live | D15; REQ-44 |
+| T-NAM-12 | fixed explicit collision does not enter the 1000-candidate loop | baseline | U | live | D15; REQ-44 |
 
 ---
 
@@ -165,6 +170,16 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 | T-LOC-05 | explicit `worktree_location` config value suppresses the mirror-parent heuristic | baseline | U | live | D5 |
 | T-LOC-06 | mirror-parent heuristic — parent is a linked worktree → fork mirrors the parent's observed placement pattern | topology=linked-worktree | F | live | D5; RESEARCH §4 |
 | T-LOC-07 | bare-at-root placement override — fork worktree placed as a child of the bare dir | topology=bare@bare | F | live | D5; RESEARCH §2.4 |
+| T-LOC-08 | base-only override preserves the derived leaf | baseline | U | live | D15; REQ-44 |
+| T-LOC-09 | name-only override preserves the derived parent and exact leaf | baseline | U | live | D15; REQ-44 |
+| T-LOC-10 | base and name compose to exactly `base/name` | baseline | U | live | D15; REQ-44 |
+| T-LOC-11 | invalid explicit leaf inventory refuses | baseline | U | live | D15; REQ-44 |
+| T-LOC-12 | relative base resolves from invocation cwd | baseline | C | live | D15; REQ-44 |
+| T-LOC-13 | explicit base must exist and be a directory | baseline | C | live | D15; REQ-44 |
+| T-LOC-14 | template result accepts parent/leaf replacement after derivation | baseline | U | live | D15; REQ-44 |
+| T-LOC-15 | linked mirror-parent result accepts partial override after derivation | topology=linked-worktree | F | live | D15; REQ-44 |
+| T-LOC-16 | bare-at-root result accepts partial override after derivation | topology=bare@bare | F | live | D15; REQ-44 |
+| T-LOC-17 | symlinked base resolves once and remains contained | baseline | F | live | D15; REQ-44 |
 
 ---
 
@@ -342,6 +357,8 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-09 | clipboard copy failure emits a stderr notice; exit code is unaffected | baseline | C | live | DESIGN-DECISIONS D9 |
 | T-OUT-10 | non-C locale row — `-o json` machine output is byte-identical regardless of process locale | locale=non-C | C | live | REQ-38 R9.4 |
 | T-OUT-11 | `fork -o json` success object carries the REQ-17 minimum fields — `agent`, `parent_session_id`, `fork.branch`, `fork.worktree`, `fork.anchor_commit`, `fork.mode` (state-carry booleans), `verification` (per-check results), `command`, `notices[]` | baseline | C | live | REQ-17 |
+| T-OUT-12 | dry-run reports exact composed destination and mutates nothing | baseline | C | live | D15; REQ-44 |
+| T-OUT-13 | human and JSON success report their exact composed final paths | baseline | C | live | D15; REQ-44 |
 
 ---
 
@@ -366,6 +383,8 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-10 | doctor content — XDG paths writable reported | baseline | C | live | REQ-38 |
 | T-CLI-11 | A14 — a failing doctor check produces a non-zero exit | baseline | C | live | REQ-38 (A14); spec §8 A14 |
 | T-CLI-12 | `--clean` is rejected as an unknown flag in v1 — usage error, exit 2 (D2; alias deferred to v1.1+) | baseline | C | live | REQUIREMENTS §3.3 (D2) |
+| T-CLI-13 | fork help exposes both partial destination flags | baseline | C | live | D15; REQ-44 |
+| T-CLI-14 | exact and partial destination overrides are parser-mutually-exclusive | baseline | C | live | D15; REQ-44 |
 
 ---
 

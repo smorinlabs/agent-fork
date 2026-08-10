@@ -201,3 +201,106 @@ def test_clean_flag_rejected_as_unknown(repo_scenario):
     abbreviated = run_cli(["fork", "name", "--ver"], world.env, world.parent_path)
     assert abbreviated.returncode == 2
     assert b"unrecognized arguments: --ver" in abbreviated.stderr
+
+
+@pytest.mark.matrix("T-CLI-13")
+def test_fork_help_exposes_partial_destination_flags(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    output = run_cli(["help", "fork"], world.env, world.parent_path).stdout
+    assert b"--worktree-base-dir" in output
+    assert b"--worktree-name" in output
+
+
+@pytest.mark.matrix("T-CLI-14")
+def test_exact_destination_conflicts_with_either_partial_before_inspection(
+    repo_scenario,
+):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    for partial in (["--worktree-base-dir", "."], ["--worktree-name", "leaf"]):
+        completed = run_cli(
+            ["fork", "x", "--worktree-dir", "exact", *partial],
+            {},
+            world.parent_path.parent,
+        )
+        assert completed.returncode == 2
+        assert b"cannot be combined" in completed.stderr
+
+
+@pytest.mark.matrix("T-NAM-11")
+def test_explicit_fixed_branch_collision_refuses_without_suffix(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    completed = run_cli(
+        [
+            "fork",
+            "--branch",
+            "main",
+            "--dry-run",
+            "--agent",
+            "claude",
+            "--parent-session",
+            "11111111-1111-1111-1111-111111111111",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 5
+    assert b"branch already exists: main" in completed.stderr
+    assert b"main-2" not in completed.stderr
+
+    occupied = world.parent_path.parent / "occupied"
+    occupied.mkdir()
+    path_collision = run_cli(
+        [
+            "fork",
+            "--worktree-dir",
+            str(occupied),
+            "--dry-run",
+            "--agent",
+            "claude",
+            "--parent-session",
+            "11111111-1111-1111-1111-111111111111",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    assert path_collision.returncode == 5
+    assert b"worktree destination already exists" in path_collision.stderr
+
+
+@pytest.mark.matrix("T-LOC-12")
+def test_relative_base_resolves_from_invocation_cwd(repo_scenario):
+    from agent_fork.location import compose_worktree_destination
+
+    world = repo_scenario()
+    base = world.parent_path / "relative"
+    base.mkdir()
+    assert (
+        compose_worktree_destination(
+            world.parent_path / "derived",
+            invocation_cwd=world.parent_path,
+            base_dir=Path("relative"),
+        )
+        == base / "derived"
+    )
+
+
+@pytest.mark.matrix("T-LOC-13")
+def test_explicit_base_must_exist_and_be_directory(repo_scenario):
+    from agent_fork.errors import PreconditionError
+    from agent_fork.location import compose_worktree_destination
+
+    world = repo_scenario()
+    for base in (world.parent_path / "missing", world.parent_path / "tracked.txt"):
+        with pytest.raises(PreconditionError) as caught:
+            compose_worktree_destination(
+                world.parent_path / "derived",
+                invocation_cwd=world.parent_path,
+                base_dir=base,
+            )
+        assert caught.value.code == "invalid_worktree_base"
