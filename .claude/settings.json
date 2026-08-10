@@ -1,5 +1,5 @@
 {
   "companyAnnouncements": [
-    "agent-fork: CLI + companion skill that forks a running coding-agent session (Claude Code, Codex) into a new branch + verified git worktree and emits the exact paste command to continue. Design is LOCKED — build to spec, precedence: DESIGN-DECISIONS.md > REQUIREMENTS.md > RESEARCH.md > CONFORMANCE.md. Tracking: PROJECTS.md (P01) via project-harness skills (project-next, project-add, project-refine, project-audit). Commands: /code-review (branch review), /security-review (pre-merge security pass). Verify with 'make check' then 'just all'."
+    "agent-fork: a CLI plus companion skill that forks a running Claude Code or Codex session into a new branch and verified Git worktree carrying your uncommitted work, then prints the exact command to continue the conversation there. Commands: /agent-fork (fork this session; $agent-fork in Codex). Build with 'make check' then 'just all'. Start at README.md; design corpus in DESIGN-DECISIONS.md and REQUIREMENTS.md."
   ]
 }
