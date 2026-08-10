@@ -313,8 +313,8 @@ copy all scenario prose into the log.
 | Checkpoint | State | Evidence | Commit/PR | Review/findings |
 |---|---|---|---|---|
 | Phase B review and landing | landed | 34 passed, 182 skipped; matrix green | PR #5 / `383c186` | owner-approved; CodeRabbit success |
-| Phase C plan | awaiting owner review | `docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md` | plan-only worktree | no product implementation started |
-| CI + A9 audit | pending | — | — | — |
+| Phase C plan | landed and owner-approved | `docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md` | PR #6 / `d7119f2` | owner approved Phase D execution on 2026-08-10 |
+| CI + A9 audit | in progress | Task 1 red: missing `.github/workflows/ci.yml` | `ci/phase-d-strict-matrix` | strict-collection CI slice started |
 | G-FIX | pending | — | — | — |
 | Pipeline core through G-RBK | pending | — | — | — |
 | Registry/agent integration | pending | — | — | — |

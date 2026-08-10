@@ -31,5 +31,9 @@ test:
 check-matrix:
     uv run python scripts/check_matrix.py
 
+# Fail on unknown markers, import errors, syntax errors, or other collection drift
+strict-collect:
+    uv run pytest --collect-only -q
+
 # Format, lint, typecheck, test
 all: fmt lint typecheck test

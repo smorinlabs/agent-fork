@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from scripts.check_matrix import Group, Item, Row, parse_matrix, run_checks
 
@@ -11,6 +13,21 @@ Varying axes: none
 | T-GRD-01 | branch exists refuses | baseline | F | live | REQ-19 |
 | T-GRD-99 | old thing | baseline | F | tombstone | A7 |
 """
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_strict_collection_is_a_blocking_ci_contract():
+    """Implementation CI rejects marker drift and collection failures first."""
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    justfile = (REPO_ROOT / "justfile").read_text()
+
+    assert "strict-collect:" in justfile
+    assert "pytest --collect-only" in justfile
+    assert "just check-matrix" in workflow
+    assert "just strict-collect" in workflow
+    assert workflow.index("just check-matrix") < workflow.index("just all")
+    assert workflow.index("just strict-collect") < workflow.index("just all")
 
 
 def test_parse_matrix_reads_groups_rows_and_statuses():
