@@ -346,7 +346,7 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 ---
 
 ## G-CLI — CLI conformance
-Status: pending
+Status: done
 
 Purpose: CLI conformance — bare→help exit 0, standard flags, the exit-code catalog (incl. unknown `--agent` → exit 3), completion smoke, doctor content, version output.
 

@@ -259,5 +259,16 @@ def set_user_value(path: Path, key: str, value: str) -> None:
         else:
             text = '"' + str(item).replace("\\", "\\\\").replace('"', '\\"') + '"'
         lines.append(f"{name} = {text}")
+    for agent, extra_args in (
+        ("claude", existing.claude_extra_args),
+        ("codex", existing.codex_extra_args),
+    ):
+        if extra_args is None:
+            continue
+        quoted = ", ".join(
+            '"' + item.replace("\\", "\\\\").replace('"', '\\"') + '"'
+            for item in extra_args
+        )
+        lines.extend(("", f"[agents.{agent}]", f"extra_args = [{quoted}]"))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")

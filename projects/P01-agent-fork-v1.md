@@ -65,8 +65,8 @@ Phase D — build (gate: everything green + reviews clean; every T preceded by i
 - [x] [P01-T14] Per-agent detection, preflight, launch templates — locked Claude/Codex REQ-28 builders and individually quoted extra_args implemented
 - [x] [P01-TS11] `fork` command end-to-end tests — human/JSON, Claude/Codex, dry-run, streams, clipboard failure, and schema paths exercised through the installed console script
 - [x] [P01-T15] `fork` command — discovery, naming/location, preflight, normative pipeline, registry, locked launch command, and output wired end to end
-- [ ] [P01-TS12] `cleanup` / `list` / `doctor` / `config` / `completion` tests (REQ-31..34, R9.10)
-- [ ] [P01-T16] `cleanup` / `list` / `doctor` / `config` / `completion`
+- [x] [P01-TS12] `cleanup` / `list` / `doctor` / `config` / `completion` tests (REQ-31..34, R9.10) — G-REG, G-CLN, and G-CLI command rows green through the installed console script
+- [x] [P01-T16] `cleanup` / `list` / `doctor` / `config` / `completion` — full command tree, standard flags, completion scripts, aggregate doctor, and stable exit mapping implemented
 - [x] [P01-TS13] Machine output + error catalog tests (REQ-16, REQ-17, R7.8/R7.12) — G-OUT 11/11 green across TTY, locale, error catalog, and minimum schema
 - [x] [P01-T17] Output layer (`-o json`, stream separation, error objects) — stable locale-independent renderer and notice-only clipboard fallback implemented
 - [ ] [P01-TS14] Conformance fixtures in CI (R9.14: help shape, streams, exit codes, `--json`, bare/unknown invocation)

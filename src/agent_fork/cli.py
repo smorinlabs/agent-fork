@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
+from importlib.metadata import version
 from pathlib import Path
 
 from agent_fork.config import (
@@ -27,12 +29,21 @@ def _user_config_path(environment: dict[str, str]) -> Path:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agent-fork")
+    parser = argparse.ArgumentParser(prog="agent-fork", allow_abbrev=False)
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"agent-fork {version('agent-fork')}",
+    )
+    parser.add_argument("-v", "--verbose", action="count", default=0)
+    parser.add_argument("-q", "--quiet", action="store_true")
     parser.add_argument("--config", type=Path)
+    parser.add_argument("--debug", action="store_true")
     commands = parser.add_subparsers(dest="command")
-    fork = commands.add_parser("fork")
+    fork = commands.add_parser("fork", allow_abbrev=False)
     fork.add_argument("name", nargs="?")
-    fork.add_argument("--agent", choices=("claude", "codex"))
+    fork.add_argument("--agent")
     fork.add_argument("--parent-session")
     fork.add_argument(
         "--with-state", action=argparse.BooleanOptionalAction, default=None
@@ -46,22 +57,34 @@ def _parser() -> argparse.ArgumentParser:
     fork.add_argument("--copy", action=argparse.BooleanOptionalAction, default=None)
     fork.add_argument("-o", "--output", choices=("text", "json"), default=None)
     fork.add_argument("--json", action="store_true")
-    listing = commands.add_parser("list")
+    listing = commands.add_parser("list", allow_abbrev=False)
     listing.add_argument("-o", "--output", choices=("text", "json"), default="text")
-    cleanup = commands.add_parser("cleanup")
+    listing.add_argument("--json", action="store_true")
+    cleanup = commands.add_parser("cleanup", allow_abbrev=False)
     cleanup.add_argument("target")
     cleanup.add_argument("--force", action="store_true")
     cleanup.add_argument("--keep-branch", action="store_true")
     cleanup.add_argument("--yes", action="store_true")
     cleanup.add_argument("--no-input", action="store_true")
     cleanup.add_argument("--dry-run", action="store_true")
-    config = commands.add_parser("config")
+    cleanup.add_argument("-o", "--output", choices=("text", "json"), default="text")
+    cleanup.add_argument("--json", action="store_true")
+    doctor = commands.add_parser("doctor", allow_abbrev=False)
+    doctor.add_argument("-o", "--output", choices=("text", "json"), default="text")
+    doctor.add_argument("--json", action="store_true")
+    completion = commands.add_parser("completion", allow_abbrev=False)
+    completion.add_argument("shell", choices=("bash", "zsh", "fish"))
+    commands.add_parser("help", allow_abbrev=False)
+    config = commands.add_parser("config", allow_abbrev=False)
     actions = config.add_subparsers(dest="config_action", required=True)
-    setter = actions.add_parser("set")
+    setter = actions.add_parser("set", allow_abbrev=False)
     setter.add_argument("key")
     setter.add_argument("value")
-    actions.add_parser("validate")
-    getter = actions.add_parser("get")
+    actions.add_parser("validate", allow_abbrev=False)
+    viewer = actions.add_parser("view", allow_abbrev=False)
+    viewer.add_argument("-o", "--output", choices=("text", "json"), default="text")
+    viewer.add_argument("--json", action="store_true")
+    getter = actions.add_parser("get", allow_abbrev=False)
     getter.add_argument("key")
     return parser
 
@@ -240,9 +263,56 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if hasattr(signal, "SIGPIPE"):
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     args = _parser().parse_args(argv)
     environment = dict(os.environ)
     try:
+        if args.command == "help":
+            _parser().print_help()
+            return 0
+        if args.command == "completion":
+            scripts = {
+                "bash": (
+                    "complete -W 'fork cleanup list doctor config completion help' "
+                    "agent-fork"
+                ),
+                "zsh": "compdef '_arguments *::command:->cmds' agent-fork",
+                "fish": (
+                    "complete -c agent-fork -f -a "
+                    "'fork cleanup list doctor config completion help'"
+                ),
+            }
+            print(scripts[args.shell])
+            return 0
+        if args.command == "doctor":
+            from agent_fork.doctor import run_doctor
+            from agent_fork.output import json_line
+
+            checks = run_doctor(Path.cwd(), environment)
+            machine = args.json or args.output == "json"
+            if machine:
+                print(
+                    json_line(
+                        {
+                            "checks": [
+                                {
+                                    "name": check.name,
+                                    "ok": check.ok,
+                                    "detail": check.detail,
+                                }
+                                for check in checks
+                            ],
+                            "ok": all(check.ok for check in checks),
+                        }
+                    )
+                )
+            else:
+                for check in checks:
+                    print(
+                        f"{'ok' if check.ok else 'FAIL'} {check.name}: {check.detail}"
+                    )
+            return 0 if all(check.ok for check in checks) else 1
         if args.command == "fork":
             return _fork_cli(args, environment)
         if args.command == "cleanup":
@@ -275,16 +345,32 @@ def main(argv: list[str] | None = None) -> int:
                 keep_branch=args.keep_branch,
                 dry_run=args.dry_run,
             )
-            prefix = "would " if args.dry_run else ""
-            print(prefix + plan.render(keep_branch=args.keep_branch))
-            for notice in result.notices:
-                print(notice)
+            machine = args.json or args.output == "json"
+            if machine:
+                from agent_fork.output import json_line
+
+                print(
+                    json_line(
+                        {
+                            "removed": result.removed,
+                            "target": plan.entry.to_dict(),
+                            "keep_branch": args.keep_branch,
+                            "dry_run": args.dry_run,
+                            "notices": list(result.notices),
+                        }
+                    )
+                )
+            else:
+                prefix = "would " if args.dry_run else ""
+                print(prefix + plan.render(keep_branch=args.keep_branch))
+                for notice in result.notices:
+                    print(notice)
             return 0
         if args.command == "list":
             from agent_fork.registry import read_registry
 
             entries = read_registry(env=environment)
-            if args.output == "json":
+            if args.json or args.output == "json":
                 print(
                     json.dumps(
                         {
@@ -314,6 +400,28 @@ def main(argv: list[str] | None = None) -> int:
             )
             if args.config_action == "validate":
                 print("config valid")
+                return 0
+            if args.config_action == "view":
+                document = {
+                    "with_state": resolved.with_state,
+                    "with_ignored": resolved.with_ignored,
+                    "branch_prefix": resolved.branch_prefix,
+                    "worktree_location": resolved.worktree_location,
+                    "verify": resolved.verify,
+                    "copy": resolved.copy,
+                    "output": resolved.output,
+                    "agents": {
+                        "claude": {"extra_args": list(resolved.claude_extra_args)},
+                        "codex": {"extra_args": list(resolved.codex_extra_args)},
+                    },
+                }
+                if args.json or args.output == "json":
+                    from agent_fork.output import json_line
+
+                    print(json_line(document))
+                else:
+                    for key, value in document.items():
+                        print(f"{key} = {value}")
                 return 0
             if args.config_action == "get":
                 if not hasattr(resolved, args.key):

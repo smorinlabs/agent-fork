@@ -4,6 +4,8 @@ tests/pipeline/).
 Matrix: docs/testing/TEST-MATRIX.md §G-CFG.
 """
 
+from pathlib import Path
+
 import pytest
 
 
@@ -19,6 +21,13 @@ def test_config_set_then_validate_round_trips(repo_scenario):
     from conftest import run_cli
 
     world = repo_scenario("plain@main")
+    config_path = (
+        Path(world.env["XDG_CONFIG_HOME"]) / "agent-fork/agent-fork_config.toml"
+    )
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        '[agents.claude]\nextra_args = ["--model", "claude future"]\n'
+    )
     written = run_cli(
         ["config", "set", "branch_prefix", "team/"],
         world.env,
@@ -32,3 +41,4 @@ def test_config_set_then_validate_round_trips(repo_scenario):
     viewed = run_cli(["config", "get", "branch_prefix"], world.env, world.parent_path)
     assert viewed.returncode == 0
     assert viewed.stdout == b"team/\n"
+    assert 'extra_args = ["--model", "claude future"]' in config_path.read_text()
