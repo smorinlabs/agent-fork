@@ -46,3 +46,10 @@ class RegistryBusyError(AgentForkError):
 
     code = "registry_busy"
     exit_code = 1
+
+
+class AgentPreflightError(AgentForkError):
+    """The detected agent cannot safely fork the requested parent session."""
+
+    code = "session_not_found"
+    exit_code = 3

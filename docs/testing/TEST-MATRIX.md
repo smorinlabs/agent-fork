@@ -63,7 +63,7 @@ Varying axes: agent (claude/codex, must vary per §4); otherwise baseline pinned
 ---
 
 ## G-PRE — Preflight & refusal
-Status: pending
+Status: done
 
 Purpose: preflight and refusal — the version matrix, Claude warn-band notices, Codex rollout-flush, and D14 refuse-with-diagnosis; plus the A14 git-floor refusal/`--force` override rows.
 

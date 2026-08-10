@@ -1,99 +1,150 @@
-"""G-PRE — Preflight & refusal (tier F rows only; U rows in tests/unit/).
+"""G-PRE refusal, Git-floor, rollout, and no-mutation proofs."""
 
-T-PRE-06/07/08/09 are blocked pending A9's implementation-time git-feature
-audit (spec §8 A9); they get authored pending stubs, not skips-for-blocked.
-
-Matrix: docs/testing/TEST-MATRIX.md §G-PRE.
-"""
+import subprocess
 
 import pytest
 
 
-@pytest.mark.matrix("T-PRE-01")
-@pytest.mark.skip(reason="pending: T-PRE-01")
-def test_agent_cli_entirely_missing_refuses_with_diagnosis(repo_scenario):
-    """T-PRE-01 — a fully missing agent CLI refuses with a diagnosis naming what was
-    detected and what's missing.
+def _context(agent="claude"):
+    from agent_fork.agents import AgentContext
 
-    Given:  the detected agent's CLI binary is entirely missing (agent=claude)
-    Expect: refusal, exit 3, diagnosis names what was detected and what's missing
-    Source: REQ-27; REQ-29
-    """
-    raise NotImplementedError
+    return AgentContext(agent, "12345678-1234-1234-1234-123456789abc")
+
+
+@pytest.mark.matrix("T-PRE-01")
+def test_agent_cli_entirely_missing_refuses_with_diagnosis(repo_scenario):
+    from agent_fork.agents import preflight_agent
+    from agent_fork.errors import AgentPreflightError
+
+    world = repo_scenario()
+    with pytest.raises(AgentPreflightError) as captured:
+        preflight_agent(_context(), {**world.env, "PATH": ""})
+    assert captured.value.exit_code == 3
+    message = str(captured.value)
+    assert "agent=claude" in message
+    assert "claude CLI is missing" in message
+    assert "agent-fork doctor" in message
 
 
 @pytest.mark.matrix("T-PRE-05")
-@pytest.mark.skip(reason="pending: T-PRE-05")
 def test_codex_rollout_not_flushed_refuses_before_mutation(repo_scenario):
-    """T-PRE-05 — an unflushed Codex parent rollout file refuses before any mutation.
+    from agent_fork.agents import preflight_agent
+    from agent_fork.errors import AgentPreflightError
 
-    Given:  the Codex parent rollout file not yet flushed to disk
-    Expect: refuse before any mutation
-    Source: REQ-27; RESEARCH §3.2
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    snapshot = world.parent_snapshot()
+    with pytest.raises(AgentPreflightError, match=r"not flushed.*doctor"):
+        preflight_agent(
+            _context("codex"),
+            world.env,
+            executable="/fake/codex",
+            version_output="codex-cli 0.145.0",
+        )
+    assert world.parent_snapshot() == snapshot
+    assert not list(world.parent_path.parent.glob("*fork*"))
+
+    context = _context("codex")
+    rollout = (
+        world.parent_path.parent
+        / "codex-home/sessions/2026/08/10"
+        / f"rollout-2026-08-10T00-00-00-{context.parent_session_id}.jsonl"
+    )
+    rollout.parent.mkdir(parents=True)
+    rollout.write_text("{}\n")
+    result = preflight_agent(
+        context,
+        {**world.env, "CODEX_HOME": str(world.parent_path.parent / "codex-home")},
+        executable="/fake/codex",
+        version_output="codex-cli 0.145.0",
+    )
+    assert result.version == (0, 145, 0)
 
 
 @pytest.mark.parametrize(
-    "boundary",
+    "version,passes",
     [
         pytest.param(
-            "below-floor", id="T-PRE-06", marks=pytest.mark.matrix("T-PRE-06")
+            "git version 2.18.9",
+            False,
+            id="T-PRE-06",
+            marks=pytest.mark.matrix("T-PRE-06"),
         ),
         pytest.param(
-            "at-or-above-floor", id="T-PRE-07", marks=pytest.mark.matrix("T-PRE-07")
+            "git version 2.19.0.windows.1",
+            True,
+            id="T-PRE-07",
+            marks=pytest.mark.matrix("T-PRE-07"),
         ),
     ],
 )
-@pytest.mark.skip(reason="pending: T-PRE-06..T-PRE-07 family")
-def test_product_git_min_boundary_blocked_on_a9(repo_scenario, boundary):
-    """PRODUCT_GIT_MIN boundary checks are blocked pending A9's implementation-time
-    git-feature audit fixing the floor value.
+def test_product_git_min_boundary_blocked_on_a9(repo_scenario, version, passes):
+    from agent_fork.agents import preflight_git
+    from agent_fork.errors import PreconditionError
+    from agent_fork.git import PRODUCT_GIT_MIN
 
-    T-PRE-06 — an injected `git --version` just below the fixed floor fails the named
-    check.
-    T-PRE-07 — an injected `git --version` at/above the fixed floor passes the named
-    check.
-    Source: REQ-38 (A9); spec §8 A9
-    """
-    raise NotImplementedError
+    repo_scenario()
+    assert PRODUCT_GIT_MIN == (2, 19, 0)
+    if passes:
+        assert preflight_git(version) == ()
+    else:
+        with pytest.raises(PreconditionError) as captured:
+            preflight_git(version)
+        assert captured.value.code == "git_version_unsupported"
 
 
 @pytest.mark.matrix("T-PRE-08")
-@pytest.mark.skip(reason="pending: T-PRE-08")
 def test_a14_below_floor_fork_refusal_names_remedy(repo_scenario):
-    """T-PRE-08 — A14 — a below-floor fork refusal names the installed version, floor,
-    and upgrade path (blocked on A9's implementation-time git-feature audit).
+    from agent_fork.agents import preflight_git
+    from agent_fork.errors import PreconditionError
 
-    Given:  an injected `git --version` below PRODUCT_GIT_MIN
-    Expect: refusal, exit 5, remedy names installed version/floor/upgrade path
-    Source: REQ-19 (A14); spec §8 A14
-    """
-    raise NotImplementedError
+    repo_scenario()
+    with pytest.raises(PreconditionError) as captured:
+        preflight_git("git version 2.18.9")
+    assert captured.value.exit_code == 5
+    message = str(captured.value)
+    assert "2.18.9" in message and "2.19.0" in message
+    assert "upgrade Git" in message and "re-run" in message
 
 
 @pytest.mark.matrix("T-PRE-09")
-@pytest.mark.skip(reason="pending: T-PRE-09")
 def test_a14_force_overrides_git_floor_refusal_only(repo_scenario):
-    """T-PRE-09 — A14 — fork --force overrides the git-floor refusal only (blocked on
-    A9's implementation-time git-feature audit).
+    from agent_fork.agents import preflight_git
 
-    Given:  an injected below-floor `git --version` with `fork --force` passed
-    Expect: the git-floor refusal is overridden only; stderr warning emitted; verify
-            ladder still runs
-    Source: REQUIREMENTS §3.3 (A14); spec §8 A14
-    """
-    raise NotImplementedError
+    repo_scenario()
+    notices = preflight_git("git version 2.18.9", force=True, verify=True)
+    assert len(notices) == 1
+    assert "--force overrides Git floor only" in notices[0]
+    with pytest.raises(ValueError, match="must not disable verification"):
+        preflight_git("git version 2.18.9", force=True, verify=False)
 
 
 @pytest.mark.matrix("T-PRE-10")
-@pytest.mark.skip(reason="pending: T-PRE-10")
 def test_d14_nothing_created_on_preflight_refusal(repo_scenario):
-    """T-PRE-10 — D14 — nothing is created (no worktree, no branch) on any preflight
-    refusal.
+    from agent_fork.agents import preflight_agent
+    from agent_fork.errors import AgentPreflightError
 
-    Given:  any preflight refusal path
-    Expect: no worktree, no branch created
-    Source: DESIGN-DECISIONS D14; REQ-29
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    before = subprocess.run(
+        ["git", "-C", str(world.parent_path), "worktree", "list", "--porcelain"],
+        env=world.env,
+        capture_output=True,
+        check=True,
+    ).stdout
+    snapshot = world.parent_snapshot()
+    with pytest.raises(AgentPreflightError):
+        preflight_agent(_context(), {**world.env, "PATH": ""})
+    after = subprocess.run(
+        ["git", "-C", str(world.parent_path), "worktree", "list", "--porcelain"],
+        env=world.env,
+        capture_output=True,
+        check=True,
+    ).stdout
+    assert after == before
+    assert world.parent_snapshot() == snapshot
+    branch = subprocess.run(
+        ["git", "-C", str(world.parent_path), "branch", "--list", "fork/*"],
+        env=world.env,
+        capture_output=True,
+        check=True,
+    ).stdout
+    assert branch == b""
