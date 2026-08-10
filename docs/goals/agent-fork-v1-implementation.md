@@ -40,9 +40,9 @@ implementation.
 ## Current baseline
 
 - Repository: `/work/agent-fork`
-- Branch at goal drafting: `main`
+- Phase B merge: PR #5, merge commit `383c186`.
 - Phase A and Phase C.5 are complete.
-- Phase B changes are present but uncommitted and await owner review.
+- Phase B is owner-approved, merged, and verified on clean `main`.
 - Current verified suite after Phase B: 34 passed, 182 skipped.
 - The original 185 stubs comprise:
   - 3 completed G-EXP rows;
@@ -312,8 +312,8 @@ copy all scenario prose into the log.
 
 | Checkpoint | State | Evidence | Commit/PR | Review/findings |
 |---|---|---|---|---|
-| Phase B review and landing | awaiting owner review | 34 passed, 182 skipped; matrix green | — | — |
-| Phase C plan | pending | — | — | — |
+| Phase B review and landing | landed | 34 passed, 182 skipped; matrix green | PR #5 / `383c186` | owner-approved; CodeRabbit success |
+| Phase C plan | awaiting owner review | `docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md` | plan-only worktree | no product implementation started |
 | CI + A9 audit | pending | — | — | — |
 | G-FIX | pending | — | — | — |
 | Pipeline core through G-RBK | pending | — | — | — |
