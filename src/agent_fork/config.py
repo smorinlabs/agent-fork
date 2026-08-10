@@ -69,6 +69,7 @@ def resolve_config(
     with_ignored = False
     branch_prefix = DEFAULT_BRANCH_PREFIX
     worktree_location = DEFAULT_WORKTREE_LOCATION
+    worktree_location_explicit = False
     verify = True
     copy = False
     output = "table"
@@ -89,6 +90,7 @@ def resolve_config(
             branch_prefix = source.branch_prefix.strip() or DEFAULT_BRANCH_PREFIX
         if source.worktree_location is not None:
             worktree_location = source.worktree_location
+            worktree_location_explicit = True
         if source.verify is not None:
             verify = source.verify
         if source.copy is not None:
@@ -107,6 +109,7 @@ def resolve_config(
         with_ignored=with_ignored,
         branch_prefix=branch_prefix,
         worktree_location=worktree_location,
+        worktree_location_explicit=worktree_location_explicit,
         verify=verify,
         copy=copy,
         output=output,
@@ -159,7 +162,7 @@ def load_config(path: Path) -> ConfigValues:
                 f"invalid config {path}: agents.{agent}.extra_args must be strings"
             )
         extras[f"{agent}_extra_args"] = tuple(raw)
-    return ConfigValues(**fork, **extras)
+    return ConfigValues(config_path=path.resolve(), **fork, **extras)
 
 
 def worktree_root(cwd: Path, env: Mapping[str, str] | None = None) -> Path:

@@ -1,7 +1,7 @@
 # PRODUCT_GIT_MIN feature audit
 
-**Date:** 2026-08-10  
-**Decision:** `PRODUCT_GIT_MIN = (2, 19, 0)`  
+**Date:** 2026-08-10
+**Decision:** `PRODUCT_GIT_MIN = (2, 19, 0)`
 **Scope:** production Git used by `agent-fork`; distinct from the test-only
 `TEST_HARNESS_GIT_MIN = (2, 43)`.
 

@@ -117,7 +117,7 @@ def _path_for_name(info, config, name, branch, environment):
         parent_path=info.parent_path,
         parent_is_linked=info.linked_worktree,
         bare_at_root=info.bare,
-        location_explicit=config.worktree_location != "sibling",
+        location_explicit=config.worktree_location_explicit,
     )
 
 

@@ -99,6 +99,7 @@ def test_explicit_worktree_location_suppresses_mirror_parent_heuristic(repo_scen
     Expect: the mirror-parent heuristic is suppressed
     Source: D5
     """
+    from agent_fork.config import resolve_config
     from agent_fork.location import derive_worktree_path
 
     world = repo_scenario("linked-worktree")
@@ -114,3 +115,17 @@ def test_explicit_worktree_location_suppresses_mirror_parent_heuristic(repo_scen
         location_explicit=True,
     )
     assert path == data / "agent-fork/worktrees" / world.repo_root.name / "fix-auth"
+
+    resolved = resolve_config(sources=({"worktree_location": "sibling"},))
+    assert resolved.worktree_location_explicit is True
+    explicit_sibling = derive_worktree_path(
+        world.repo_root,
+        "fork/fix-auth",
+        "fix-auth",
+        resolved.worktree_location,
+        parent_path=world.parent_path,
+        parent_is_linked=True,
+        location_explicit=resolved.worktree_location_explicit,
+    )
+    assert explicit_sibling.parent == world.repo_root.parent
+    assert explicit_sibling.parent != world.parent_path.parent

@@ -328,7 +328,8 @@ def repo_scenario(tmp_path, request):
             repo_root = world / "main"
             _init_plain(repo_root, env)
             _run_git(env, repo_root, "branch", "feature")
-            parent = world / "linked"
+            parent = world / "external-worktrees/linked"
+            parent.parent.mkdir()
             _run_git(env, repo_root, "worktree", "add", str(parent), "feature")
             _commit_file(parent, env, "linked-only.txt", "linked commit\n")
             (repo_root / "tracked.txt").write_text("dirty main\n")

@@ -31,6 +31,7 @@ class ResolvedConfig:
     with_ignored: bool
     branch_prefix: str
     worktree_location: str
+    worktree_location_explicit: bool
     verify: bool
     copy: bool
     output: str
