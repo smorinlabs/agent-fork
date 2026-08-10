@@ -76,10 +76,10 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 | T-PRE-03 | Claude warn-band (<~2.1.1xx) → warn-and-proceed, `notices[]` populated | agent=claude | U | live | REQ-27; RESEARCH §5.1 Q1 |
 | T-PRE-04 | Codex below the fork-subcommand floor (0.81.0) → refuse | agent=codex | U | live | REQ-27; RESEARCH §5.1 Q4 |
 | T-PRE-05 | Codex parent rollout file not yet flushed on disk → refuse before any mutation | agent=codex | F | live | REQ-27; RESEARCH §3.2 |
-| T-PRE-06 | PRODUCT_GIT_MIN boundary — injected `git --version` just below the fixed floor → the named check fails (blocked on A9's implementation-time git-feature audit fixing the floor value) | baseline | F | blocked | REQ-38 (A9); spec §8 A9 |
-| T-PRE-07 | PRODUCT_GIT_MIN boundary — injected `git --version` at/above the fixed floor → the named check passes (blocked on A9's implementation-time git-feature audit) | baseline | F | blocked | REQ-38 (A9); spec §8 A9 |
-| T-PRE-08 | A14 — below-floor `fork` refusal, exit 5, remedy names installed version/floor/upgrade path (blocked on A9's implementation-time git-feature audit) | baseline | F | blocked | REQ-19 (A14); spec §8 A14 |
-| T-PRE-09 | A14 — `fork --force` overrides the git-floor refusal only, stderr warning emitted, verify ladder still runs (blocked on A9's implementation-time git-feature audit) | baseline | F | blocked | REQUIREMENTS §3.3 (A14); spec §8 A14 |
+| T-PRE-06 | PRODUCT_GIT_MIN boundary — injected `git --version` just below 2.19.0 → the named check fails | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
+| T-PRE-07 | PRODUCT_GIT_MIN boundary — injected `git --version` at/above 2.19.0 → the named check passes | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
+| T-PRE-08 | A14 — below-2.19.0 `fork` refusal, exit 5, remedy names installed version/floor/upgrade path | baseline | F | live | REQ-19 (A14); PRODUCT-GIT-MIN-AUDIT |
+| T-PRE-09 | A14 — `fork --force` overrides the git-floor refusal only, stderr warning emitted, verify ladder still runs | baseline | F | live | REQUIREMENTS §3.3 (A14); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-10 | D14 — nothing is created (no worktree, no branch) on any preflight refusal | baseline | F | live | DESIGN-DECISIONS D14; REQ-29 |
 
 ---
