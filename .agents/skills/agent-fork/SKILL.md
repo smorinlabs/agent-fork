@@ -21,3 +21,9 @@ The script selects the CLI's strict agent mode, then detects Claude Code from `C
 `CLAUDE_CODE_SESSION_ID`, or Codex from `CODEX_THREAD_ID`. It passes the detected
 agent and session explicitly to `agent-fork fork --json`. If the CLI is absent,
 show its installation hint and stop.
+
+Codex session UUIDs supplied by the active environment bypass name resolution.
+If a user explicitly supplies a renamed Codex session instead, the CLI resolves
+it through the local Codex app-server before emitting the canonical UUID-based
+command. Pass `--no-codex-session-name-resolution` only when the user requests
+the strict UUID-only behavior; do not attempt a transcript or database lookup.

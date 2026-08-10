@@ -16,6 +16,8 @@ from agent_fork.errors import (
     AgentDetectionError,
     AgentPreflightError,
     PreconditionError,
+    SessionNameAmbiguousError,
+    SessionResolutionUnavailableError,
 )
 from agent_fork.git import PRODUCT_GIT_MIN
 
@@ -34,6 +36,8 @@ class PreflightResult:
     version: tuple[int, int, int]
     notices: tuple[str, ...]
     verify: bool = True
+    context: AgentContext | None = None
+    parent_session_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +99,7 @@ def preflight_agent(
     *,
     executable: str | None = None,
     version_output: str | None = None,
+    codex_session_name_resolution: bool = True,
 ) -> PreflightResult:
     """Refuse unsupported native forks before any repository mutation."""
     binary = (
@@ -124,6 +129,8 @@ def preflight_agent(
         ) from error
 
     notices: list[str] = []
+    resolved_context = context
+    resolved_name: str | None = None
     if context.agent == "claude":
         if version < CLAUDE_FORK_MIN:
             raise _diagnosis(
@@ -146,12 +153,61 @@ def preflight_agent(
                 f"detected Codex {_render(version)}; CODEX_THREAD_ID support requires "
                 f">={_render(CODEX_ENV_MIN)}"
             )
-        if not codex_rollout_exists(context, env):
+        try:
+            canonical = str(uuid.UUID(context.parent_session_id))
+            is_uuid = canonical.lower() == context.parent_session_id.lower()
+        except ValueError:
+            is_uuid = False
+        if not is_uuid:
+            if not codex_session_name_resolution:
+                raise SessionResolutionUnavailableError(
+                    "Codex session-name resolution is disabled; pass the canonical "
+                    "UUID or enable --codex-session-name-resolution"
+                )
+            from agent_fork.codex_app_server import list_named_threads
+
+            candidates = list_named_threads(binary, context.parent_session_id, env)
+            canonical_ids: list[str] = []
+            for candidate in candidates:
+                try:
+                    candidate_id = str(uuid.UUID(candidate.id))
+                except ValueError:
+                    continue
+                if candidate_id.lower() == candidate.id.lower():
+                    canonical_ids.append(candidate_id)
+            canonical_ids = sorted(set(canonical_ids))
+            if not canonical_ids:
+                raise AgentPreflightError(
+                    f"Codex session name {context.parent_session_id!r} was not found; "
+                    "pass the canonical UUID or run codex resume --all"
+                )
+            if len(canonical_ids) > 1:
+                shown = ", ".join(canonical_ids[:5])
+                omitted = len(canonical_ids) - 5
+                suffix = f" (+{omitted} more)" if omitted > 0 else ""
+                raise SessionNameAmbiguousError(
+                    f"Codex session name {context.parent_session_id!r} matches "
+                    f"multiple sessions: {shown}{suffix}; pass a canonical UUID"
+                )
+            resolved_name = context.parent_session_id
+            resolved_context = AgentContext("codex", canonical_ids[0])
+            notices.append(
+                f"resolved Codex session {resolved_name!r} to "
+                f"{resolved_context.parent_session_id}"
+            )
+        if not codex_rollout_exists(resolved_context, env):
             raise _diagnosis(
                 f"detected Codex {_render(version)}, but parent rollout "
-                f"{context.parent_session_id} is not flushed under {_codex_home(env)}"
+                f"{resolved_context.parent_session_id} is not flushed under "
+                f"{_codex_home(env)}"
             )
-    return PreflightResult(context.agent, version, tuple(notices))
+    return PreflightResult(
+        context.agent,
+        version,
+        tuple(notices),
+        context=resolved_context,
+        parent_session_name=resolved_name,
+    )
 
 
 def preflight_git(

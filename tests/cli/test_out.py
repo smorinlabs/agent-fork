@@ -11,6 +11,48 @@ import pytest
 PARENT = "11111111-1111-1111-1111-111111111111"
 
 
+@pytest.mark.matrix("T-OUT-19")
+def test_renamed_codex_identity_is_additive_in_json():
+    from agent_fork.output import ForkOutput
+
+    output = ForkOutput(
+        agent="codex",
+        parent_session_id=PARENT,
+        mode="agent",
+        name="child",
+        branch="fork/child",
+        worktree=Path("/tmp/child"),
+        anchor_commit="a" * 40,
+        with_state=False,
+        with_ignored=False,
+        verification={"enabled": True, "passed": True},
+        command=f"codex fork {PARENT} -C /tmp/child",
+        notices=("resolved Codex session name 'hello'",),
+        parent_session_name="hello",
+    )
+    document = output.document()
+    assert document["parent_session_id"] == PARENT
+    assert document["parent_session_name"] == "hello"
+
+
+@pytest.mark.matrix("T-OUT-20")
+def test_dry_run_reports_resolution_notice():
+    from agent_fork.output import DryRunOutput
+
+    rendered = DryRunOutput(
+        "fork/child",
+        Path("/tmp/child"),
+        0,
+        0,
+        0,
+        0,
+        f"codex fork {PARENT} -C /tmp/child",
+        ("resolved Codex session name 'hello' to its UUID",),
+    ).render()
+    assert "notices: resolved Codex session name 'hello' to its UUID" in rendered
+    assert f"paste command: codex fork {PARENT}" in rendered
+
+
 def _agent_env(world, agent="claude", *, isolated_path=False):
     directory = world.parent_path.parent / "agent-bin"
     directory.mkdir()

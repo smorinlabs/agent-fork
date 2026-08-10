@@ -447,7 +447,7 @@ def test_semantic_metavars_and_config_help_order(repo_scenario):
     for token in (
         b"[NAME]",
         b"--agent {claude,codex}",
-        b"--parent-session ID",
+        b"--parent-session ID_OR_NAME",
         b"--worktree-base-dir DIRECTORY",
         b"--worktree-name COMPONENT",
     ):
@@ -527,3 +527,43 @@ def test_default_auto_forks_git_only_without_session(repo_scenario):
     doctor = run_cli(["doctor"], doctor_env, world.parent_path)
     assert doctor.returncode == 0
     assert b"selected=git-only" in doctor.stdout
+
+
+@pytest.mark.matrix("T-CLI-24")
+def test_codex_session_name_resolution_surface(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    help_text = run_cli(["help", "fork"], world.env, world.parent_path).stdout
+    assert b"--codex-session-name-resolution" in help_text
+    assert b"--no-codex-session-name-resolution" in help_text
+    assert b"renamed Codex session name" in b" ".join(help_text.split())
+
+    configured = world.parent_path / "codex-resolution.toml"
+    assert (
+        run_cli(
+            [
+                "--config",
+                str(configured),
+                "config",
+                "set",
+                "agents.codex.session_name_resolution",
+                "false",
+            ],
+            world.env,
+            world.parent_path,
+        ).returncode
+        == 0
+    )
+    read = run_cli(
+        [
+            "--config",
+            str(configured),
+            "config",
+            "get",
+            "agents.codex.session_name_resolution",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    assert read.returncode == 0 and read.stdout == b"false\n"

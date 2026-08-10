@@ -51,6 +51,10 @@ The default `auto` mode detects the agent and parent session from
 agent-fork fork review-auth \
   --agent claude --parent-session '<session-uuid>' \
   --branch review/auth --worktree-dir '../auth-review'
+
+# A renamed Codex thread can be supplied instead of its UUID.
+agent-fork fork review-auth \
+  --agent codex --parent-session 'hello-codex' --dry-run
 ```
 
 `--agent` with an explicit `--parent-session` works without either environment
@@ -58,6 +62,33 @@ variable and implies strict agent behavior. `--require-agent` refuses unless a
 single usable session is available; `--no-agent` ignores agent signals. Set the
 default with `[fork] agent_mode = "auto" | "strict" | "git-only"` or
 `AGENT_FORK_AGENT_MODE`.
+
+### Renamed Codex sessions
+
+Codex stores a rename separately from the rollout filename, so a name such as
+`hello-codex` cannot be used directly with `codex fork`. When an explicit
+Codex parent is not a UUID, `agent-fork` asks the installed local Codex
+app-server for exact name matches, replaces the name with the canonical thread
+UUID, verifies that UUID's rollout is present, and emits the normal
+`codex fork <uuid> -C <worktree>` command. UUID input bypasses this lookup.
+The lookup is local and bounded; `agent-fork` never reads Codex's internal
+SQLite database directly.
+
+Name resolution is enabled by default. Disable it for a strict UUID-only path
+with `--no-codex-session-name-resolution`, or persist that choice:
+
+```toml
+[agents.codex]
+session_name_resolution = false
+```
+
+The corresponding config key is
+`agents.codex.session_name_resolution`. With resolution disabled, a non-UUID
+Codex parent is rejected before repository mutation. Missing and duplicate
+names are also rejected; duplicate diagnostics list the candidate UUIDs.
+This option is intentionally Codex-specific. If another agent later needs the
+same facility, a future design may add a generic option while retaining this
+name as a compatible alias.
 
 `--worktree-dir` selects one exact destination. Alternatively,
 `--worktree-base-dir` and `--worktree-name` independently replace the parent
@@ -112,7 +143,7 @@ their meaning.
 |---|---|
 | 1 | `runtime_error`, `verify_failed`, `registry_busy` |
 | 2 | `config_error` |
-| 3 | `agent_not_detected`, `session_not_found`, `cleanup_target_unknown` |
+| 3 | `agent_not_detected`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `cleanup_target_unknown` |
 | 5 | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits` |
 
 Exit 4 remains reserved because this local tool has no authentication failure

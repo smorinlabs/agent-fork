@@ -23,6 +23,8 @@ SHELLS = ("bash", "zsh", "fish")
 FORK_OPTIONS = (
     "--agent",
     "--parent-session",
+    "--codex-session-name-resolution",
+    "--no-codex-session-name-resolution",
     "--require-agent",
     "--no-agent",
     "--branch",

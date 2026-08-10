@@ -22,6 +22,7 @@ class ConfigValues:
     config_path: Path | None = None
     claude_extra_args: tuple[str, ...] | None = None
     codex_extra_args: tuple[str, ...] | None = None
+    codex_session_name_resolution: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class ResolvedConfig:
     config_path: Path | None
     claude_extra_args: tuple[str, ...]
     codex_extra_args: tuple[str, ...]
+    codex_session_name_resolution: bool
 
     @property
     def mode(self) -> str:

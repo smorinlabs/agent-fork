@@ -36,7 +36,7 @@ switch that forces UUID-only operation. Do not add a direct SQLite fallback.
 4. Name resolution is enabled by default and can be disabled per invocation:
 
    ```bash
-   agent-fork fork NAME --no-resolve-session-name \
+   agent-fork fork NAME --no-codex-session-name-resolution \
      --agent codex --parent-session '<uuid>'
    ```
 
@@ -44,10 +44,11 @@ switch that forces UUID-only operation. Do not add a direct SQLite fallback.
 
    ```toml
    [agents.codex]
-   resolve_session_names = true
+   session_name_resolution = true
    ```
 
-   CLI precedence is `--resolve-session-name` / `--no-resolve-session-name`
+   CLI precedence is `--codex-session-name-resolution` /
+   `--no-codex-session-name-resolution`
    over config over the default `true`. No environment variable is proposed.
 6. When resolution is disabled, UUID input works normally. A non-UUID value
    refuses before mutation without starting app-server and says to pass the
@@ -88,13 +89,14 @@ ResolvedAgentContext
   resolution_source = uuid | codex-app-server
 ```
 
-One operation resolves and preflights identity before any launch command is
+One operation validates the executable/version, resolves, and preflights identity before any launch command is
 built:
 
 ```text
 requested reference
+    -> executable/version preflight
     -> resolve canonical identity
-    -> agent/version/rollout preflight
+    -> canonical rollout preflight
     -> build launch command from resolved identity
 ```
 
@@ -123,14 +125,18 @@ Add a narrow boundary such as `src/agent_fork/codex_app_server.py` that:
 4. Requests `useStateDbOnly: true`, which avoids JSONL scan-and-repair behavior.
 5. Ignores unrelated notifications, correlates numeric request IDs, and validates
    response shapes and required `id`/`name` fields.
-6. Paginates until exhaustion so duplicate exact names cannot be missed.
-7. Applies explicit bounds: startup/request/overall timeouts, page and record
+6. Sends `searchTerm=<requested-name>` as a server-side prefilter, then paginates
+   all filtered results and applies exact matching locally so duplicates cannot
+   be missed.
+7. Reads stdout and stderr concurrently as bounded nonblocking byte streams;
+   never uses an unbounded `readline`, `read`, or `communicate` call.
+8. Applies explicit bounds: startup/request/overall timeouts, page and record
    caps, maximum line/response/stderr bytes, and maximum diagnostic candidates.
-8. Terminates gracefully, escalates to kill after a short bound, and always
+9. Terminates gracefully, escalates to kill after a short bound, and always
    reaps the child process.
-9. Never sends `thread/read`, `thread/resume`, `thread/fork`, or any mutation
+10. Never sends `thread/read`, `thread/resume`, `thread/fork`, or any mutation
    method.
-10. Treats JSON-RPC method-not-found and schema drift as feature-unavailable,
+11. Treats JSON-RPC method-not-found and schema drift as feature-unavailable,
     not as a generic runtime crash.
 
 The adapter returns only structured thread summaries. Resolution policy—UUID
@@ -156,7 +162,7 @@ Reserve rows only after owner approval:
 
 | ID | Test-first behavior | Tier |
 |---|---|---|
-| T-CFG-17 | Codex name resolution defaults true; config and both CLI flags obey precedence | U |
+| T-CFG-17 | Codex name resolution defaults true; config and both Codex-specific CLI flags obey precedence | U |
 | T-PRE-11 | canonical Codex UUID bypasses app-server entirely | U |
 | T-PRE-12 | exact renamed session resolves once to canonical UUID | U |
 | T-PRE-13 | disabled resolution + UUID succeeds; disabled + name refuses without spawning | F |
@@ -254,8 +260,9 @@ change.
 
 ## Remaining owner questions
 
-1. Approve `--resolve-session-name` / `--no-resolve-session-name` and
-   `[agents.codex] resolve_session_names = true`? These names are recommended.
+1. **Approved:** `--codex-session-name-resolution` /
+   `--no-codex-session-name-resolution` and
+   `[agents.codex] session_name_resolution = true`.
 2. Confirm default enabled? Recommended: yes; UUID paths still bypass it.
 3. Should explicit names search active sessions only, or active plus archived?
    Recommended: active only, matching the normal fork picker; UUID remains the
@@ -268,3 +275,12 @@ change.
    `session_resolution_unavailable` as new stable exit-3 codes, while unknown
    name and stale rollout retain `session_not_found`? Recommended: yes.
 7. Approve no SQLite fallback under any failure? Recommended: yes.
+
+## Future generalization
+
+The Codex-specific CLI name is deliberate. If a second agent later needs the
+same capability, add generic `--session-name-resolution` /
+`--no-session-name-resolution` controls while retaining the Codex-specific
+flags as compatible overrides. The generic value supplies a default and the
+agent-specific value wins. Reuse `[agents.<agent>].session_name_resolution`;
+do not silently reinterpret or remove the Codex-specific interface.

@@ -24,6 +24,7 @@
 | D11 | Extra-args passthrough | **Ships in v1**: `[agents.<name>] extra_args` | ⚠ `ch-13-b` |
 | D15 | Partial worktree destination overrides | **Independent base and leaf flags; exact path remains exclusive** | ★ owner-approved 2026-08-10 |
 | D16 | Agent integration mode | **Adaptive `auto`; explicit `strict` and `git-only` controls** | ★ owner-approved 2026-08-10 |
+| D17 | Codex renamed sessions | **Feature-detected app-server resolution; default on with UUID-only escape hatch** | ★ owner-approved 2026-08-10 |
 
 ## Decisions in detail
 
@@ -98,6 +99,17 @@ Dual ambient signals remain ambiguous in auto/strict mode; explicit Git-only
 mode ignores them. Once auto detects an agent, agent preflight failure refuses
 without silently degrading. Git-only retains state carry, verification,
 includes, hooks, registry, and rollback and emits `cd <worktree>`.
+
+### D17 — Codex renamed-session resolution (owner-approved 2026-08-10)
+
+For a non-UUID explicit Codex `--parent-session`, Agent Fork resolves an exact
+renamed-session match through the installed Codex app-server `thread/list`
+protocol and always emits the canonical UUID. Resolution is enabled by default;
+`--no-codex-session-name-resolution` or
+`[agents.codex] session_name_resolution=false` enforces UUID-only behavior.
+Canonical UUIDs bypass app-server. Protocol failures refuse with UUID guidance;
+there is never a direct SQLite fallback. The Codex-specific flag is retained if
+a future generic session-name-resolution control is introduced.
 
 ## Resulting v1 surface (consolidated)
 

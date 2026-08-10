@@ -86,8 +86,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     fork.add_argument(
         "--parent-session",
-        metavar="ID",
-        help="Parent session/thread ID; detected when omitted",
+        metavar="ID_OR_NAME",
+        help=(
+            "Parent session/thread UUID or renamed Codex session name; "
+            "detected when omitted"
+        ),
     )
     agent_mode = fork.add_mutually_exclusive_group()
     agent_mode.add_argument(
@@ -99,6 +102,15 @@ def _parser() -> argparse.ArgumentParser:
         "--no-agent",
         action="store_true",
         help="Create only the Git branch and worktree",
+    )
+    fork.add_argument(
+        "--codex-session-name-resolution",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Resolve renamed Codex sessions through the local app-server "
+            "(default: enabled; UUIDs bypass it)"
+        ),
     )
     fork.add_argument("--branch", metavar="BRANCH", help="Explicit fork branch name")
     fork.add_argument(
@@ -333,6 +345,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
                 if args.no_agent
                 else None
             ),
+            "codex_session_name_resolution": args.codex_session_name_resolution,
         }.items()
         if value is not None
     }
@@ -440,18 +453,21 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         if context is not None
         else ()
     )
-    launch = (
-        build_launch_command(
-            context, worktree=destination, name=name, extra_args=extra_args
-        )
-        if context is not None
-        else LaunchCommand(f"cd {shlex.quote(str(destination))}", None, ())
-    )
     output_kind = "json" if args.json else (args.output or config.output)
 
     if args.dry_run:
         if context is not None:
-            preflight_agent(context, environment)
+            agent_check = preflight_agent(
+                context,
+                environment,
+                codex_session_name_resolution=config.codex_session_name_resolution,
+            )
+            context = agent_check.context or context
+            launch = build_launch_command(
+                context, worktree=destination, name=name, extra_args=extra_args
+            )
+        else:
+            launch = LaunchCommand(f"cd {shlex.quote(str(destination))}", None, ())
         git_version = subprocess.run(
             ["git", "--version"], env=environment, capture_output=True, text=True
         ).stdout
@@ -472,6 +488,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             if config.with_ignored
             else 0,
             launch.command,
+            agent_check.notices if context is not None else (),
         )
         print(dry.render())
         return 0
@@ -488,7 +505,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             verify=config.verify,
             force=args.force,
             extra_args=extra_args,
-            child_session_id=launch.child_session_id,
+            codex_session_name_resolution=config.codex_session_name_resolution,
         ),
         env=environment,
     )
@@ -496,8 +513,11 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     if config.copy:
         notices.extend(copy_to_clipboard(result.launch.command))
     presented = ForkOutput(
-        agent=context.agent if context is not None else None,
-        parent_session_id=context.parent_session_id if context is not None else None,
+        agent=result.agent.agent if result.agent is not None else None,
+        parent_session_id=(
+            result.agent.parent_session_id if result.agent is not None else None
+        ),
+        parent_session_name=result.parent_session_name,
         mode="agent" if context is not None else "git-only",
         name=name,
         branch=branch,
@@ -697,7 +717,12 @@ def main(argv: list[str] | None = None) -> int:
                     "output": resolved.output,
                     "agents": {
                         "claude": {"extra_args": list(resolved.claude_extra_args)},
-                        "codex": {"extra_args": list(resolved.codex_extra_args)},
+                        "codex": {
+                            "extra_args": list(resolved.codex_extra_args),
+                            "session_name_resolution": (
+                                resolved.codex_session_name_resolution
+                            ),
+                        },
                     },
                 }
                 if args.json or args.output == "json":
@@ -709,9 +734,17 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"{key} = {value}")
                 return 0
             if args.config_action == "get":
-                if not hasattr(resolved, args.key):
+                aliases = {
+                    "agents.codex.session_name_resolution": (
+                        resolved.codex_session_name_resolution
+                    )
+                }
+                if args.key in aliases:
+                    value = aliases[args.key]
+                elif hasattr(resolved, args.key):
+                    value = getattr(resolved, args.key)
+                else:
                     raise ConfigError(f"unknown config key: {args.key}")
-                value = getattr(resolved, args.key)
                 print(str(value).lower() if isinstance(value, bool) else value)
                 return 0
     except ConfigError as error:
