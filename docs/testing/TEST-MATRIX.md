@@ -288,7 +288,7 @@ Varying axes: none of the shared four vary (baseline pinned); CLI flag combinati
 ---
 
 ## G-INC — Include & setup hook
-Status: pending
+Status: done
 
 Purpose: `.worktreeinclude` precedence (materialized copies win) plus the setup-hook contract (cwd, env, non-fatal).
 

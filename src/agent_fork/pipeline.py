@@ -1,0 +1,129 @@
+"""Normative preflight-to-emission fork orchestration."""
+
+from __future__ import annotations
+
+import subprocess
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+
+from agent_fork.agents import (
+    AgentContext,
+    LaunchCommand,
+    build_launch_command,
+    preflight_agent,
+    preflight_git,
+)
+from agent_fork.git import run_git
+from agent_fork.include import copy_worktree_includes, run_setup_hook
+from agent_fork.materialize import materialize
+from agent_fork.models import RegistryEntry
+from agent_fork.registry import add_entry
+from agent_fork.repository import (
+    WorktreeCreation,
+    create_worktree_at_anchor,
+    validate_fork_guards,
+)
+from agent_fork.rollback import run_with_rollback
+from agent_fork.verify import verify_fork
+
+
+@dataclass(frozen=True)
+class ForkRequest:
+    parent: Path
+    destination: Path
+    name: str
+    branch: str
+    agent: AgentContext
+    with_state: bool = True
+    with_ignored: bool = False
+    verify: bool = True
+    force: bool = False
+    extra_args: tuple[str, ...] = ()
+    agent_executable: str | None = None
+    agent_version_output: str | None = None
+    git_version_output: str | None = None
+    child_session_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ForkResult:
+    creation: WorktreeCreation
+    launch: LaunchCommand
+    notices: tuple[str, ...]
+    verification: bool
+    included: tuple[str, ...]
+
+
+def _git_version(env: Mapping[str, str]) -> str:
+    completed = subprocess.run(
+        ["git", "--version"], env=dict(env), capture_output=True, text=True
+    )
+    return completed.stdout or completed.stderr
+
+
+def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
+    """Execute the locked preflight-through-registry fork sequence."""
+    agent_check = preflight_agent(
+        request.agent,
+        env,
+        executable=request.agent_executable,
+        version_output=request.agent_version_output,
+    )
+    notices = list(
+        preflight_git(
+            request.git_version_output or _git_version(env),
+            force=request.force,
+            verify=request.verify,
+        )
+    )
+    notices.extend(agent_check.notices)
+    validate_fork_guards(request.parent, request.branch, request.destination, env=env)
+    parent_status = run_git(
+        request.parent, ["status", "--porcelain=v1", "-z"], env=env
+    ).stdout
+    creation = create_worktree_at_anchor(
+        request.parent, request.branch, request.destination, env=env
+    )
+
+    def finish() -> tuple[tuple[str, ...], tuple[str, ...]]:
+        materialized = materialize(
+            request.parent,
+            creation.path,
+            with_state=request.with_state,
+            with_ignored=request.with_ignored,
+            env=env,
+        )
+        notices.extend(materialized.notices)
+        if request.verify:
+            verify_fork(
+                creation,
+                with_state=request.with_state,
+                with_ignored=request.with_ignored,
+                parent_status_before=parent_status,
+                env=env,
+            )
+        included = copy_worktree_includes(request.parent, creation.path, env=env)
+        notices.extend(included.notices)
+        hook_notices = run_setup_hook(request.parent, creation.path, env=env)
+        notices.extend(hook_notices)
+        add_entry(
+            RegistryEntry.create(
+                name=request.name,
+                branch=request.branch,
+                worktree=creation.path,
+                agent=request.agent.agent,
+            ),
+            env=env,
+        )
+        return included.copied, hook_notices
+
+    included, _ = run_with_rollback(creation, finish, env=env)
+    launch = build_launch_command(
+        request.agent,
+        worktree=creation.path,
+        name=request.name,
+        extra_args=request.extra_args,
+        child_session_id=request.child_session_id,
+    )
+    return ForkResult(creation, launch, tuple(notices), request.verify, included)

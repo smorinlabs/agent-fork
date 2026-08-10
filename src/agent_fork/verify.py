@@ -31,6 +31,7 @@ def verify_fork(
     creation: WorktreeCreation,
     *,
     with_state: bool = True,
+    with_ignored: bool = False,
     parent_status_before: bytes,
     env: Mapping[str, str] | None = None,
 ) -> None:
@@ -49,13 +50,12 @@ def verify_fork(
     if (str(creation.path), creation.branch) not in _worktree_pairs(creation, env=env):
         failures.append("worktree-list")
 
-    child_status = run_git(
-        creation.path, ["status", "--porcelain=v1", "-z"], env=env
-    ).stdout
+    status_args = ["status", "--porcelain=v1", "-z"]
+    if with_ignored:
+        status_args.append("--ignored")
+    child_status = run_git(creation.path, status_args, env=env).stdout
     if with_state:
-        parent_status = run_git(
-            creation.parent_path, ["status", "--porcelain=v1", "-z"], env=env
-        ).stdout
+        parent_status = run_git(creation.parent_path, status_args, env=env).stdout
         if child_status != parent_status:
             failures.append("exact-copy-status")
     elif child_status:
