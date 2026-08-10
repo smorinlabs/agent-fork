@@ -17,6 +17,8 @@ uv.pkg-path = "uv"
 just.pkg-path = "just"
 git.pkg-path = "git"
 gnumake.pkg-path = "gnumake"
+zsh.pkg-path = "zsh"
+fish.pkg-path = "fish"
 
 # --- Agent runtime CLIs (integration tests marked requires_real_cli) ---
 # Isolated group: they track fast-moving nixpkgs revisions and would

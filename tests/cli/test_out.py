@@ -1,5 +1,6 @@
 """G-OUT — black-box streams plus rendering-boundary conformance."""
 
+import ast
 import json
 import os
 import shutil
@@ -331,3 +332,69 @@ def test_human_and_json_report_same_composed_path(repo_scenario):
     )
     assert machine.returncode == 0
     assert json.loads(machine.stdout)["fork"]["worktree"] == str(base2 / "JSON Leaf")
+
+
+@pytest.mark.matrix("T-OUT-14")
+def test_production_boundary_codes_equal_authoritative_catalog(repo_scenario):
+    from agent_fork.errors import ERROR_CATALOG
+
+    repo_scenario()
+    discovered = set()
+    for path in (Path(__file__).parents[2] / "src/agent_fork").glob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name) and target.id == "code"
+                    for target in node.targets
+                )
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                discovered.add(node.value.value)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "PreconditionError"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+            ):
+                discovered.add(node.args[0].value)
+    assert discovered == set(ERROR_CATALOG)
+
+
+@pytest.mark.matrix("T-OUT-15")
+def test_error_catalog_json_and_exit_families(repo_scenario):
+    from agent_fork.errors import ERROR_CATALOG, AgentForkError
+    from agent_fork.output import STABLE_ERROR_CODES, render_error
+
+    repo_scenario()
+    assert STABLE_ERROR_CODES == tuple(ERROR_CATALOG)
+    for code, spec in ERROR_CATALOG.items():
+        error_type = type(
+            f"CatalogError_{code}",
+            (AgentForkError,),
+            {"code": code, "exit_code": spec.exit_code},
+        )
+        error = error_type("catalog message")
+        assert error.exit_code == spec.exit_code
+        assert json.loads(render_error(error, machine=True)) == {
+            "error": {"code": code, "message": "catalog message"}
+        }
+
+
+@pytest.mark.matrix("T-OUT-16")
+def test_config_failure_json_uses_specific_code_and_exit_2(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    invalid = world.parent_path / "invalid.toml"
+    invalid.write_text("not valid toml = [")
+    completed = run_cli(
+        ["--config", str(invalid), "config", "view", "--json"],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 2 and completed.stdout == b""
+    assert json.loads(completed.stderr)["error"]["code"] == "config_error"

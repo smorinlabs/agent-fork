@@ -75,25 +75,36 @@ def _parser() -> argparse.ArgumentParser:
     fork.add_argument(
         "name",
         nargs="?",
+        metavar="NAME",
         help="Fork identity; derived from the current branch when omitted",
     )
     fork.add_argument(
-        "--agent", help="Host agent (claude or codex); detected when omitted"
+        "--agent",
+        metavar="{claude,codex}",
+        help="Host agent (claude or codex); detected when omitted",
     )
     fork.add_argument(
-        "--parent-session", help="Parent session/thread ID; detected when omitted"
+        "--parent-session",
+        metavar="ID",
+        help="Parent session/thread ID; detected when omitted",
     )
-    fork.add_argument("--branch", help="Explicit fork branch name")
+    fork.add_argument("--branch", metavar="BRANCH", help="Explicit fork branch name")
     fork.add_argument(
-        "--worktree-dir", type=Path, help="Use this exact worktree destination"
+        "--worktree-dir",
+        type=Path,
+        metavar="PATH",
+        help="Use this exact worktree destination",
     )
     fork.add_argument(
         "--worktree-base-dir",
         type=Path,
+        metavar="DIRECTORY",
         help="Replace only the derived worktree parent directory",
     )
     fork.add_argument(
-        "--worktree-name", help="Replace only the derived worktree directory name"
+        "--worktree-name",
+        metavar="COMPONENT",
+        help="Replace only the derived worktree directory name",
     )
     fork.add_argument(
         "--with-state",
@@ -156,7 +167,9 @@ def _parser() -> argparse.ArgumentParser:
         description="Remove a fork worktree and, by default, its branch.",
         epilog="Safety: Never remove the invoking working directory.",
     )
-    cleanup.add_argument("target", help="Fork name, branch, or worktree path")
+    cleanup.add_argument(
+        "target", metavar="TARGET", help="Fork name, branch, or worktree path"
+    )
     cleanup.add_argument(
         "--force",
         action="store_true",
@@ -209,6 +222,21 @@ def _parser() -> argparse.ArgumentParser:
         "config", allow_abbrev=False, help="Inspect or update configuration"
     )
     actions = config.add_subparsers(dest="config_action", required=True)
+    viewer = actions.add_parser(
+        "view", allow_abbrev=False, help="Show effective configuration"
+    )
+    viewer.add_argument(
+        "-o",
+        "--output",
+        choices=("table", "text", "json"),
+        default="table",
+        help="Select result format",
+    )
+    viewer.add_argument("--json", action="store_true", help="Alias for --output json")
+    getter = actions.add_parser(
+        "get", allow_abbrev=False, help="Get one effective configuration value"
+    )
+    getter.add_argument("key", help="Configuration key")
     setter = actions.add_parser(
         "set", allow_abbrev=False, help="Set a user configuration value"
     )
@@ -217,17 +245,6 @@ def _parser() -> argparse.ArgumentParser:
     actions.add_parser(
         "validate", allow_abbrev=False, help="Validate effective configuration"
     )
-    viewer = actions.add_parser(
-        "view", allow_abbrev=False, help="Show effective configuration"
-    )
-    viewer.add_argument(
-        "-o", "--output", choices=("table", "text", "json"), default="table"
-    )
-    viewer.add_argument("--json", action="store_true", help="Alias for --output json")
-    getter = actions.add_parser(
-        "get", allow_abbrev=False, help="Get one effective configuration value"
-    )
-    getter.add_argument("key", help="Configuration key")
     return parser
 
 
@@ -501,18 +518,9 @@ def main(argv: list[str] | None = None) -> int:
             selected.print_help()
             return 0
         if args.command == "completion":
-            scripts = {
-                "bash": (
-                    "complete -W 'fork cleanup list doctor config completion help' "
-                    "agent-fork"
-                ),
-                "zsh": "compdef '_arguments *::command:->cmds' agent-fork",
-                "fish": (
-                    "complete -c agent-fork -f -a "
-                    "'fork cleanup list doctor config completion help'"
-                ),
-            }
-            print(scripts[args.shell])
+            from agent_fork.completion import render_completion
+
+            print(render_completion(args.shell), end="")
             return 0
         if args.command == "doctor":
             from agent_fork.doctor import run_doctor

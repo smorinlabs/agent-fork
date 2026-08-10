@@ -352,13 +352,16 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-04 | `-o json` includes `cwd_prompt_expected: false` for Codex because the E2-locked `-C` template suppresses the prompt | agent=codex | C | live | REQ-17; EXPERIMENTS E2 |
 | T-OUT-05 | `-o json` omits the `cwd_prompt_expected` field for Claude | agent=claude | C | live | REQ-17; RESEARCH §5.1 Q4 |
 | T-OUT-06 | error object shape on stderr — single `{"error":{"code","message"}}` under any machine format | baseline | C | live | REQ-17 |
-| T-OUT-07 | every stable error code (`conflict_branch_exists`, `parent_mid_operation`, `session_not_found`, `verify_failed`, `repo_no_commits`, `unmerged_index`, `registry_busy`) round-trips correctly in the `-o json` error object — asserted individually | baseline | C | live | REQ-17 |
+| T-OUT-07 | every code in the authoritative stable error catalog round-trips correctly in the `-o json` error object — asserted individually | baseline | C | live | REQ-17 |
 | T-OUT-08 | `--dry-run` output lists every planned mutation (branch, worktree path, files-to-carry counts, paste command) and states validation was local-only | baseline | C | live | REQ-18 |
 | T-OUT-09 | clipboard copy failure emits a stderr notice; exit code is unaffected | baseline | C | live | DESIGN-DECISIONS D9 |
 | T-OUT-10 | non-C locale row — `-o json` machine output is byte-identical regardless of process locale | locale=non-C | C | live | REQ-38 R9.4 |
 | T-OUT-11 | `fork -o json` success object carries the REQ-17 minimum fields — `agent`, `parent_session_id`, `fork.branch`, `fork.worktree`, `fork.anchor_commit`, `fork.mode` (state-carry booleans), `verification` (per-check results), `command`, `notices[]` | baseline | C | live | REQ-17 |
 | T-OUT-12 | dry-run reports exact composed destination and mutates nothing | baseline | C | live | D15; REQ-44 |
 | T-OUT-13 | human and JSON success report their exact composed final paths | baseline | C | live | D15; REQ-44 |
+| T-OUT-14 | production boundary-code inventory exactly matches the authoritative error catalog | baseline | C | live | CLI Design Standard R7.12; P01-T19 follow-up |
+| T-OUT-15 | every catalog entry renders its JSON code and carries its documented exit family | baseline | C | live | CLI Design Standard R6/R7.12; P01-T19 follow-up |
+| T-OUT-16 | handled configuration failure emits `config_error` with exit 2 under JSON output | baseline | C | live | CLI Design Standard R6/R7.8; P01-T19 follow-up |
 
 ---
 
@@ -386,6 +389,11 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-13 | fork help exposes both partial destination flags | baseline | C | live | D15; REQ-44 |
 | T-CLI-14 | exact and partial destination overrides are parser-mutually-exclusive | baseline | C | live | D15; REQ-44 |
 | T-CLI-15 | publishable help describes commands and core arguments/options, destructive cleanup safety, and the stable exit-code contract | baseline | C | live | CLI Design Standard R7.9/R7.12; REQ-11; P01-T19 |
+| T-CLI-16 | Bash completion covers nested actions, flags, and fixed choices and passes syntax validation | baseline | C | live | CLI Design Standard R9.1; P01-T19 follow-up |
+| T-CLI-17 | Zsh completion has semantic parity and passes syntax validation when Zsh is installed | baseline | C | live | CLI Design Standard R9.1; P01-T19 follow-up |
+| T-CLI-18 | Fish completion has semantic parity and passes syntax validation when Fish is installed | baseline | C | live | CLI Design Standard R9.1; P01-T19 follow-up |
+| T-CLI-19 | semantic metavariables, config-view output help, and read-first config action order match the approved contract | baseline | C | live | CLI Design Standard R3/R7.9; P01-T19 follow-up |
+| T-CLI-20 | display-only agent enum metadata preserves unknown-agent exit 3 behavior | baseline | C | live | REQ-03/REQ-11; P01-T19 follow-up |
 
 ---
 

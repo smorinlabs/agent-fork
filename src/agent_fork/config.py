@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from agent_fork.errors import AgentForkError
 from agent_fork.models import ConfigValues, ResolvedConfig
 
 DEFAULT_BRANCH_PREFIX = "fork/"
@@ -27,8 +28,11 @@ _FORK_KEYS = {
 _BOOL_KEYS = {"with_state", "with_ignored", "verify", "copy"}
 
 
-class ConfigError(ValueError):
+class ConfigError(AgentForkError, ValueError):
     """A deterministic, user-actionable configuration failure."""
+
+    code = "config_error"
+    exit_code = 2
 
 
 def _coerce_source(source: ConfigValues | Mapping[str, Any] | None) -> ConfigValues:

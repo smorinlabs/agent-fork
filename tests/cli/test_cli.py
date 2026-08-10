@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -368,3 +369,104 @@ def test_explicit_base_must_exist_and_be_directory(repo_scenario):
                 base_dir=base,
             )
         assert caught.value.code == "invalid_worktree_base"
+
+
+def _completion(repo_scenario, shell):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    completed = run_cli(["completion", shell], world.env, world.parent_path)
+    assert completed.returncode == 0 and completed.stderr == b""
+    return completed.stdout.decode()
+
+
+def _assert_completion_semantics(script):
+    for token in (
+        "fork",
+        "cleanup",
+        "config",
+        "view",
+        "validate",
+        "--worktree-base-dir",
+        "--worktree-name",
+        "--parent-session",
+        "--help",
+        "--config",
+        "--debug",
+        "claude",
+        "codex",
+        "table",
+        "json",
+        "bash",
+        "zsh",
+        "fish",
+    ):
+        assert token in script or token.removeprefix("--") in script
+
+
+@pytest.mark.matrix("T-CLI-16")
+def test_bash_completion_semantics_and_syntax(repo_scenario):
+    script = _completion(repo_scenario, "bash")
+    _assert_completion_semantics(script)
+    completed = subprocess.run(
+        ["bash", "-n"], input=script, text=True, capture_output=True, check=False
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.matrix("T-CLI-17")
+def test_zsh_completion_semantics_and_syntax(repo_scenario):
+    script = _completion(repo_scenario, "zsh")
+    _assert_completion_semantics(script)
+    executable = shutil.which("zsh")
+    if executable:
+        completed = subprocess.run(
+            [executable, "-n"], input=script, text=True, capture_output=True
+        )
+        assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.matrix("T-CLI-18")
+def test_fish_completion_semantics_and_syntax(repo_scenario):
+    script = _completion(repo_scenario, "fish")
+    _assert_completion_semantics(script)
+    executable = shutil.which("fish")
+    if executable:
+        completed = subprocess.run(
+            [executable, "-n"], input=script, text=True, capture_output=True
+        )
+        assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.matrix("T-CLI-19")
+def test_semantic_metavars_and_config_help_order(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    fork = run_cli(["help", "fork"], world.env, world.parent_path).stdout
+    for token in (
+        b"[NAME]",
+        b"--agent {claude,codex}",
+        b"--parent-session ID",
+        b"--worktree-base-dir DIRECTORY",
+        b"--worktree-name COMPONENT",
+    ):
+        assert token in fork
+    config = run_cli(["help", "config"], world.env, world.parent_path).stdout
+    assert b"{view,get,set,validate}" in config
+    view = run_cli(["config", "view", "--help"], world.env, world.parent_path).stdout
+    assert b"Select result format" in view
+
+
+@pytest.mark.matrix("T-CLI-20")
+def test_agent_metavar_does_not_change_unknown_agent_exit(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    completed = run_cli(
+        ["fork", "x", "--agent", "alien", "--parent-session", "id"],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 3
+    assert b"agent_not_detected" in completed.stderr

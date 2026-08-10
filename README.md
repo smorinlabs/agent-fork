@@ -91,6 +91,22 @@ documented in [REQUIREMENTS.md](REQUIREMENTS.md). Incompatible CLI or schema
 changes require a major version change; compatible additions may appear in a
 minor release. Deprecated interfaces will be documented before removal.
 
+## Error catalog
+
+Machine-format failures use `{"error":{"code","message"}}` on stderr. Codes
+are stable compatibility identifiers; messages may gain detail without changing
+their meaning.
+
+| Exit | Codes |
+|---|---|
+| 1 | `runtime_error`, `verify_failed`, `registry_busy` |
+| 2 | `config_error` |
+| 3 | `agent_not_detected`, `session_not_found`, `cleanup_target_unknown` |
+| 5 | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits` |
+
+Exit 4 remains reserved because this local tool has no authentication failure
+class. SIGINT and SIGTERM exit 130 and 143 after rollback where applicable.
+
 ## Development
 
 ```bash

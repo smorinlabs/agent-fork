@@ -56,3 +56,13 @@ a wheel installed into a disposable environment.
 **Pass after fixes.** CLI-AUD-01 and CLI-AUD-02 are closed, the existing R2.1 waiver is unchanged,
 and no new waiver is required. This audit does not configure release automation,
 publish a package, or perform P01-T20/P01-T21.
+
+## Approved second-level hardening
+
+The owner approved the follow-up adversarial plan. The implementation replaces
+the self-referential seven-code check with an authoritative 21-code catalog,
+uses `config_error` for handled configuration failures, provides semantic Bash,
+Zsh, and Fish completions with syntax gates, and aligns help metavariables and
+config-action ordering with the locked interface. Evidence is T-OUT-14..16 and
+T-CLI-16..20. Reserved exit 4 remains documentation-only and help examples stay
+in README, as recommended by the review.
