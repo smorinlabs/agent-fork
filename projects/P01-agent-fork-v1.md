@@ -48,28 +48,29 @@ Phase C.5 — test architecture skeleton (gate: matrix + stub tree + checker gre
 - [x] [P01-T24] check-matrix drift guard + just check-matrix
 
 Phase D — build (gate: everything green + reviews clean; every T preceded by its TS)
-- [ ] [P01-TS04] Config resolver tests: tri-state semantics + implication rule (REQ-13)
-- [ ] [P01-T08] Config resolver (port agent-deck Resolve() semantics verbatim)
-- [ ] [P01-TS05] Git detection matrix tests (RESEARCH §2.3 rows)
-- [ ] [P01-T09] Detection module
-- [ ] [P01-TS06] Guards + anchor + worktree-create tests (REQ-19, REQ-20)
-- [ ] [P01-T10] Guards, parent-HEAD anchor, worktree create
-- [ ] [P01-TS07] Materialization fixture tests — §2.2 verbatim sequence; one case per RESEARCH §4 matrix row incl. symlink + exec-bit (REQ-21)
-- [ ] [P01-T11] Materialize (staged → unstaged → untracked [+ignored])
-- [ ] [P01-TS08] Verification ladder + rollback tests (REQ-22, REQ-23)
-- [ ] [P01-T12] Verify ladder + rollback
-- [ ] [P01-TS09] Registry locking/concurrency tests (REQ-41)
-- [ ] [P01-T13] Fork registry in XDG state (REQ-12)
-- [ ] [P01-TS10] Agent detection/preflight/template tests incl. extra_args quoting boundary (REQ-26..30, D11)
-- [ ] [P01-T14] Per-agent detection, preflight, launch templates
-- [ ] [P01-TS11] `fork` command end-to-end tests
-- [ ] [P01-T15] `fork` command
-- [ ] [P01-TS12] `cleanup` / `list` / `doctor` / `config` / `completion` tests (REQ-31..34, R9.10)
-- [ ] [P01-T16] `cleanup` / `list` / `doctor` / `config` / `completion`
-- [ ] [P01-TS13] Machine output + error catalog tests (REQ-16, REQ-17, R7.8/R7.12)
-- [ ] [P01-T17] Output layer (`-o json`, stream separation, error objects)
-- [ ] [P01-TS14] Conformance fixtures in CI (R9.14: help shape, streams, exit codes, `--json`, bare/unknown invocation)
-- [ ] [P01-T18] GitHub Actions CI green from the start — implementation-start matrix + strict-collection job landed in Phase D Task 1; T18 remains reserved for the full R9.14 conformance job
+- [x] Phase D fixture gate — G-FIX 24/24 green; sealed environment, topology worlds, manifest/index oracles, version canaries, PATH shim, pty/stall machinery, and hardened teardown reviewed
+- [x] [P01-TS04] Config resolver tests: tri-state semantics + implication rule (REQ-13) — G-CFG 13/13 green
+- [x] [P01-T08] Config resolver — tri-state/A12 precedence, discovery boundaries, XDG env, and config set/validate implemented fresh from the locked behavior
+- [x] [P01-TS05] Git repository/topology detection matrix tests (RESEARCH §2.3 rows) — all eight anchor topologies plus guard topology cases green
+- [x] [P01-T09] Detection module — agent/session detection plus PATH-resolved plain/linked/bare Git metadata and pre-mutation guard detection complete
+- [x] [P01-TS06] Guards + anchor + worktree-create tests (REQ-19, REQ-20) — G-GRD 14/14 and G-ANC 8/8 green
+- [x] [P01-T10] Guards, parent-HEAD anchor, atomic worktree create — PATH-resolved Git, metadata, and race-loss mapping implemented
+- [x] [P01-TS07] Materialization fixture tests — §2.2 verbatim sequence; one case per RESEARCH §4 matrix row incl. symlink + exec-bit (REQ-21) — G-MAT 20/20 green
+- [x] [P01-T11] Materialize (staged → unstaged → untracked [+ignored]) — exact, exact+ignored, and no-state preserve the declared Git-visible state
+- [x] [P01-TS08] Verification ladder + rollback tests (REQ-22, REQ-23) — G-VER 11/11 and G-RBK 6/6 green, including real filter divergence, producer failure, and signal stalls
+- [x] [P01-T12] Verify ladder + rollback — typed verification failure, precise cleanup, exact manual recovery, and SIGINT/SIGTERM exit mapping implemented
+- [x] [P01-TS09] Registry locking/concurrency tests (REQ-41) — G-REG 7/7 green with atomicity, real different-name fork races, timeout, and lock-death proofs
+- [x] [P01-T13] Fork registry in XDG state (REQ-12) — stable schema, deterministic ordering, atomic locked writes, ownership lookup, and list rendering implemented
+- [x] [P01-TS10] Agent detection/preflight/template tests incl. extra_args quoting boundary (REQ-26..30, D11) — G-DET, G-PRE, and G-EMT green; hostile shell execution and real E1–E3 rerun pass
+- [x] [P01-T14] Per-agent detection, preflight, launch templates — locked Claude/Codex REQ-28 builders and individually quoted extra_args implemented
+- [x] [P01-TS11] `fork` command end-to-end tests — human/JSON, Claude/Codex, dry-run, streams, clipboard failure, and schema paths exercised through the installed console script
+- [x] [P01-T15] `fork` command — discovery, naming/location, preflight, normative pipeline, registry, locked launch command, and output wired end to end
+- [x] [P01-TS12] `cleanup` / `list` / `doctor` / `config` / `completion` tests (REQ-31..34, R9.10) — G-REG, G-CLN, and G-CLI command rows green through the installed console script
+- [x] [P01-T16] `cleanup` / `list` / `doctor` / `config` / `completion` — full command tree, standard flags, completion scripts, aggregate doctor, and stable exit mapping implemented
+- [x] [P01-TS13] Machine output + error catalog tests (REQ-16, REQ-17, R7.8/R7.12) — G-OUT 11/11 green across TTY, locale, error catalog, and minimum schema
+- [x] [P01-T17] Output layer (`-o json`, stream separation, error objects) — stable locale-independent renderer and notice-only clipboard fallback implemented
+- [x] [P01-TS14] Conformance fixtures in CI (R9.14: help shape, streams, exit codes, `--json`, bare/unknown invocation) — blocking job plus closed-fd/SIGPIPE and disposable wheel-install checks implemented and green locally
+- [x] [P01-T18] GitHub Actions CI green from the start — implementation-start matrix + strict collection landed in Phase D Task 1; final R9.14 conformance and clean-install jobs green in PR #8
 
 Phase E — ship v0.1.0 (gate: released + installable)
 - [ ] [P01-T19] cli-standards audit vs built binary; fix/waive; CONFORMANCE.md audit row
@@ -80,7 +81,7 @@ Phase F — companion skill (gate: end-to-end demo)
 - [ ] [P01-TS15] Acceptance: one word in a real Claude Code session → verified fork + working paste command; same for Codex
 - [ ] [P01-T22] `agent-fork` skill via skill-create (env detection, `--json` contract, install hint)
 
-- [ ] Regression Test Status — `just all` green at every merge; conformance fixtures in CI from Phase D
+- [x] Regression Test Status — Phase D final suite 218 passed with only retired T-EXP-04 skipped; conformance fixtures and clean-install checks green in PR #8
 
 ### Deliverable
 ```bash

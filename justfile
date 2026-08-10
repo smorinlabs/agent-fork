@@ -35,5 +35,9 @@ check-matrix:
 strict-collect:
     uv run pytest --collect-only -q
 
+# Build a wheel, install it into a disposable venv, and smoke-test the entry point
+clean-install:
+    bash scripts/check_clean_install.sh
+
 # Format, lint, typecheck, test
 all: fmt lint typecheck test

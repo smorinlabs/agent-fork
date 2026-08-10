@@ -1,5 +1,7 @@
 # Goal: complete agent-fork v1 through the Phase D gate
 
+> Active execution contract: [finish Phase D and stop before Phase E](phase-d-completion.md).
+
 ## Objective
 
 Implement `agent-fork` v1 test-first against the committed test matrix, validate

@@ -1,60 +1,116 @@
-"""G-CLN — Cleanup (tier F rows only; C rows in tests/cli/).
+"""G-CLN cleanup targeting, mutation, and guard proofs."""
 
-Matrix: docs/testing/TEST-MATRIX.md §G-CLN.
-"""
+import subprocess
 
 import pytest
 
 
-@pytest.mark.matrix("T-CLN-01")
-@pytest.mark.skip(reason="pending: T-CLN-01")
-def test_cleanup_target_accepts_name_branch_or_path(repo_scenario):
-    """T-CLN-01 — cleanup's TARGET argument accepts a fork name, a branch name, or a
-    worktree path.
+def _forked(repo_scenario, name="cleanup"):
+    from agent_fork.agents import AgentContext
+    from agent_fork.pipeline import ForkRequest, fork
+    from conftest import origin
 
-    Given:  a completed fork, targeted by each of its name, branch, and worktree path
-            forms
-    Expect: each form resolves to the same fork
-    Source: REQ-31
-    """
-    raise NotImplementedError
+    world = repo_scenario("plain@main", remote=origin())
+    request = ForkRequest(
+        parent=world.parent_path,
+        destination=world.parent_path.parent / f"child-{name}",
+        name=name,
+        branch=f"fork/{name}",
+        agent=AgentContext("claude", "11111111-1111-1111-1111-111111111111"),
+        agent_executable="/fake/claude",
+        agent_version_output="Claude Code 2.1.220",
+        git_version_output="git version 2.43.0",
+        child_session_id="33333333-3333-3333-3333-333333333333",
+    )
+    return world, fork(request, env=world.env)
+
+
+def _branch_exists(world, branch):
+    return (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(world.parent_path),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+            ],
+            env=world.env,
+        ).returncode
+        == 0
+    )
+
+
+@pytest.mark.matrix("T-CLN-01")
+def test_cleanup_target_accepts_name_branch_or_path(repo_scenario):
+    from agent_fork.cleanup import resolve_cleanup_target
+
+    for form in ("name", "branch", "path"):
+        world, result = _forked(repo_scenario, name=f"target-{form}")
+        target = {
+            "name": f"target-{form}",
+            "branch": f"fork/target-{form}",
+            "path": str(result.creation.path),
+        }[form]
+        plan = resolve_cleanup_target(target, cwd=world.parent_path, env=world.env)
+        assert plan.entry.name == f"target-{form}"
+        assert plan.branch == f"fork/target-{form}"
+        assert plan.worktree == result.creation.path
 
 
 @pytest.mark.matrix("T-CLN-02")
-@pytest.mark.skip(reason="pending: T-CLN-02")
 def test_cleanup_removes_and_prunes_worktree(repo_scenario):
-    """T-CLN-02 — cleanup removes the worktree via `git worktree remove` and prunes it.
+    from agent_fork.cleanup import cleanup, resolve_cleanup_target
 
-    Given:  a fork targeted for cleanup
-    Expect: worktree removed via `git worktree remove` and pruned
-    Source: REQ-31
-    """
-    raise NotImplementedError
+    world, forked = _forked(repo_scenario)
+    plan = resolve_cleanup_target("cleanup", cwd=world.parent_path, env=world.env)
+    result = cleanup(plan, cwd=world.parent_path, env=world.env)
+    assert result.removed and not forked.creation.path.exists()
+    listing = subprocess.run(
+        ["git", "-C", str(world.parent_path), "worktree", "list", "--porcelain"],
+        env=world.env,
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
+    assert str(forked.creation.path) not in listing
 
 
 @pytest.mark.matrix("T-CLN-03")
-@pytest.mark.skip(reason="pending: T-CLN-03")
 def test_cleanup_deletes_branch_unless_keep_branch(repo_scenario):
-    """T-CLN-03 — cleanup deletes the fork branch by default; --keep-branch preserves
-    it.
+    from agent_fork.cleanup import cleanup, resolve_cleanup_target
 
-    Given:  cleanup run with and without `--keep-branch`
-    Expect: the fork branch is deleted by default; `--keep-branch` preserves it
-    Source: REQ-31
-    """
-    raise NotImplementedError
+    world, _ = _forked(repo_scenario, "delete")
+    cleanup(
+        resolve_cleanup_target("delete", cwd=world.parent_path, env=world.env),
+        cwd=world.parent_path,
+        env=world.env,
+    )
+    assert not _branch_exists(world, "fork/delete")
+
+    kept_world, _ = _forked(repo_scenario, "kept")
+    cleanup(
+        resolve_cleanup_target("kept", cwd=kept_world.parent_path, env=kept_world.env),
+        cwd=kept_world.parent_path,
+        env=kept_world.env,
+        keep_branch=True,
+    )
+    assert _branch_exists(kept_world, "fork/kept")
 
 
 @pytest.mark.matrix("T-CLN-04")
-@pytest.mark.skip(reason="pending: T-CLN-04")
 def test_cleanup_removes_registry_entry(repo_scenario):
-    """T-CLN-04 — cleanup removes the fork's registry entry.
+    from agent_fork.cleanup import cleanup, resolve_cleanup_target
+    from agent_fork.registry import find_owned
 
-    Given:  a completed cleanup
-    Expect: the fork's registry entry is removed
-    Source: REQ-31
-    """
-    raise NotImplementedError
+    world, _ = _forked(repo_scenario)
+    cleanup(
+        resolve_cleanup_target("cleanup", cwd=world.parent_path, env=world.env),
+        cwd=world.parent_path,
+        env=world.env,
+    )
+    assert find_owned("cleanup", env=world.env) is None
 
 
 @pytest.mark.parametrize(
@@ -71,56 +127,80 @@ def test_cleanup_removes_registry_entry(repo_scenario):
         ),
     ],
 )
-@pytest.mark.skip(reason="pending: T-CLN-05..T-CLN-07 family")
 def test_cleanup_guard_refuses_without_force(repo_scenario, guard):
-    """Each cleanup guard refuses the target with exit 5 unless overridden.
+    from agent_fork.cleanup import cleanup, resolve_cleanup_target
+    from agent_fork.errors import PreconditionError
 
-    T-CLN-05 — a dirty worktree (uncommitted changes) refuses cleanup, exit 5.
-    T-CLN-06 — commits not reachable from any upstream (unpushed) refuses cleanup, exit
-    5.
-    T-CLN-07 — a target that is the invoking cwd refuses cleanup, exit 5.
-    Source: REQ-32; DESIGN-DECISIONS D12
-    """
-    raise NotImplementedError
+    world, result = _forked(repo_scenario, guard)
+    if guard == "dirty-worktree":
+        (result.creation.path / "dirty.txt").write_text("dirty\n")
+    elif guard == "unpushed-commits":
+        (result.creation.path / "commit.txt").write_text("commit\n")
+        subprocess.run(
+            ["git", "-C", str(result.creation.path), "add", "commit.txt"],
+            env=world.env,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(result.creation.path), "commit", "-m", "unpushed"],
+            env=world.env,
+            check=True,
+        )
+    plan = resolve_cleanup_target(guard, cwd=world.parent_path, env=world.env)
+    cwd = result.creation.path if guard == "target-is-cwd" else world.parent_path
+    with pytest.raises(PreconditionError) as captured:
+        cleanup(plan, cwd=cwd, env=world.env)
+    assert captured.value.exit_code == 5
+    assert guard.replace("-", "_") in captured.value.code
+    assert result.creation.path.exists()
 
 
 @pytest.mark.matrix("T-CLN-08")
-@pytest.mark.skip(reason="pending: T-CLN-08")
 def test_cleanup_force_extends_targeting_and_overrides_guards(repo_scenario):
-    """T-CLN-08 — --force extends cleanup targeting beyond registry-recorded forks and
-    overrides the dirty/unpushed guards only.
+    from agent_fork.cleanup import cleanup, resolve_cleanup_target
+    from agent_fork.repository import create_worktree_at_anchor
+    from conftest import origin
 
-    Given:  cleanup run with `--force` against a non-registry target and against
-            dirty/unpushed guard conditions
-    Expect: targeting is extended beyond registry-recorded forks; the dirty/unpushed
-            guards are overridden. The invoking-cwd guard is never overridden by
-            `--force` (see T-CLN-14).
-    Source: DESIGN-DECISIONS D12
-    """
-    raise NotImplementedError
+    world = repo_scenario("plain@main", remote=origin())
+    target = world.parent_path.parent / "outside"
+    create_worktree_at_anchor(world.parent_path, "outside", target, env=world.env)
+    (target / "dirty").write_text("dirty\n")
+    plan = resolve_cleanup_target(
+        str(target), cwd=world.parent_path, env=world.env, force=True
+    )
+    assert not plan.owned
+    result = cleanup(plan, cwd=world.parent_path, env=world.env, force=True)
+    assert result.removed and not target.exists()
 
 
 @pytest.mark.matrix("T-CLN-14")
-@pytest.mark.skip(reason="pending: T-CLN-14")
 def test_cleanup_force_does_not_override_cwd_guard(repo_scenario):
-    """T-CLN-14 — --force combined with a target-is-invoking-cwd guard still refuses.
+    from agent_fork.cleanup import cleanup, resolve_cleanup_target
+    from agent_fork.errors import PreconditionError
 
-    Given:  cleanup run with `--force` against a target that is the invoking cwd
-    Expect: still refuse, exit 5 — the invoking-cwd guard is non-overridable
-    Source: REQ-32; DESIGN-DECISIONS D12
-    """
-    raise NotImplementedError
+    world, result = _forked(repo_scenario, "cwd-force")
+    plan = resolve_cleanup_target("cwd-force", cwd=world.parent_path, env=world.env)
+    with pytest.raises(PreconditionError) as captured:
+        cleanup(plan, cwd=result.creation.path, env=world.env, force=True)
+    assert captured.value.code == "cleanup_target_is_cwd"
+    assert result.creation.path.exists()
 
 
 @pytest.mark.matrix("T-CLN-12")
-@pytest.mark.skip(reason="pending: T-CLN-12")
 def test_cleanup_never_deletes_session_files(repo_scenario):
-    """T-CLN-12 — cleanup never deletes session files and notes the session remains
-    resumable.
+    from agent_fork.cleanup import cleanup, resolve_cleanup_target
 
-    Given:  cleanup run against a fork with an associated agent session
-    Expect: session files are never deleted; output notes the fork session remains
-            resumable
-    Source: REQ-34
-    """
-    raise NotImplementedError
+    world, _ = _forked(repo_scenario, "session")
+    session = world.parent_path.parent / "agent-home/session.jsonl"
+    session.parent.mkdir()
+    session.write_text("conversation\n")
+    result = cleanup(
+        resolve_cleanup_target("session", cwd=world.parent_path, env=world.env),
+        cwd=world.parent_path,
+        env=world.env,
+    )
+    assert session.read_text() == "conversation\n"
+    assert any(
+        "remains resumable" in notice and "archived" in notice
+        for notice in result.notices
+    )

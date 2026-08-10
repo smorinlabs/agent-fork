@@ -1,70 +1,134 @@
-"""G-CLI — CLI conformance (tier C).
+"""G-CLI — full command-tree and doctor conformance."""
 
-Matrix: docs/testing/TEST-MATRIX.md §G-CLI.
-"""
+import os
+import shutil
+from pathlib import Path
 
 import pytest
 
 
 @pytest.mark.matrix("T-CLI-01")
-@pytest.mark.skip(reason="pending: T-CLI-01")
 def test_bare_invocation_prints_help_exit_0(repo_scenario):
-    """T-CLI-01 — bare `agent-fork` prints help on stdout and exits 0.
+    from conftest import run_cli
 
-    Given:  `agent-fork` invoked with no arguments
-    Expect: help on stdout, exit 0
-    Source: REQ-06; DESIGN-DECISIONS D1
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    completed = run_cli([], world.env, world.parent_path)
+    assert completed.returncode == 0 and completed.stderr == b""
+    assert completed.stdout.startswith(b"usage: agent-fork")
+    for command in (
+        b"fork",
+        b"cleanup",
+        b"list",
+        b"doctor",
+        b"config",
+        b"completion",
+        b"help",
+    ):
+        assert command in completed.stdout
 
 
 @pytest.mark.matrix("T-CLI-02")
-@pytest.mark.skip(reason="pending: T-CLI-02")
 def test_standard_global_flags_present(repo_scenario):
-    """T-CLI-02 — standard global flags are present and each behaves correctly.
+    from conftest import run_cli
 
-    Given:  each of -h/--help, -V/--version, repeated -v, -q, --config, --debug invoked
-    Expect: `-V/--version` prints `agent-fork <semver>`; each flag asserted individually
-    Source: REQ-10
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    for flag in ("-h", "--help"):
+        completed = run_cli([flag], world.env, world.parent_path)
+        assert completed.returncode == 0 and b"usage: agent-fork" in completed.stdout
+    for flag in ("-V", "--version"):
+        completed = run_cli([flag], world.env, world.parent_path)
+        assert completed.returncode == 0
+        assert completed.stdout == b"agent-fork 0.1.0\n"
+    combined = run_cli(["-vv", "-q", "--debug"], world.env, world.parent_path)
+    assert combined.returncode == 0 and b"usage: agent-fork" in combined.stdout
+    path = world.parent_path.parent / "explicit.toml"
+    path.write_text("[fork]\nverify = true\n")
+    explicit = run_cli(
+        ["--config", str(path), "config", "validate"], world.env, world.parent_path
+    )
+    assert explicit.returncode == 0 and explicit.stdout == b"config valid\n"
+    help_text = run_cli(["--help"], world.env, world.parent_path).stdout
+    for spelling in (
+        b"-V",
+        b"--version",
+        b"-v",
+        b"--verbose",
+        b"-q",
+        b"--quiet",
+        b"--config",
+        b"--debug",
+    ):
+        assert spelling in help_text
+    fork_help = run_cli(["help", "fork"], world.env, world.parent_path)
+    assert fork_help.returncode == 0
+    for spelling in (
+        b"--branch",
+        b"--worktree-dir",
+        b"--no-with-state",
+        b"--no-verify",
+    ):
+        assert spelling in fork_help.stdout
 
 
 @pytest.mark.matrix("T-CLI-03")
-@pytest.mark.skip(reason="pending: T-CLI-03")
 def test_malformed_usage_exits_2(repo_scenario):
-    """T-CLI-03 — malformed usage exits 2.
+    from conftest import run_cli
 
-    Given:  a malformed command-line invocation
-    Expect: exit 2
-    Source: REQ-11
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    for args in (["cleanup"], ["completion", "powershell"], ["config", "get"]):
+        completed = run_cli(args, world.env, world.parent_path)
+        assert completed.returncode == 2
+        assert b"usage:" in completed.stderr
 
 
 @pytest.mark.matrix("T-CLI-04")
-@pytest.mark.skip(reason="pending: T-CLI-04")
 def test_unknown_agent_value_exits_3(repo_scenario):
-    """T-CLI-04 — an unknown --agent value exits 3.
+    from conftest import run_cli
 
-    Given:  `--agent` passed an unrecognized value
-    Expect: exit 3
-    Source: REQ-11; REQ-03
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    completed = run_cli(
+        ["fork", "unknown", "--agent", "alien", "--parent-session", "id"],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 3
+    assert b"unknown agent 'alien'" in completed.stderr
 
 
 @pytest.mark.matrix("T-CLI-05")
-@pytest.mark.skip(reason="pending: T-CLI-05")
 def test_completion_subcommand_smoke_per_shell(repo_scenario):
-    """T-CLI-05 — the completion subcommand is smoke-tested for bash, zsh, and fish.
+    from conftest import run_cli
 
-    Given:  `completion bash`, `completion zsh`, and `completion fish` each invoked
-    Expect: each shell's completion script is produced without error, asserted
-            individually
-    Source: REQUIREMENTS §3.2
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    for shell in ("bash", "zsh", "fish"):
+        completed = run_cli(["completion", shell], world.env, world.parent_path)
+        assert completed.returncode == 0 and completed.stderr == b""
+        assert b"agent-fork" in completed.stdout
+        assert completed.stdout.strip()
+
+
+def _doctor_env(world, *, agents=True, git_version="2.43.0"):
+    directory = world.parent_path.parent / ("doctor-bin" if agents else "git-bin")
+    directory.mkdir()
+    real_git = Path(shutil.which("git") or "/usr/bin/git").resolve()
+    git = directory / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        f"if [ \"$1\" = --version ]; then echo 'git version {git_version}'; exit; fi\n"
+        f'exec {real_git} "$@"\n'
+    )
+    git.chmod(0o755)
+    if agents:
+        for name, version in (("claude", "2.1.220"), ("codex", "codex-cli 0.147.0")):
+            path = directory / name
+            path.write_text(f"#!/bin/sh\necho '{version}'\n")
+            path.chmod(0o755)
+    return {
+        **world.env,
+        "PATH": f"{directory}{os.pathsep}{world.env['PATH'] if agents else ''}",
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "11111111-1111-1111-1111-111111111111",
+    }
 
 
 @pytest.mark.parametrize(
@@ -83,40 +147,57 @@ def test_completion_subcommand_smoke_per_shell(repo_scenario):
         pytest.param("xdg-paths", id="T-CLI-10", marks=pytest.mark.matrix("T-CLI-10")),
     ],
 )
-@pytest.mark.skip(reason="pending: T-CLI-06..T-CLI-10 family")
 def test_doctor_content_reports_each_subject(repo_scenario, subject):
-    """`doctor` reports content for each subject it checks.
+    from conftest import run_cli
 
-    T-CLI-06 — git version is reported against the named PRODUCT_GIT_MIN check.
-    T-CLI-07 — agent CLIs found and their versions are reported against the version
-    matrix.
-    T-CLI-08 — env signals visible (Claude/Codex detection env vars) are reported.
-    T-CLI-09 — config valid/invalid is reported.
-    T-CLI-10 — XDG paths writable is reported.
-    Source: REQ-38; git-version row also cites A9 (spec §8 A9)
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    environment = _doctor_env(world)
+    completed = run_cli(["doctor"], environment, world.parent_path)
+    assert completed.returncode == 0 and completed.stderr == b""
+    output = completed.stdout.decode()
+    expected = {
+        "git-version": "git PRODUCT_GIT_MIN: 2.43.0 (minimum 2.19.0)",
+        "agent-clis": "Claude CLI: 2.1.220",
+        "env-signals": "environment signals: CLAUDECODE=1",
+        "config-validity": "config validity: valid",
+        "xdg-paths": "XDG paths:",
+    }[subject]
+    assert expected in output
+    if subject == "agent-clis":
+        assert "Codex CLI: 0.147.0" in output
+    if subject == "config-validity":
+        invalid = world.parent_path / ".agent-fork/agent-fork_config.toml"
+        invalid.parent.mkdir()
+        invalid.write_text("not valid toml = [")
+        failed = run_cli(["doctor"], environment, world.parent_path)
+        assert failed.returncode != 0
+        assert b"FAIL config validity" in failed.stdout
 
 
 @pytest.mark.matrix("T-CLI-11")
-@pytest.mark.skip(reason="pending: T-CLI-11")
 def test_a14_failing_doctor_check_nonzero_exit(repo_scenario):
-    """T-CLI-11 — A14 — a failing doctor check produces a non-zero exit.
+    from conftest import run_cli
 
-    Given:  a doctor check that fails
-    Expect: non-zero exit
-    Source: REQ-38 (A14); spec §8 A14
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    completed = run_cli(
+        ["doctor", "--json"],
+        _doctor_env(world, git_version="2.18.9"),
+        world.parent_path,
+    )
+    assert completed.returncode != 0
+    assert b'"ok":false' in completed.stdout
+    assert b"git PRODUCT_GIT_MIN" in completed.stdout
+    assert b"2.18.9" in completed.stdout and b"2.19.0" in completed.stdout
 
 
 @pytest.mark.matrix("T-CLI-12")
-@pytest.mark.skip(reason="pending: T-CLI-12")
 def test_clean_flag_rejected_as_unknown(repo_scenario):
-    """T-CLI-12 — `--clean` is rejected as an unknown flag in v1.
+    from conftest import run_cli
 
-    Given:  `fork --clean` invoked
-    Expect: usage error, exit 2 (D2; the `--clean` alias is deferred to v1.1+)
-    Source: REQUIREMENTS §3.3 (D2)
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    completed = run_cli(["fork", "name", "--clean"], world.env, world.parent_path)
+    assert completed.returncode == 2
+    assert b"unrecognized arguments: --clean" in completed.stderr
+    abbreviated = run_cli(["fork", "name", "--ver"], world.env, world.parent_path)
+    assert abbreviated.returncode == 2
+    assert b"unrecognized arguments: --ver" in abbreviated.stderr

@@ -138,6 +138,12 @@ Do not conflate it with `TEST_HARNESS_GIT_MIN`.
 **Proof:** audit is reproducible; all four rows are live and collected; no
 blocked row remains; matrix is green.
 
+**Owner-approved amendment (2026-08-10):** G-PRE lifecycle transitions remain
+group-atomic. Task 2 fixes and records the floor and changes T-PRE-06..09 from
+`blocked` to `live`, but their red-green product implementation moves to the
+dependency-ready full G-PRE task (Task 15). This avoids partially unskipping a
+`pending` group or prematurely starting the other agent/orchestration rows.
+
 ### Task 3 — G-FIX foundation A: sealed environment and basic worlds
 
 **Rows:** T-FIX-01..10, T-FIX-16..17, T-FIX-24  

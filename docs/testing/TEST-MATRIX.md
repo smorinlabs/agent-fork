@@ -18,7 +18,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 ---
 
 ## G-CFG — Config resolution
-Status: pending
+Status: done
 
 Purpose: config resolution — tri-state keys, the implication rule, precedence chain, and env vars (U); config-file walk-up/boundary rows (F); `config set`/`config validate` round-trip via the CLI (C).
 
@@ -43,7 +43,7 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 ---
 
 ## G-DET — Agent detection
-Status: pending
+Status: done
 
 Purpose: agent detection — the env-signal ladder, explicit-flags-win rule, and ambiguity → exit 3.
 
@@ -63,7 +63,7 @@ Varying axes: agent (claude/codex, must vary per §4); otherwise baseline pinned
 ---
 
 ## G-PRE — Preflight & refusal
-Status: pending
+Status: done
 
 Purpose: preflight and refusal — the version matrix, Claude warn-band notices, Codex rollout-flush, and D14 refuse-with-diagnosis; plus the A14 git-floor refusal/`--force` override rows.
 
@@ -76,16 +76,16 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 | T-PRE-03 | Claude warn-band (<~2.1.1xx) → warn-and-proceed, `notices[]` populated | agent=claude | U | live | REQ-27; RESEARCH §5.1 Q1 |
 | T-PRE-04 | Codex below the fork-subcommand floor (0.81.0) → refuse | agent=codex | U | live | REQ-27; RESEARCH §5.1 Q4 |
 | T-PRE-05 | Codex parent rollout file not yet flushed on disk → refuse before any mutation | agent=codex | F | live | REQ-27; RESEARCH §3.2 |
-| T-PRE-06 | PRODUCT_GIT_MIN boundary — injected `git --version` just below the fixed floor → the named check fails (blocked on A9's implementation-time git-feature audit fixing the floor value) | baseline | F | blocked | REQ-38 (A9); spec §8 A9 |
-| T-PRE-07 | PRODUCT_GIT_MIN boundary — injected `git --version` at/above the fixed floor → the named check passes (blocked on A9's implementation-time git-feature audit) | baseline | F | blocked | REQ-38 (A9); spec §8 A9 |
-| T-PRE-08 | A14 — below-floor `fork` refusal, exit 5, remedy names installed version/floor/upgrade path (blocked on A9's implementation-time git-feature audit) | baseline | F | blocked | REQ-19 (A14); spec §8 A14 |
-| T-PRE-09 | A14 — `fork --force` overrides the git-floor refusal only, stderr warning emitted, verify ladder still runs (blocked on A9's implementation-time git-feature audit) | baseline | F | blocked | REQUIREMENTS §3.3 (A14); spec §8 A14 |
+| T-PRE-06 | PRODUCT_GIT_MIN boundary — injected `git --version` just below 2.19.0 → the named check fails | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
+| T-PRE-07 | PRODUCT_GIT_MIN boundary — injected `git --version` at/above 2.19.0 → the named check passes | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
+| T-PRE-08 | A14 — below-2.19.0 `fork` refusal, exit 5, remedy names installed version/floor/upgrade path | baseline | F | live | REQ-19 (A14); PRODUCT-GIT-MIN-AUDIT |
+| T-PRE-09 | A14 — `fork --force` overrides the git-floor refusal only, stderr warning emitted, verify ladder still runs | baseline | F | live | REQUIREMENTS §3.3 (A14); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-10 | D14 — nothing is created (no worktree, no branch) on any preflight refusal | baseline | F | live | DESIGN-DECISIONS D14; REQ-29 |
 
 ---
 
 ## G-GRD — Fork guards
-Status: pending
+Status: done
 
 Purpose: fork guards — branch/worktree/path collisions, mid-operation, not-a-repo, unborn HEAD (A2), unmerged index (A4), and race-loss classification (A1).
 
@@ -111,7 +111,7 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 ---
 
 ## G-ANC — Anchor & topology
-Status: pending
+Status: done
 
 Purpose: anchor and topology — parent-HEAD anchoring across every topology value, including bare split by invocation point.
 
@@ -131,7 +131,7 @@ Varying axes: topology (the full set: plain@branch, plain@main, detached, linked
 ---
 
 ## G-NAM — Naming pipeline
-Status: pending
+Status: done
 
 Purpose: naming pipeline — sanitizer table, auto-name derivation including detached (A5), collision suffix vs explicit-name refusal, the 1000-cap, and name feed-through.
 
@@ -150,7 +150,7 @@ Varying axes: none of the shared four vary (pure unit-level logic, tier U); deta
 ---
 
 ## G-LOC — Worktree location
-Status: pending
+Status: done
 
 Purpose: worktree location — `sibling`/`central`/`subdirectory`/template placeholders, the mirror-parent heuristic and its suppression, and the bare-at-root override.
 
@@ -169,7 +169,7 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 ---
 
 ## G-MAT — Materialize
-Status: pending
+Status: done
 
 Purpose: materialize — the staged→unstaged→untracked(+ignored) sequence, symlinks, exec-bit-only, binary, rename+edit, ITA (A3), nested untracked dirs, the empty-dir contract, and submodules-opaque.
 
@@ -201,7 +201,7 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 ---
 
 ## G-VER — Verify ladder
-Status: pending
+Status: done
 
 Purpose: verify ladder — the 6 base checks plus per-topology conditional checks (branch≠default on main; common-dir match in worktrees; detached recorded); fault-injection rows.
 
@@ -224,7 +224,7 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 ---
 
 ## G-RBK — Rollback & signals
-Status: pending
+Status: done
 
 Purpose: rollback and signals — materialize-failure rollback, the manual-recovery path, SIGINT/SIGTERM → 130/143; sole owner of the producer-pipe-failure rows.
 
@@ -242,7 +242,7 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 ---
 
 ## G-REG — Registry & list
-Status: pending
+Status: done
 
 Purpose: registry and list — registry schema/ordering logic (U); XDG state, locking, atomic writes, the different-name concurrent race (F); `list` command output incl. `-o json` (C).
 
@@ -261,7 +261,7 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 ---
 
 ## G-CLN — Cleanup
-Status: pending
+Status: done
 
 Purpose: cleanup — targets, guards, `--force`/`--yes`/`--no-input` semantics, the consent prompt (pty), and never-delete-session-files.
 
@@ -288,7 +288,7 @@ Varying axes: none of the shared four vary (baseline pinned); CLI flag combinati
 ---
 
 ## G-INC — Include & setup hook
-Status: pending
+Status: done
 
 Purpose: `.worktreeinclude` precedence (materialized copies win) plus the setup-hook contract (cwd, env, non-fatal).
 
@@ -305,7 +305,7 @@ Varying axes: none of the shared four vary (baseline pinned).
 ---
 
 ## G-EMT — Emitted commands
-Status: pending
+Status: done
 
 Purpose: emitted commands — templates, uniform quoting, the `extra_args` boundary (spaces, quotes, `$`, `;`), fixed-prefix + quoted-suffix assertions.
 
@@ -323,7 +323,7 @@ Varying axes: agent (claude/codex, must vary per §4 — templates differ by age
 ---
 
 ## G-OUT — Output contract
-Status: pending
+Status: done
 
 Purpose: output contract — stdout purity, `-o json` schema fields (incl. `cwd_prompt_expected` per agent), error objects, `--dry-run`, notices, copy-failure-is-notice, a non-C locale row, TTY-format stability.
 
@@ -346,7 +346,7 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 ---
 
 ## G-CLI — CLI conformance
-Status: pending
+Status: done
 
 Purpose: CLI conformance — bare→help exit 0, standard flags, the exit-code catalog (incl. unknown `--agent` → exit 3), completion smoke, doctor content, version output.
 
@@ -388,7 +388,7 @@ Varying axes: agent (claude/codex, must vary per §4 — E1/E3 claude, E2 codex)
 ---
 
 ## G-FIX — Fixture layer
-Status: pending
+Status: done
 
 Purpose: the fixture layer itself — builder-vs-spec verification, oracle mutation rows, the env-seal assertion, git-version canaries, the shim-interception canary, the realpath rule.
 

@@ -1,42 +1,52 @@
-"""G-PRE — Preflight & refusal (U-tier rows only; F rows land in Task 8).
-
-Matrix: docs/testing/TEST-MATRIX.md §G-PRE.
-"""
+"""G-PRE unit rows for agent version policy."""
 
 import pytest
 
 
-@pytest.mark.matrix("T-PRE-02")
-@pytest.mark.skip(reason="pending: T-PRE-02")
-def test_claude_below_pinned_id_fork_floor_refuses(repo_scenario):
-    """T-PRE-02 — Claude below the pinned-ID fork floor (2.0.73) is refused.
+def _context(agent="claude"):
+    from agent_fork.agents import AgentContext
 
-    Given:  detected Claude CLI version below 2.0.73
-    Expect: refusal
-    Source: REQ-27; RESEARCH §5.2
-    """
-    raise NotImplementedError
+    return AgentContext(agent, "12345678-1234-1234-1234-123456789abc")
+
+
+@pytest.mark.matrix("T-PRE-02")
+def test_claude_below_pinned_id_fork_floor_refuses(repo_scenario):
+    from agent_fork.agents import preflight_agent
+    from agent_fork.errors import AgentPreflightError
+
+    world = repo_scenario()
+    with pytest.raises(AgentPreflightError, match=r"2\.0\.72.*2\.0\.73.*doctor"):
+        preflight_agent(
+            _context(), world.env, executable="/fake/claude", version_output="2.0.72"
+        )
 
 
 @pytest.mark.matrix("T-PRE-03")
-@pytest.mark.skip(reason="pending: T-PRE-03")
 def test_claude_warn_band_warns_and_proceeds(repo_scenario):
-    """T-PRE-03 — Claude in the warn-band (<~2.1.1xx) warns and proceeds.
+    from agent_fork.agents import preflight_agent
 
-    Given:  detected Claude CLI version in the warn-band (<~2.1.1xx)
-    Expect: proceeds with notices[] populated
-    Source: REQ-27; RESEARCH §5.1 Q1
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    result = preflight_agent(
+        _context(),
+        world.env,
+        executable="/fake/claude",
+        version_output="Claude Code v2.1.99",
+    )
+    assert result.version == (2, 1, 99)
+    assert result.verify is True
+    assert result.notices and "reliable worktree-resume" in result.notices[0]
 
 
 @pytest.mark.matrix("T-PRE-04")
-@pytest.mark.skip(reason="pending: T-PRE-04")
 def test_codex_below_fork_subcommand_floor_refuses(repo_scenario):
-    """T-PRE-04 — Codex below the fork-subcommand floor (0.81.0) is refused.
+    from agent_fork.agents import preflight_agent
+    from agent_fork.errors import AgentPreflightError
 
-    Given:  detected Codex CLI version below 0.81.0
-    Expect: refusal
-    Source: REQ-27; RESEARCH §5.1 Q4
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    with pytest.raises(AgentPreflightError, match=r"0\.80\.9.*0\.81\.0.*doctor"):
+        preflight_agent(
+            _context("codex"),
+            world.env,
+            executable="/fake/codex",
+            version_output="codex-cli 0.80.9",
+        )
