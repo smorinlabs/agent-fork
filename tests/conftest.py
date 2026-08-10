@@ -538,7 +538,14 @@ def _apply_states(handle: WorldHandle, states: tuple[StateSpec, ...]) -> None:
         elif spec.kind == "untracked-symlink":
             path.symlink_to(spec.target or "tracked.txt")
         elif spec.kind == "ignored":
-            exclude = handle.git_dir / "info/exclude"
+            exclude_path = (
+                _run_git(handle.env, parent, "rev-parse", "--git-path", "info/exclude")
+                .stdout.decode()
+                .strip()
+            )
+            exclude = Path(exclude_path)
+            if not exclude.is_absolute():
+                exclude = parent / exclude
             exclude.parent.mkdir(parents=True, exist_ok=True)
             with exclude.open("a") as stream:
                 stream.write(f"/{spec.path}\n")
@@ -616,7 +623,17 @@ def _apply_states(handle: WorldHandle, states: tuple[StateSpec, ...]) -> None:
         elif spec.kind.startswith("empty-dir"):
             path.mkdir(parents=True, exist_ok=True)
             if spec.kind == "empty-dir-ignored":
-                exclude = handle.git_dir / "info/exclude"
+                exclude_path = (
+                    _run_git(
+                        handle.env, parent, "rev-parse", "--git-path", "info/exclude"
+                    )
+                    .stdout.decode()
+                    .strip()
+                )
+                exclude = Path(exclude_path)
+                if not exclude.is_absolute():
+                    exclude = parent / exclude
+                exclude.parent.mkdir(parents=True, exist_ok=True)
                 with exclude.open("a") as stream:
                     stream.write(f"/{spec.path}/\n")
         elif spec.kind == "submodule":

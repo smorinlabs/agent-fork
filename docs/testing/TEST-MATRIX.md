@@ -169,7 +169,7 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 ---
 
 ## G-MAT — Materialize
-Status: pending
+Status: done
 
 Purpose: materialize — the staged→unstaged→untracked(+ignored) sequence, symlinks, exec-bit-only, binary, rename+edit, ITA (A3), nested untracked dirs, the empty-dir contract, and submodules-opaque.
 

@@ -55,8 +55,8 @@ Phase D — build (gate: everything green + reviews clean; every T preceded by i
 - [x] [P01-T09] Detection module — agent/session detection plus PATH-resolved plain/linked/bare Git metadata and pre-mutation guard detection complete
 - [x] [P01-TS06] Guards + anchor + worktree-create tests (REQ-19, REQ-20) — G-GRD 14/14 and G-ANC 8/8 green
 - [x] [P01-T10] Guards, parent-HEAD anchor, atomic worktree create — PATH-resolved Git, metadata, and race-loss mapping implemented
-- [ ] [P01-TS07] Materialization fixture tests — §2.2 verbatim sequence; one case per RESEARCH §4 matrix row incl. symlink + exec-bit (REQ-21)
-- [ ] [P01-T11] Materialize (staged → unstaged → untracked [+ignored])
+- [x] [P01-TS07] Materialization fixture tests — §2.2 verbatim sequence; one case per RESEARCH §4 matrix row incl. symlink + exec-bit (REQ-21) — G-MAT 20/20 green
+- [x] [P01-T11] Materialize (staged → unstaged → untracked [+ignored]) — exact, exact+ignored, and no-state preserve the declared Git-visible state
 - [ ] [P01-TS08] Verification ladder + rollback tests (REQ-22, REQ-23)
 - [ ] [P01-T12] Verify ladder + rollback
 - [ ] [P01-TS09] Registry locking/concurrency tests (REQ-41)
