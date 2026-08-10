@@ -111,7 +111,7 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 ---
 
 ## G-ANC — Anchor & topology
-Status: pending
+Status: done
 
 Purpose: anchor and topology — parent-HEAD anchoring across every topology value, including bare split by invocation point.
 

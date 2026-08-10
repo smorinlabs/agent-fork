@@ -30,6 +30,11 @@ class WorktreeCreation:
     branch: str
     anchor: str
     branch_created: bool
+    parent_path: Path
+    common_dir: Path
+    parent_branch: str | None
+    parent_detached: bool
+    parent_on_default: bool
 
 
 def _resolve_git_path(parent: Path, value: str) -> Path:
@@ -187,7 +192,36 @@ def create_worktree_at_anchor(
     env: Mapping[str, str] | None = None,
 ) -> WorktreeCreation:
     """Atomically ask Git to create branch+worktree and classify race losses."""
+    info = inspect_repository(parent, env=env)
     resolved_anchor = anchor or resolve_anchor(parent, env=env)
+    symbolic = run_git(
+        parent, ["symbolic-ref", "--quiet", "--short", "HEAD"], env=env, check=False
+    )
+    parent_branch = (
+        symbolic.stdout.decode().strip() if symbolic.returncode == 0 else None
+    )
+    default_candidates: set[str] = set()
+    remote_default = run_git(
+        parent,
+        ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        env=env,
+        check=False,
+    )
+    if remote_default.returncode == 0:
+        default_candidates.add(
+            remote_default.stdout.decode().strip().removeprefix("origin/")
+        )
+    for fallback in ("main", "master"):
+        if (
+            run_git(
+                parent,
+                ["show-ref", "--verify", "--quiet", f"refs/heads/{fallback}"],
+                env=env,
+                check=False,
+            ).returncode
+            == 0
+        ):
+            default_candidates.add(fallback)
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
         run_git(
@@ -217,4 +251,9 @@ def create_worktree_at_anchor(
         branch=branch,
         anchor=resolved_anchor,
         branch_created=True,
+        parent_path=info.parent_path,
+        common_dir=info.common_dir,
+        parent_branch=parent_branch,
+        parent_detached=parent_branch is None,
+        parent_on_default=parent_branch in default_candidates,
     )
