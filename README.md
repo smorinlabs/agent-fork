@@ -136,7 +136,7 @@ session files are never removed.
 | `--with-state` / `--no-with-state` | Carry staged, unstaged, and untracked state (default: enabled) |
 | `--with-ignored` / `--no-with-ignored` | Also carry ignored files (default: disabled) |
 | `--verify` / `--no-verify` | Verify the completed fork (default: enabled) |
-| `--codex-session-name-resolution` / `--no-…` | Resolve renamed Codex sessions (default: enabled) |
+| `--codex-session-name-resolution` / `--no-codex-session-name-resolution` | Resolve renamed Codex sessions (default: enabled) |
 | `--force` | Override only the Git-version floor |
 | `--dry-run` | Preview every planned mutation without changing anything |
 | `--copy` / `--no-copy` | Copy the paste command to the clipboard |
@@ -277,9 +277,14 @@ documented before removal.
 
 ## Exit codes and error catalog
 
-Machine-format failures use `{"error":{"code","message"}}` on stderr. Codes are
-stable compatibility identifiers; messages may gain detail without changing
-their meaning.
+Under any machine format, a failure prints a single error object on stderr:
+
+```json
+{"error":{"code":"config_error","message":"cannot discover project config: /tmp/notrepo is not a worktree"}}
+```
+
+Codes are stable compatibility identifiers; messages may gain detail without
+changing their meaning.
 
 | Exit | Meaning | Codes |
 |---|---|---|
