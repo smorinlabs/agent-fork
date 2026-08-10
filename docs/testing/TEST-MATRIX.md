@@ -150,7 +150,7 @@ Varying axes: none of the shared four vary (pure unit-level logic, tier U); deta
 ---
 
 ## G-LOC — Worktree location
-Status: pending
+Status: done
 
 Purpose: worktree location — `sibling`/`central`/`subdirectory`/template placeholders, the mirror-parent heuristic and its suppression, and the bare-at-root override.
 
