@@ -1,0 +1,131 @@
+"""Locale-independent human and machine result rendering."""
+
+from __future__ import annotations
+
+import base64
+import json
+import shutil
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+
+from agent_fork.errors import AgentForkError
+
+STABLE_ERROR_CODES = (
+    "conflict_branch_exists",
+    "parent_mid_operation",
+    "session_not_found",
+    "verify_failed",
+    "repo_no_commits",
+    "unmerged_index",
+    "registry_busy",
+)
+
+
+def json_line(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+@dataclass(frozen=True)
+class ForkOutput:
+    agent: str
+    parent_session_id: str
+    name: str
+    branch: str
+    worktree: Path
+    anchor_commit: str
+    with_state: bool
+    with_ignored: bool
+    verification: dict[str, bool]
+    command: str
+    notices: tuple[str, ...] = ()
+
+    def document(self) -> dict[str, object]:
+        result: dict[str, object] = {
+            "agent": self.agent,
+            "parent_session_id": self.parent_session_id,
+            "fork": {
+                "name": self.name,
+                "branch": self.branch,
+                "worktree": str(self.worktree),
+                "anchor_commit": self.anchor_commit,
+                "mode": {
+                    "with_state": self.with_state,
+                    "with_ignored": self.with_ignored,
+                },
+            },
+            "verification": self.verification,
+            "command": self.command,
+            "notices": list(self.notices),
+        }
+        if self.agent == "codex":
+            result["cwd_prompt_expected"] = False
+        return result
+
+    def render(self, output: str = "text") -> str:
+        if output == "json":
+            return json_line(self.document())
+        lines = [
+            f"fork: {self.name}",
+            f"branch: {self.branch}",
+            f"worktree: {self.worktree}",
+        ]
+        if self.notices:
+            lines.append("notices: " + "; ".join(self.notices))
+        lines.extend(("", self.command))
+        return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class DryRunOutput:
+    branch: str
+    worktree: Path
+    staged: int
+    unstaged: int
+    untracked: int
+    ignored: int
+    command: str
+
+    def render(self) -> str:
+        return "\n".join(
+            (
+                f"branch: create {self.branch}",
+                f"worktree: create {self.worktree}",
+                f"files-to-carry: staged={self.staged} unstaged={self.unstaged} "
+                f"untracked={self.untracked} ignored={self.ignored}",
+                f"paste command: {self.command}",
+                "validation: local-only; no mutation performed",
+            )
+        )
+
+
+def render_error(error: BaseException, *, machine: bool = False) -> str:
+    code = error.code if isinstance(error, AgentForkError) else "runtime_error"
+    if machine:
+        return json_line({"error": {"code": code, "message": str(error)}})
+    return f"{code}: {error}"
+
+
+def copy_to_clipboard(command: str) -> tuple[str, ...]:
+    """Try platform helpers, then OSC52 on a TTY; failure remains notice-only."""
+    candidates = (("pbcopy",), ("xclip", "-selection", "clipboard"))
+    for candidate in candidates:
+        executable = shutil.which(candidate[0])
+        if executable is None:
+            continue
+        completed = subprocess.run(
+            [executable, *candidate[1:]], input=command.encode(), capture_output=True
+        )
+        if completed.returncode == 0:
+            return ()
+    try:
+        import sys
+
+        if sys.stderr.isatty():
+            payload = base64.b64encode(command.encode()).decode()
+            sys.stderr.write(f"\033]52;c;{payload}\a")
+            sys.stderr.flush()
+            return ()
+    except OSError:
+        pass
+    return ("clipboard copy failed; paste command remains available on stdout",)

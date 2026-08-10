@@ -323,7 +323,7 @@ Varying axes: agent (claude/codex, must vary per §4 — templates differ by age
 ---
 
 ## G-OUT — Output contract
-Status: pending
+Status: done
 
 Purpose: output contract — stdout purity, `-o json` schema fields (incl. `cwd_prompt_expected` per agent), error objects, `--dry-run`, notices, copy-failure-is-notice, a non-C locale row, TTY-format stability.
 

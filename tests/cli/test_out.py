@@ -1,48 +1,89 @@
-"""G-OUT — Output contract (tier C).
+"""G-OUT — black-box streams plus rendering-boundary conformance."""
 
-Matrix: docs/testing/TEST-MATRIX.md §G-OUT.
-"""
+import json
+import os
+import shutil
+from pathlib import Path
 
 import pytest
 
+PARENT = "11111111-1111-1111-1111-111111111111"
+
+
+def _agent_env(world, agent="claude", *, isolated_path=False):
+    directory = world.parent_path.parent / "agent-bin"
+    directory.mkdir()
+    script = directory / agent
+    version = "2.1.220 (Claude Code)" if agent == "claude" else "codex-cli 0.147.0"
+    script.write_text(f"#!/bin/sh\necho '{version}'\n")
+    script.chmod(0o755)
+    if isolated_path:
+        script.unlink()
+        git = Path(shutil.which("git") or "/usr/bin/git").resolve()
+        (directory / "git").symlink_to(git)
+        path = str(directory)
+    else:
+        path = f"{directory}{os.pathsep}{world.env['PATH']}"
+    environment = {**world.env, "PATH": path}
+    if agent == "claude":
+        environment.update({"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": PARENT})
+    else:
+        environment["CODEX_THREAD_ID"] = PARENT
+        home = world.parent_path.parent / "codex"
+        rollout = home / "sessions/2026/08/10" / f"rollout-now-{PARENT}.jsonl"
+        rollout.parent.mkdir(parents=True)
+        rollout.write_text("{}\n")
+        environment["CODEX_HOME"] = str(home)
+    return environment
+
+
+def _fork(repo_scenario, name, *, agent="claude", output="text", copy=False):
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    environment = _agent_env(world, agent)
+    args = ["fork", name, "-o", output]
+    if copy:
+        args.append("--copy")
+    return world, environment, run_cli(args, environment, world.parent_path)
+
 
 @pytest.mark.matrix("T-OUT-01")
-@pytest.mark.skip(reason="pending: T-OUT-01")
 def test_stdout_carries_only_requested_result(repo_scenario):
-    """T-OUT-01 — stdout carries only the requested result; all
-    progress/diagnostics/prompts go to stderr.
-
-    Given:  any successful CLI invocation
-    Expect: stdout carries only the requested result; progress/diagnostics/prompts are
-            on stderr
-    Source: REQ-16
-    """
-    raise NotImplementedError
+    _, _, completed = _fork(repo_scenario, "streams")
+    assert completed.returncode == 0
+    assert completed.stderr == b""
+    assert completed.stdout.startswith(b"fork: streams\n")
+    assert b"progress" not in completed.stdout and b"diagnostic" not in completed.stdout
 
 
 @pytest.mark.matrix("T-OUT-02")
-@pytest.mark.skip(reason="pending: T-OUT-02")
 def test_human_format_ends_with_paste_command(repo_scenario):
-    """T-OUT-02 — human-format output ends with the paste command as the final stdout
-    block.
-
-    Given:  a successful fork in human output format
-    Expect: output ends with the paste command as the final stdout block
-    Source: REQ-16
-    """
-    raise NotImplementedError
+    _, _, completed = _fork(repo_scenario, "human")
+    lines = completed.stdout.decode().splitlines()
+    assert lines[-1].startswith("cd ")
+    assert "claude --session-id" in lines[-1]
+    assert lines[-1].endswith("--fork-session -n human")
 
 
 @pytest.mark.matrix("T-OUT-03")
-@pytest.mark.skip(reason="pending: T-OUT-03")
 def test_tty_does_not_change_output_format(repo_scenario):
-    """T-OUT-03 — a TTY does not change the output format.
+    from agent_fork.models import RegistryEntry
+    from agent_fork.registry import add_entry
+    from conftest import pty_run, run_cli
 
-    Given:  the CLI run attached to a pty
-    Expect: output format is unchanged from the non-TTY case
-    Source: REQ-16; spec §6.6
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    add_entry(
+        RegistryEntry(
+            "one", "fork/one", str(world.parent_path), "codex", "2026-01-01T00:00:00Z"
+        ),
+        env=world.env,
+    )
+    plain = run_cli(["list"], world.env, world.parent_path)
+    tty = pty_run(["list"], world.env, 1)
+    assert plain.returncode == tty.returncode == 0
+    assert tty.tty == plain.stdout
+    assert tty.stderr == plain.stderr == b""
 
 
 @pytest.mark.parametrize(
@@ -52,95 +93,126 @@ def test_tty_does_not_change_output_format(repo_scenario):
         pytest.param("claude", id="T-OUT-05", marks=pytest.mark.matrix("T-OUT-05")),
     ],
 )
-@pytest.mark.skip(reason="pending: T-OUT-04..T-OUT-05 family")
 def test_cwd_prompt_expected_field_present_only_for_codex(repo_scenario, agent):
-    """-o json includes cwd_prompt_expected for Codex and omits it for Claude.
-
-    T-OUT-04 — agent=codex: -o json includes the cwd_prompt_expected field.
-    T-OUT-05 — agent=claude: -o json omits the cwd_prompt_expected field.
-    Source: REQ-17; RESEARCH §5.1 Q4
-    """
-    raise NotImplementedError
+    _, _, completed = _fork(repo_scenario, f"json-{agent}", agent=agent, output="json")
+    assert completed.returncode == 0 and completed.stderr == b""
+    document = json.loads(completed.stdout)
+    if agent == "codex":
+        assert document["cwd_prompt_expected"] is False
+        assert " -C " in document["command"]
+    else:
+        assert "cwd_prompt_expected" not in document
 
 
 @pytest.mark.matrix("T-OUT-06")
-@pytest.mark.skip(reason="pending: T-OUT-06")
 def test_error_object_shape_on_stderr(repo_scenario):
-    """T-OUT-06 — the error object shape on stderr is a single
-    {"error":{"code","message"}}.
+    from conftest import run_cli
 
-    Given:  a failing invocation under any machine output format
-    Expect: single `{"error":{"code","message"}}` object on stderr
-    Source: REQ-17
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    environment = _agent_env(world, isolated_path=True)
+    completed = run_cli(["fork", "missing", "--json"], environment, world.parent_path)
+    assert completed.returncode == 3 and completed.stdout == b""
+    assert json.loads(completed.stderr) == {
+        "error": {
+            "code": "session_not_found",
+            "message": (
+                f"detected agent=claude session={PARENT}, but required claude CLI "
+                "is missing from PATH; run agent-fork doctor for diagnostics"
+            ),
+        }
+    }
 
 
 @pytest.mark.matrix("T-OUT-07")
-@pytest.mark.skip(reason="pending: T-OUT-07")
 def test_stable_error_codes_round_trip_in_json(repo_scenario):
-    """T-OUT-07 — every stable error code round-trips correctly in the -o json error
-    object.
+    from agent_fork.errors import AgentForkError
+    from agent_fork.output import STABLE_ERROR_CODES, render_error
 
-    Given:  each stable error code (conflict_branch_exists, parent_mid_operation,
-            session_not_found, verify_failed, repo_no_commits, unmerged_index,
-            registry_busy)
-    Expect: each round-trips correctly in the `-o json` error object, asserted
-            individually
-    Source: REQ-17
-    """
-    raise NotImplementedError
+    repo_scenario()
+    for code in STABLE_ERROR_CODES:
+        error_type = type(f"Error_{code}", (AgentForkError,), {"code": code})
+        rendered = json.loads(
+            render_error(error_type(f"message for {code}"), machine=True)
+        )
+        assert rendered == {"error": {"code": code, "message": f"message for {code}"}}
 
 
 @pytest.mark.matrix("T-OUT-08")
-@pytest.mark.skip(reason="pending: T-OUT-08")
 def test_dry_run_lists_planned_mutations_and_local_only(repo_scenario):
-    """T-OUT-08 — --dry-run output lists every planned mutation and states validation
-    was local-only.
+    from conftest import run_cli, staged, untracked
 
-    Given:  fork invoked with `--dry-run`
-    Expect: output lists every planned mutation (branch, worktree path, files-to-carry
-            counts, paste command) and states validation was local-only
-    Source: REQ-18
-    """
-    raise NotImplementedError
+    world = repo_scenario(
+        "plain@main", states=(staged(add="new.txt"), untracked("loose.txt"))
+    )
+    environment = _agent_env(world)
+    completed = run_cli(
+        ["fork", "planned", "--dry-run"], environment, world.parent_path
+    )
+    assert completed.returncode == 0 and completed.stderr == b""
+    output = completed.stdout.decode()
+    assert "branch: create fork/planned" in output
+    assert "worktree: create" in output
+    assert "staged=1" in output and "untracked=1" in output
+    assert "paste command:" in output and "local-only; no mutation" in output
+    assert not (world.parent_path.parent / "repo-fork-planned").exists()
 
 
 @pytest.mark.matrix("T-OUT-09")
-@pytest.mark.skip(reason="pending: T-OUT-09")
 def test_clipboard_copy_failure_emits_notice_only(repo_scenario):
-    """T-OUT-09 — a clipboard copy failure emits a stderr notice without affecting the
-    exit code.
+    world = repo_scenario("plain@main")
+    environment = _agent_env(world)
+    directory = Path(environment["PATH"].split(os.pathsep)[0])
+    git = Path(shutil.which("git") or "/usr/bin/git").resolve()
+    (directory / "git").symlink_to(git)
+    environment["PATH"] = str(directory)
+    from conftest import run_cli
 
-    Given:  the clipboard copy step fails
-    Expect: a stderr notice is emitted; exit code is unaffected
-    Source: DESIGN-DECISIONS D9
-    """
-    raise NotImplementedError
+    completed = run_cli(["fork", "copy", "--copy"], environment, world.parent_path)
+    assert completed.returncode == 0
+    assert b"clipboard copy failed" in completed.stderr
+    assert completed.stdout.decode().splitlines()[-1].endswith("--fork-session -n copy")
 
 
 @pytest.mark.matrix("T-OUT-10")
-@pytest.mark.skip(reason="pending: T-OUT-10")
 def test_non_c_locale_json_output_byte_identical(repo_scenario):
-    """T-OUT-10 — -o json output is byte-identical regardless of a non-C process locale.
+    from agent_fork.models import RegistryEntry
+    from agent_fork.registry import add_entry
+    from conftest import run_cli
 
-    Given:  the process run under a non-C locale
-    Expect: `-o json` machine output is byte-identical regardless of process locale
-    Source: REQ-38 R9.4
-    """
-    raise NotImplementedError
+    world = repo_scenario()
+    add_entry(
+        RegistryEntry(
+            "é", "fork/é", str(world.parent_path), "claude", "2026-01-01T00:00:00Z"
+        ),
+        env=world.env,
+    )
+    baseline = run_cli(
+        ["list", "-o", "json"], {**world.env, "LC_ALL": "C"}, world.parent_path
+    )
+    alternate = run_cli(
+        ["list", "-o", "json"], {**world.env, "LC_ALL": "C.UTF-8"}, world.parent_path
+    )
+    assert baseline.returncode == alternate.returncode == 0
+    assert baseline.stdout == alternate.stdout
 
 
 @pytest.mark.matrix("T-OUT-11")
-@pytest.mark.skip(reason="pending: T-OUT-11")
 def test_json_success_object_carries_req17_minimum_fields(repo_scenario):
-    """T-OUT-11 — the -o json success object carries the REQ-17 minimum fields.
-
-    Given:  a successful `fork -o json` invocation
-    Expect: the success object carries the REQ-17 minimum fields — `agent`,
-            `parent_session_id`, `fork.branch`, `fork.worktree`,
-            `fork.anchor_commit`, `fork.mode` (state-carry booleans),
-            `verification` (per-check results), `command`, `notices[]`
-    Source: REQ-17
-    """
-    raise NotImplementedError
+    world, _, completed = _fork(repo_scenario, "schema", output="json")
+    document = json.loads(completed.stdout)
+    assert set(document) >= {
+        "agent",
+        "parent_session_id",
+        "fork",
+        "verification",
+        "command",
+        "notices",
+    }
+    assert document["agent"] == "claude" and document["parent_session_id"] == PARENT
+    assert set(document["fork"]) >= {"branch", "worktree", "anchor_commit", "mode"}
+    assert document["fork"]["branch"] == "fork/schema"
+    assert Path(document["fork"]["worktree"]).is_dir()
+    assert document["fork"]["mode"] == {"with_state": True, "with_ignored": False}
+    assert document["verification"] == {"enabled": True, "passed": True}
+    assert document["command"].endswith("--fork-session -n schema")
+    assert document["notices"] == []

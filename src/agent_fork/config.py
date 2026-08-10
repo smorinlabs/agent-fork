@@ -73,6 +73,8 @@ def resolve_config(
     copy = False
     output = "table"
     config_path: Path | None = None
+    claude_extra_args: tuple[str, ...] = ()
+    codex_extra_args: tuple[str, ...] = ()
 
     for source in ordered:
         if source.with_state is not None:
@@ -95,6 +97,10 @@ def resolve_config(
             output = source.output
         if source.config_path is not None:
             config_path = source.config_path.resolve()
+        if source.claude_extra_args is not None:
+            claude_extra_args = source.claude_extra_args
+        if source.codex_extra_args is not None:
+            codex_extra_args = source.codex_extra_args
 
     return ResolvedConfig(
         with_state=with_state,
@@ -105,6 +111,8 @@ def resolve_config(
         copy=copy,
         output=output,
         config_path=config_path,
+        claude_extra_args=claude_extra_args,
+        codex_extra_args=codex_extra_args,
     )
 
 
@@ -133,7 +141,25 @@ def load_config(path: Path) -> ConfigValues:
     for key in {"branch_prefix", "worktree_location"}:
         if key in fork and not isinstance(fork[key], str):
             raise ConfigError(f"invalid config {path}: fork.{key} must be a string")
-    return ConfigValues(**fork)
+    agents = document.get("agents", {})
+    if not isinstance(agents, dict):
+        raise ConfigError(f"invalid config {path}: [agents] must be a table")
+    unknown_agents = set(agents) - {"claude", "codex"}
+    if unknown_agents:
+        raise ConfigError(
+            f"invalid config {path}: unknown agent {sorted(unknown_agents)[0]}"
+        )
+    extras: dict[str, tuple[str, ...]] = {}
+    for agent, values in agents.items():
+        if not isinstance(values, dict) or set(values) - {"extra_args"}:
+            raise ConfigError(f"invalid config {path}: [agents.{agent}] is invalid")
+        raw = values.get("extra_args", [])
+        if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+            raise ConfigError(
+                f"invalid config {path}: agents.{agent}.extra_args must be strings"
+            )
+        extras[f"{agent}_extra_args"] = tuple(raw)
+    return ConfigValues(**fork, **extras)
 
 
 def worktree_root(cwd: Path, env: Mapping[str, str] | None = None) -> Path:

@@ -19,6 +19,8 @@ class ConfigValues:
     copy: bool | None = None
     output: str | None = None
     config_path: Path | None = None
+    claude_extra_args: tuple[str, ...] | None = None
+    codex_extra_args: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,8 @@ class ResolvedConfig:
     copy: bool
     output: str
     config_path: Path | None
+    claude_extra_args: tuple[str, ...]
+    codex_extra_args: tuple[str, ...]
 
     @property
     def mode(self) -> str:
