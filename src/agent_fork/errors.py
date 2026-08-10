@@ -18,6 +18,10 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
     "config_error": ErrorSpec(2, "configuration is invalid or unsupported"),
     "agent_not_detected": ErrorSpec(3, "agent identity is missing or ambiguous"),
     "session_not_found": ErrorSpec(3, "agent session or rollout is unavailable"),
+    "session_name_ambiguous": ErrorSpec(3, "session name matches multiple sessions"),
+    "session_resolution_unavailable": ErrorSpec(
+        3, "session-name resolver is unavailable"
+    ),
     "cleanup_target_unknown": ErrorSpec(3, "cleanup target is not registered or found"),
     "conflict_branch_exists": ErrorSpec(5, "fork branch already exists"),
     "conflict_branch_worktree": ErrorSpec(5, "branch is attached to a worktree"),
@@ -87,4 +91,14 @@ class AgentPreflightError(AgentForkError):
     """The detected agent cannot safely fork the requested parent session."""
 
     code = "session_not_found"
+    exit_code = 3
+
+
+class SessionNameAmbiguousError(AgentForkError):
+    code = "session_name_ambiguous"
+    exit_code = 3
+
+
+class SessionResolutionUnavailableError(AgentForkError):
+    code = "session_resolution_unavailable"
     exit_code = 3

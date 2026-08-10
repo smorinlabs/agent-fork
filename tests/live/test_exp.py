@@ -50,6 +50,22 @@ def _run(
         )
 
 
+@pytest.mark.matrix("T-EXP-07")
+@pytest.mark.requires_real_cli
+def test_codex_renamed_session_resolves_through_real_app_server():
+    """E7 — exercise Codex-owned name resolution without repository mutation."""
+    from agent_fork.codex_app_server import list_named_threads
+
+    if CODEX is None:
+        pytest.skip("requires real Codex CLI")
+    name = os.environ.get("AGENT_FORK_CODEX_RENAMED_SESSION", "hello-codex")
+    candidates = list_named_threads(CODEX, name, os.environ)
+    if not candidates:
+        pytest.skip(f"requires a renamed Codex session named {name!r}")
+    assert all(candidate.name == name for candidate in candidates)
+    assert all(str(uuid.UUID(candidate.id)) == candidate.id for candidate in candidates)
+
+
 def _git_repo(root: Path) -> tuple[Path, Path]:
     repo = root / "repo"
     child = root / "child-worktree"

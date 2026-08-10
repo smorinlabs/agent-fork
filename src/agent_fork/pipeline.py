@@ -45,6 +45,7 @@ class ForkRequest:
     agent_version_output: str | None = None
     git_version_output: str | None = None
     child_session_id: str | None = None
+    codex_session_name_resolution: bool = True
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,8 @@ class ForkResult:
     notices: tuple[str, ...]
     verification: bool
     included: tuple[str, ...]
+    agent: AgentContext | None = None
+    parent_session_name: str | None = None
 
 
 def _git_version(env: Mapping[str, str]) -> str:
@@ -71,6 +74,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             env,
             executable=request.agent_executable,
             version_output=request.agent_version_output,
+            codex_session_name_resolution=request.codex_session_name_resolution,
         )
         if request.agent is not None
         else None
@@ -84,6 +88,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
     )
     if agent_check is not None:
         notices.extend(agent_check.notices)
+    resolved_agent = agent_check.context if agent_check is not None else request.agent
     validate_fork_guards(request.parent, request.branch, request.destination, env=env)
     parent_status = run_git(
         request.parent, ["status", "--porcelain=v1", "-z"], env=env
@@ -118,8 +123,8 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                 name=request.name,
                 branch=request.branch,
                 worktree=creation.path,
-                agent=request.agent.agent if request.agent is not None else None,
-                mode="agent" if request.agent is not None else "git-only",
+                agent=resolved_agent.agent if resolved_agent is not None else None,
+                mode="agent" if resolved_agent is not None else "git-only",
             ),
             env=env,
         )
@@ -128,13 +133,21 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
     included, _ = run_with_rollback(creation, finish, env=env)
     launch = (
         build_launch_command(
-            request.agent,
+            resolved_agent,
             worktree=creation.path,
             name=request.name,
             extra_args=request.extra_args,
             child_session_id=request.child_session_id,
         )
-        if request.agent is not None
+        if resolved_agent is not None
         else LaunchCommand(f"cd {shlex.quote(str(creation.path))}", None, ())
     )
-    return ForkResult(creation, launch, tuple(notices), request.verify, included)
+    return ForkResult(
+        creation,
+        launch,
+        tuple(notices),
+        request.verify,
+        included,
+        resolved_agent,
+        agent_check.parent_session_name if agent_check is not None else None,
+    )

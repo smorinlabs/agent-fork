@@ -42,6 +42,7 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 | T-CFG-14 | `agent_mode` defaults to `auto` | baseline | U | live | REQ-45; D16 |
 | T-CFG-15 | agent-mode precedence is CLI > environment > config > `auto` | baseline | U | live | REQ-45; D16 |
 | T-CFG-16 | invalid configured agent mode is rejected as `config_error` | baseline | U | live | REQ-45; D16 |
+| T-CFG-17 | Codex session-name resolution defaults on and obeys CLI > config precedence | agent=codex | U | live | REQ-46; D17 |
 
 ---
 
@@ -83,6 +84,16 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 | T-PRE-03 | Claude warn-band (<~2.1.1xx) → warn-and-proceed, `notices[]` populated | agent=claude | U | live | REQ-27; RESEARCH §5.1 Q1 |
 | T-PRE-04 | Codex below the fork-subcommand floor (0.81.0) → refuse | agent=codex | U | live | REQ-27; RESEARCH §5.1 Q4 |
 | T-PRE-05 | Codex parent rollout file not yet flushed on disk → refuse before any mutation | agent=codex | F | live | REQ-27; RESEARCH §3.2 |
+| T-PRE-11 | canonical Codex UUID input bypasses app-server resolution | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-12 | one exact Codex name match resolves once to its canonical UUID and preserves the display name | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-13 | disabled Codex name resolution rejects non-UUID input without spawning app-server | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-14 | zero exact Codex name matches refuse before mutation | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-15 | duplicate exact Codex names refuse with deterministically sorted candidate UUIDs | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-16 | malformed app-server protocol produces a typed bounded resolution failure | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-17 | resolved UUID without a flushed rollout refuses before mutation | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-18 | app-server lookup follows pagination and only accepts an exact name | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-19 | app-server notifications are tolerated and the subprocess is reaped | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-20 | an app-server notification flood is stopped by the pending-message bound | agent=codex | U | live | REQ-46; D17 |
 | T-PRE-06 | PRODUCT_GIT_MIN boundary — injected `git --version` just below 2.19.0 → the named check fails | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-07 | PRODUCT_GIT_MIN boundary — injected `git --version` at/above 2.19.0 → the named check passes | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-08 | A14 — below-2.19.0 `fork` refusal, exit 5, remedy names installed version/floor/upgrade path | baseline | F | live | REQ-19 (A14); PRODUCT-GIT-MIN-AUDIT |
@@ -342,6 +353,7 @@ Varying axes: agent (claude/codex, must vary per §4 — templates differ by age
 | T-EMT-04 | `extra_args` — an element containing a space, a quote, `$`, and `;` is each individually shell-quoted at emission | baseline | U | live | REQ-13 D11; DESIGN-DECISIONS D11 |
 | T-EMT-05 | `extra_args` values are visible in `--dry-run` output | agent=claude | U | live | REQ-13 D11; REQ-18 |
 | T-EMT-06 | `extra_args` values are visible in the `-o json` `command` field | agent=codex | U | live | REQ-13 D11; REQ-17 |
+| T-EMT-07 | a resolved Codex name emits the canonical UUID-based `codex fork` command | agent=codex | U | live | REQ-46; D17 |
 
 ---
 
@@ -372,6 +384,8 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-16 | handled configuration failure emits `config_error` with exit 2 under JSON output | baseline | C | live | CLI Design Standard R6/R7.8; P01-T19 follow-up |
 | T-OUT-17 | Git-only JSON reports `mode=git-only` and omits agent/session fields | baseline | C | live | REQ-45; D16 |
 | T-OUT-18 | managed-agent JSON reports `mode=agent` and preserves agent/session fields | agent=claude | C | live | REQ-45; D16 |
+| T-OUT-19 | renamed Codex JSON preserves canonical `parent_session_id` and additively reports `parent_session_name` | agent=codex | C | live | REQ-46; D17 |
+| T-OUT-20 | renamed Codex dry-run reports the resolution notice and UUID-based paste command | agent=codex | C | live | REQ-46; D17 |
 
 ---
 
@@ -407,6 +421,7 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-21 | `--require-agent` and `--no-agent` are mutually exclusive | baseline | C | live | REQ-45; D16 |
 | T-CLI-22 | `--no-agent` conflicts with explicit agent/session inputs | baseline | C | live | REQ-45; D16 |
 | T-CLI-23 | a real fork outside an agent succeeds in default auto mode as Git-only | baseline | C | live | REQ-45; D16 |
+| T-CLI-24 | help, positive/negative flag spelling, and dotted config set/get expose the Codex-specific control | agent=codex | C | live | REQ-46; D17 |
 
 ---
 
@@ -425,6 +440,7 @@ Varying axes: agent (claude/codex, must vary per §4 — E1/E3 claude, E2 codex)
 | T-EXP-04 | E4 — `.jsonl`-copy last-resort fallback smoke test, retired until milestone v1.1 | agent=claude | R | retired | RESEARCH §7 E4; spec §8 A8 |
 | T-EXP-05 | E5 — absorbed into G-MAT/G-VER core TDD (mapping row — prevents restoration from stale RESEARCH §7) | n/a | n/a | n/a | RESEARCH §7 E5 |
 | T-EXP-06 | E6 — Codex pre-0.95.0 fallback disambiguation, tombstoned with the pre-0.95 detection ladder | n/a | n/a | tombstone | RESEARCH §7 E6 (A7) |
+| T-EXP-07 | E7 — a real renamed Codex thread resolves through the installed app-server to the expected UUID without repository mutation | agent=codex | R | live | REQ-46; D17; EXPERIMENTS E7 |
 
 ---
 

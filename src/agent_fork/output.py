@@ -32,6 +32,7 @@ class ForkOutput:
     verification: dict[str, bool]
     command: str
     notices: tuple[str, ...] = ()
+    parent_session_name: str | None = None
 
     def document(self) -> dict[str, object]:
         result: dict[str, object] = {
@@ -53,6 +54,8 @@ class ForkOutput:
         if self.agent is not None:
             result["agent"] = self.agent
             result["parent_session_id"] = self.parent_session_id
+            if self.parent_session_name is not None:
+                result["parent_session_name"] = self.parent_session_name
         if self.agent == "codex":
             result["cwd_prompt_expected"] = False
         return result
@@ -82,18 +85,20 @@ class DryRunOutput:
     untracked: int
     ignored: int
     command: str
+    notices: tuple[str, ...] = ()
 
     def render(self) -> str:
-        return "\n".join(
-            (
-                f"branch: create {self.branch}",
-                f"worktree: create {self.worktree}",
-                f"files-to-carry: staged={self.staged} unstaged={self.unstaged} "
-                f"untracked={self.untracked} ignored={self.ignored}",
-                f"paste command: {self.command}",
-                "validation: local-only; no mutation performed",
-            )
-        )
+        lines = [
+            f"branch: create {self.branch}",
+            f"worktree: create {self.worktree}",
+            f"files-to-carry: staged={self.staged} unstaged={self.unstaged} "
+            f"untracked={self.untracked} ignored={self.ignored}",
+            f"paste command: {self.command}",
+            "validation: local-only; no mutation performed",
+        ]
+        if self.notices:
+            lines.insert(3, "notices: " + "; ".join(self.notices))
+        return "\n".join(lines)
 
 
 def render_error(error: BaseException, *, machine: bool = False) -> str:

@@ -84,6 +84,7 @@ def resolve_config(
     config_path: Path | None = None
     claude_extra_args: tuple[str, ...] = ()
     codex_extra_args: tuple[str, ...] = ()
+    codex_session_name_resolution = True
 
     for source in ordered:
         if source.with_state is not None:
@@ -113,6 +114,8 @@ def resolve_config(
             claude_extra_args = source.claude_extra_args
         if source.codex_extra_args is not None:
             codex_extra_args = source.codex_extra_args
+        if source.codex_session_name_resolution is not None:
+            codex_session_name_resolution = source.codex_session_name_resolution
 
     if agent_mode not in {"auto", "strict", "git-only"}:
         raise ConfigError("agent_mode must be auto, strict, or git-only")
@@ -130,6 +133,7 @@ def resolve_config(
         config_path=config_path,
         claude_extra_args=claude_extra_args,
         codex_extra_args=codex_extra_args,
+        codex_session_name_resolution=codex_session_name_resolution,
     )
 
 
@@ -174,17 +178,28 @@ def load_config(path: Path) -> ConfigValues:
         raise ConfigError(
             f"invalid config {path}: unknown agent {sorted(unknown_agents)[0]}"
         )
-    extras: dict[str, tuple[str, ...]] = {}
+    agent_values: dict[str, object] = {}
     for agent, values in agents.items():
-        if not isinstance(values, dict) or set(values) - {"extra_args"}:
+        allowed = {"extra_args"}
+        if agent == "codex":
+            allowed.add("session_name_resolution")
+        if not isinstance(values, dict) or set(values) - allowed:
             raise ConfigError(f"invalid config {path}: [agents.{agent}] is invalid")
         raw = values.get("extra_args", [])
         if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
             raise ConfigError(
                 f"invalid config {path}: agents.{agent}.extra_args must be strings"
             )
-        extras[f"{agent}_extra_args"] = tuple(raw)
-    return ConfigValues(config_path=path.resolve(), **fork, **extras)
+        agent_values[f"{agent}_extra_args"] = tuple(raw)
+        if agent == "codex" and "session_name_resolution" in values:
+            resolution = values["session_name_resolution"]
+            if not isinstance(resolution, bool):
+                raise ConfigError(
+                    f"invalid config {path}: "
+                    "agents.codex.session_name_resolution must be boolean"
+                )
+            agent_values["codex_session_name_resolution"] = resolution
+    return ConfigValues(config_path=path.resolve(), **fork, **agent_values)
 
 
 def worktree_root(cwd: Path, env: Mapping[str, str] | None = None) -> Path:
@@ -263,9 +278,10 @@ def resolve_discovered_config(
 
 def set_user_value(path: Path, key: str, value: str) -> None:
     """Write one supported `[fork]` value for the config CLI."""
-    if key not in _FORK_KEYS:
+    codex_resolution_key = "agents.codex.session_name_resolution"
+    if key != codex_resolution_key and key not in _FORK_KEYS:
         raise ConfigError(f"unknown config key: {key}")
-    if key in _BOOL_KEYS:
+    if key in _BOOL_KEYS or key == codex_resolution_key:
         lowered = value.lower()
         if lowered not in {"true", "false"}:
             raise ConfigError(f"{key} expects true or false")
@@ -277,7 +293,17 @@ def set_user_value(path: Path, key: str, value: str) -> None:
         for field in _FORK_KEYS
         if getattr(existing, field) is not None
     }
-    values[key] = value.lower() == "true" if key in _BOOL_KEYS else value
+    if key == codex_resolution_key:
+        existing = ConfigValues(
+            **{
+                field: getattr(existing, field)
+                for field in ConfigValues.__dataclass_fields__
+                if field != "codex_session_name_resolution"
+            },
+            codex_session_name_resolution=value.lower() == "true",
+        )
+    else:
+        values[key] = value.lower() == "true" if key in _BOOL_KEYS else value
     lines = ["[fork]"]
     for name in sorted(values):
         item = values[name]
@@ -290,12 +316,19 @@ def set_user_value(path: Path, key: str, value: str) -> None:
         ("claude", existing.claude_extra_args),
         ("codex", existing.codex_extra_args),
     ):
-        if extra_args is None:
+        if extra_args is None and not (
+            agent == "codex" and existing.codex_session_name_resolution is not None
+        ):
             continue
         quoted = ", ".join(
             '"' + item.replace("\\", "\\\\").replace('"', '\\"') + '"'
-            for item in extra_args
+            for item in (extra_args or ())
         )
         lines.extend(("", f"[agents.{agent}]", f"extra_args = [{quoted}]"))
+        if agent == "codex" and existing.codex_session_name_resolution is not None:
+            lines.append(
+                "session_name_resolution = "
+                + ("true" if existing.codex_session_name_resolution else "false")
+            )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")

@@ -209,3 +209,21 @@ def test_invalid_agent_mode_is_config_error(repo_scenario):
     path.write_text('[fork]\nagent_mode = "sometimes"\n')
     with pytest.raises(ConfigError, match="auto, strict, or git-only"):
         load_config(path)
+
+
+@pytest.mark.matrix("T-CFG-17")
+def test_codex_session_name_resolution_config_and_flag_precedence(repo_scenario):
+    from agent_fork.config import load_config, resolve_config
+
+    world = repo_scenario()
+    path = world.parent_path / "agent.toml"
+    path.write_text("[agents.codex]\nsession_name_resolution = false\n")
+    loaded = load_config(path)
+    assert resolve_config().codex_session_name_resolution is True
+    assert resolve_config(sources=(loaded,)).codex_session_name_resolution is False
+    assert (
+        resolve_config(
+            sources=(loaded,), flags={"codex_session_name_resolution": True}
+        ).codex_session_name_resolution
+        is True
+    )

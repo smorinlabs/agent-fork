@@ -66,3 +66,20 @@ Result: **pass**.
 
 E1-E3 are closed. E4 remains retired until v1.1 (A8/D14), E5 is the G-MAT/G-VER core
 TDD obligation, and E6 is tombstoned with the removed pre-0.95 Codex ladder (A7).
+
+## E7 — Codex renamed-session resolution
+
+On 2026-08-10, Codex CLI 0.147.0 in the guest had a real thread renamed
+`hello-codex`. A bounded stdio app-server session initialized successfully and
+`thread/list` with `searchTerm: "hello-codex"`, active-thread filters, and
+state-database-only lookup returned the exact name with canonical UUID
+`019fed92-fa7e-7262-b93e-6bd73a38ac72`.
+
+Result: **pass**. The app-server is a sufficient Codex-owned resolution path;
+direct SQLite access is unnecessary. The implementation therefore resolves an
+explicit non-UUID Codex parent through this protocol, handles pagination, and
+requires exactly one exact-name match. Canonical UUID input bypasses app-server
+startup. `--no-codex-session-name-resolution` and
+`[agents.codex] session_name_resolution = false` retain a deterministic
+UUID-only escape hatch. T-EXP-07 rechecks the real local path and performs no
+repository mutation.
