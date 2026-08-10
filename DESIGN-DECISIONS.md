@@ -22,6 +22,7 @@
 | D13 | Cleanup verb | **`cleanup`** (waiver stands) | ★ `ch-11-a` |
 | D7 | Config surface | **Trimmed schema** (see final schema below) | ★ `ch-12-a` |
 | D11 | Extra-args passthrough | **Ships in v1**: `[agents.<name>] extra_args` | ⚠ `ch-13-b` |
+| D15 | Partial worktree destination overrides | **Independent base and leaf flags; exact path remains exclusive** | ★ owner-approved 2026-08-10 |
 
 ## Decisions in detail
 
@@ -81,9 +82,12 @@ Dropped from agent-deck's `[fork]`: `docker`, the `worktree` toggle, `inherit_fr
 ### D11 — Extra-args passthrough ships in v1 (`ch-13-b` ⚠ went against)
 `[agents.<name>] extra_args` (array of strings) is appended to that agent's emitted launch command. Constraints: each element individually shell-quoted at emission (no string-splitting, no interpolation); values appear in `--dry-run` and `-o json` output (`command` field reflects them); tests cover the quoting boundary (spaces, quotes, `$`, `;`). *Consequence for testing:* launch-template tests assert the fixed prefix byte-for-byte plus a quoted-suffix property, rather than the whole line as a constant.
 
+### D15 — Independent worktree base and leaf overrides (owner-approved 2026-08-10)
+`--worktree-base-dir DIR` replaces only the parent of the D5-derived destination; `--worktree-name NAME` replaces only its final component, and the two compose. `--worktree-dir PATH` retains its exact-path behavior and cannot be combined with either partial override. Relative bases resolve from invocation cwd and must already be directories. Explicit leaves are preserved byte-for-byte but must be one non-empty, non-traversing path component. The base is resolved once while the leaf is joined lexically so an existing leaf symlink remains visible to collision guards. Explicit resource collisions refuse; automatic suffixing continues only when the next automatic name changes every colliding resource. No config or output schema is added.
+
 ## Resulting v1 surface (consolidated)
 
-- **Commands:** `fork [NAME]` · `cleanup <TARGET>` · `list` · `doctor` · `config view|get|set|validate` · `completion <shell>` · `help` — bare `agent-fork` prints help (D1).
+- **Commands:** `fork [NAME] [--branch B] [--worktree-dir P | --worktree-base-dir B [--worktree-name N] | --worktree-name N]` · `cleanup <TARGET>` · `list` · `doctor` · `config view|get|set|validate` · `completion <shell>` · `help` — bare `agent-fork` prints help (D1).
 - **Emitted commands** (quoted uniformly; `<extra>` = D11 args):
   - Claude: `cd '<worktree>' && claude --session-id "<uuid>" --resume <parent-id> --fork-session -n '<fork-name>'<extra>` (`-n` pending experiment E1)
   - Codex: `cd '<worktree>' && codex fork <parent-thread-id><extra>` (`-C` variant + cwd-prompt handling pending E2)

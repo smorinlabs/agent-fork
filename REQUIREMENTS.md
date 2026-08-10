@@ -53,7 +53,7 @@ agent-fork
 
 ### 3.3 `fork` — arguments & flags
 
-Positional `[NAME]` = the fork's identity (R2.3): seeds branch slug, worktree dir, and derived session name. Optional; when absent the name is auto-derived (D4).
+Positional `[NAME]` = the fork's identity (R2.3): seeds the default branch, derived worktree leaf, and session name. Optional; when absent the name is auto-derived (D4). D15's explicit branch or worktree overrides replace only their named resource and do not alter the fork/session identity.
 
 | Flag | Short | Type | Default | Purpose |
 |---|---|---|---|---|
@@ -61,6 +61,8 @@ Positional `[NAME]` = the fork's identity (R2.3): seeds branch slug, worktree di
 | `--parent-session <id>` | — | str | from env | Parent session/thread ID |
 | `--branch <name>` | — | str | `<branch_prefix><slug>` | Explicit fork branch |
 | `--worktree-dir <path>` | — | path | location scheme (D5) | Explicit worktree destination |
+| `--worktree-base-dir <directory>` | — | path | derived parent (D5) | Replace only the worktree parent; must already be a directory |
+| `--worktree-name <component>` | — | str | derived leaf (D5) | Replace only the worktree leaf, preserving exact spelling |
 | *state model:* `--no-with-state` | — | bool | exact-copy default (D2/D3) | Clean-from-HEAD vs carry state (`--clean` alias deferred to v1.1+, D2) |
 | `--with-ignored` | — | bool | **off** (#1354 evidence) | Also copy gitignored files (implies state carry) |
 | `--dry-run` | — | bool | off | Print full plan incl. the would-be paste command; no mutation (R4.3/R8.6) |
@@ -166,6 +168,7 @@ Port of RESEARCH §2 (agent-deck `forkWithStateWorktree` + `MaterializeWipFromPa
 - **REQ-41** Concurrency safety: registry/state writes atomic + locked (R5.8); two simultaneous forks of one repo must not corrupt each other (the mid-mutation collision loss is classified as exit 5 per spec A1; nothing left behind; rollback runs). **Amended 2026-08-08 (owner, test-architecture spec A13):** Registry locking: OS advisory lock (self-clearing on process death); contending process waits ≤ ~5s then fails with `registry_busy`.
 - **REQ-42** Every emitted shell command is quoted defensively (shlex.quote equivalents) — REQ-28 note.
 - **REQ-43** Testability: **Amended 2026-08-08 (owner, test-architecture spec A10):** the CLI resolves `git` via PATH at each invocation — never a cached absolute path (canaried in the test suite).
+- **REQ-44** Partial worktree destination overrides (D15): derive the normal D5 path, then replace its parent with `--worktree-base-dir` and/or its leaf with `--worktree-name`. The partial flags compose; `--worktree-dir` is parser-incompatible with either. A relative base resolves from invocation cwd and must exist as a directory. A leaf is preserved exactly but must be one non-empty component (not `.`, `..`, absolute, slash/backslash/NUL-containing, or whitespace-only). Resolve the base once and do not follow an existing leaf symlink. Explicit resource collisions refuse without suffixing; auto-suffixing proceeds only when the next candidate changes each colliding resource. Existing invocations, exact-path behavior, configuration, registry, and JSON schemas remain compatible.
 
 ---
 
@@ -195,5 +198,6 @@ Full record with rationale, notes, and agent-deck reconciliation: **`DESIGN-DECI
 | D12 | Cleanup registry-scoped; `--force` extends targets + overrides guards |
 | D13 | Verb stays `cleanup` (waiver confirmed) |
 | D14 | ⚠ Preflight failure → refuse with diagnosis; handoff ladder deferred to v1.1+ (REQ-29) |
+| D15 | Independent worktree base/leaf overrides; exact destination remains exclusive (REQ-44) |
 
 Queued for the implementation session: PROJECTS.md project creation (house process), git init + worktree discipline for this repo, live experiments E1–E3 (E4 retired per spec A8), conformance fixture scaffold (R9.14).

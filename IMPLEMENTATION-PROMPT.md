@@ -18,7 +18,7 @@ In precedence order (paths as given):
 6. `CONFORMANCE.md` — applicability map + the one standing waiver (R2.1 `cleanup`).
 7. `research/reference/agent-session-fork-cli-recipes-2026-07-21.md` — the distilled per-agent fork recipes with version gates and gotchas.
 
-Key locked facts: Python ≥3.11, `uv`-based packaging; PyPI + TestPyPI names **already reserved** (`0.0.0.dev0` placeholders — PEP 541 makes shipping a real v0.1.0 time-sensitive); v1 agents are Claude Code + Codex only; v1 refuses when native fork is impossible (D14 — no fallback ladder); `[agents.<name>] extra_args` ships in v1 (D11 — individually shell-quoted).
+Key locked facts: Python ≥3.11, `uv`-based packaging; PyPI + TestPyPI names **already reserved** (`0.0.0.dev0` placeholders — PEP 541 makes shipping a real v0.1.0 time-sensitive); v1 agents are Claude Code + Codex only; v1 refuses when native fork is impossible (D14 — no fallback ladder); `[agents.<name>] extra_args` ships in v1 (D11 — individually shell-quoted). Post-Phase-E amendment D15 adds independent `--worktree-base-dir`/`--worktree-name` composition while retaining exclusive exact `--worktree-dir`; Phase E.5 completes and gates this compatibility increment before Phase F.
 
 ## 2. Method — non-negotiable
 
@@ -63,17 +63,17 @@ Execute the plan with subagent-driven development + TDD per task (model matrix a
 
 **STOP for my review of the finished build.**
 
-## 7. PHASE E — Ship v0.1.0 *(gate: released + installable, then STOP)*
+## 7. PHASE E — The `agent-fork` skill *(gate: end-to-end demo, then STOP)*
+
+Build the companion skill via the skill-create pipeline (it handles placement for both Claude Code and Codex, docs, and the skill-quality gate): the skill detects the host agent from env (`CLAUDECODE`/`CLAUDE_CODE_SESSION_ID`; `CODEX_THREAD_ID`), invokes `agent-fork fork … --json` with explicit `--agent`/`--parent-session`, and renders the returned paste command prominently (REQ-02..04). It never re-implements git logic; if the CLI is missing it prints the install hint. Final acceptance: from a real Claude Code session, one word produces a verified fork and a paste command that works in a fresh terminal; same demo for Codex. **STOP — v1 complete.**
+
+## 8. PHASE F — Ship v0.1.0 *(gate: released + installable, then STOP)*
 
 1. cli-standards **audit** mode against the built binary; fix or waive findings; append the audit row to CONFORMANCE.md.
 2. Release plumbing via repo-please-setup (release-please pattern; PyPI + TestPyPI trusted publishing; Homebrew tap; secrets via repo-secrets). Merge-commit rules per house policy; `merge_commit_title = MERGE_MESSAGE` for release-please.
 3. Cut **v0.1.0** — replaces the PyPI placeholder (verify: `uv tool install agent-fork` and `pipx install agent-fork` both yield a working `agent-fork --version`). Homebrew + Flox/Nix packaging follow the difftree pattern.
 
-**STOP.**
-
-## 8. PHASE F — The `agent-fork` skill *(gate: end-to-end demo, then STOP)*
-
-Build the companion skill via the skill-create pipeline (it handles placement for both Claude Code and Codex, docs, and the skill-quality gate): the skill detects the host agent from env (`CLAUDECODE`/`CLAUDE_CODE_SESSION_ID`; `CODEX_THREAD_ID`), invokes `agent-fork fork … --json` with explicit `--agent`/`--parent-session`, and renders the returned paste command prominently (REQ-02..04). It never re-implements git logic; if the CLI is missing it prints the install hint. Final acceptance: from a real Claude Code session, one word produces a verified fork and a paste command that works in a fresh terminal; same demo for Codex. **STOP — v1 complete.**
+**STOP — v1 complete.**
 
 ## Guardrails
 

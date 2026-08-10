@@ -15,7 +15,9 @@ Phase D pull request, and stop at the owner-review gate immediately before
 Phase E.
 
 This goal does not authorize release, publishing, package-registry changes,
-Homebrew work, or the Phase F companion skill.
+Homebrew work, or the then-planned Phase F companion skill. The owner reordered
+the remaining phases after this goal completed: companion skill is now Phase E
+and release is Phase F.
 
 ## Authority and execution contract
 

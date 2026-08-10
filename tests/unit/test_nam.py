@@ -145,3 +145,50 @@ def test_derived_name_feeds_branch_worktree_and_display_name(repo_scenario):
     assert plan.branch == "fork/fix-auth"
     assert plan.worktree_suffix == "fix-auth"
     assert plan.display_name == "fix-auth"
+
+
+@pytest.mark.matrix("T-NAM-08")
+def test_destination_defaults_preserve_identity_feed_through(repo_scenario):
+    from agent_fork.naming import naming_plan
+
+    plan = naming_plan("same", branch_prefix="fork/")
+    assert (plan.name, plan.branch, plan.worktree_suffix, plan.display_name) == (
+        "same",
+        "fork/same",
+        "same",
+        "same",
+    )
+
+
+@pytest.mark.matrix("T-NAM-09")
+def test_explicit_resource_overrides_do_not_rewrite_display_identity(repo_scenario):
+    from agent_fork.naming import naming_plan
+
+    plan = naming_plan("session", branch_prefix="fork/")
+    explicit_branch, explicit_leaf = "review/branch", "Exact Leaf"
+    assert plan.name == plan.display_name == "session"
+    assert explicit_branch != plan.branch and explicit_leaf != plan.worktree_suffix
+
+
+@pytest.mark.matrix("T-NAM-10")
+def test_derived_collision_advances_auto_name(repo_scenario):
+    from agent_fork.naming import unique_auto_name
+
+    assert unique_auto_name("auto", lambda value: value == "auto") == "auto-2"
+
+
+@pytest.mark.matrix("T-NAM-12")
+def test_fixed_collision_can_abort_before_candidate_cap(repo_scenario):
+    from agent_fork.errors import PreconditionError
+    from agent_fork.naming import unique_auto_name
+
+    calls = 0
+
+    def fixed(_value):
+        nonlocal calls
+        calls += 1
+        raise PreconditionError("conflict_worktree_path", "fixed destination")
+
+    with pytest.raises(PreconditionError):
+        unique_auto_name("auto", fixed)
+    assert calls == 1

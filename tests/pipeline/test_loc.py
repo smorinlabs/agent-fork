@@ -50,3 +50,58 @@ def test_bare_at_root_placement_override(repo_scenario):
         bare_at_root=True,
     )
     assert path == world.repo_root / "fix-auth"
+
+
+@pytest.mark.matrix("T-LOC-15")
+def test_partial_override_applies_after_linked_mirror_derivation(repo_scenario):
+    from agent_fork.location import compose_worktree_destination, derive_worktree_path
+
+    world = repo_scenario("linked-worktree")
+    derived = derive_worktree_path(
+        world.repo_root,
+        "fork/x",
+        "x",
+        "sibling",
+        parent_path=world.parent_path,
+        parent_is_linked=True,
+    )
+    assert (
+        compose_worktree_destination(
+            derived, invocation_cwd=world.parent_path, worktree_name="leaf"
+        )
+        == derived.parent / "leaf"
+    )
+
+
+@pytest.mark.matrix("T-LOC-16")
+def test_partial_override_applies_after_bare_root_derivation(repo_scenario):
+    from agent_fork.location import compose_worktree_destination, derive_worktree_path
+
+    world = repo_scenario("bare@bare")
+    derived = derive_worktree_path(
+        world.repo_root, "fork/x", "x", "sibling", bare_at_root=True
+    )
+    assert (
+        compose_worktree_destination(
+            derived, invocation_cwd=world.parent_path, worktree_name="leaf"
+        )
+        == world.repo_root / "leaf"
+    )
+
+
+@pytest.mark.matrix("T-LOC-17")
+def test_symlinked_base_resolves_once_without_following_leaf(repo_scenario):
+    from agent_fork.location import compose_worktree_destination
+
+    world = repo_scenario()
+    real = world.parent_path.parent / "real-base"
+    real.mkdir()
+    link = world.parent_path.parent / "base-link"
+    link.symlink_to(real, target_is_directory=True)
+    destination = compose_worktree_destination(
+        world.parent_path / "derived",
+        invocation_cwd=world.parent_path,
+        base_dir=link,
+        worktree_name="leaf",
+    )
+    assert destination == real / "leaf"

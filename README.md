@@ -4,9 +4,27 @@
 staged, unstaged, and untracked state, verifies the copy, and prints the exact
 command for continuing the current Claude Code or Codex conversation there.
 
-The CLI is implemented for v0.1.0 but remains pre-release until the Phase E
+The CLI is implemented for v0.1.0 but remains pre-release until the Phase F
 release gate. It requires Python 3.11+, Git 2.19+, Claude Code 2.0.73+ or Codex
 0.95+ (Codex native `fork` itself requires 0.81+).
+
+## Companion skill
+
+The repository includes one canonical Agent Skills artifact at
+`.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`; Claude
+Code discovers the same artifact through `.claude/skills/agent-fork` as
+`/agent-fork`.
+
+From an active agent session, invoke it with an optional fork name:
+
+```text
+$agent-fork my-experiment   # Codex
+/agent-fork my-experiment   # Claude Code
+```
+
+The skill requires `agent-fork` on `PATH`, delegates all repository mechanics
+to `agent-fork fork --json`, and returns a command to paste into a fresh
+terminal. Until Phase F publishes v0.1.0, use the CLI from a source checkout.
 
 ## Usage
 
@@ -17,6 +35,8 @@ agent-fork fork review-auth
 agent-fork fork review-auth --with-ignored
 agent-fork fork --no-with-state --dry-run
 agent-fork fork review-auth -o json
+agent-fork fork experiment --branch review/manual \
+  --worktree-base-dir /work/forks --worktree-name 'Manual Worktree'
 ```
 
 The agent and parent session are normally detected from
@@ -27,6 +47,12 @@ agent-fork fork review-auth \
   --agent claude --parent-session '<session-uuid>' \
   --branch review/auth --worktree-dir '../auth-review'
 ```
+
+`--worktree-dir` selects one exact destination. Alternatively,
+`--worktree-base-dir` and `--worktree-name` independently replace the parent
+and leaf of the configured/default destination and may be combined. An explicit
+base must already exist. The exact-path flag cannot be mixed with either partial
+override.
 
 Other commands:
 

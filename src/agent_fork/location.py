@@ -6,9 +6,58 @@ from pathlib import Path
 
 from platformdirs import user_data_path
 
+from agent_fork.errors import PreconditionError
+
 
 def _branch_escaped(branch: str) -> str:
     return branch.replace("/", "-").replace("\\", "-")
+
+
+def validate_worktree_name(value: str) -> str:
+    """Validate an explicit worktree leaf without rewriting it."""
+    if (
+        not value.strip()
+        or value in {".", ".."}
+        or "\0" in value
+        or "/" in value
+        or "\\" in value
+        or Path(value).is_absolute()
+    ):
+        raise PreconditionError(
+            "invalid_worktree_name",
+            f"worktree name must be one non-empty path component: {value!r}",
+        )
+    return value
+
+
+def compose_worktree_destination(
+    derived: Path,
+    *,
+    invocation_cwd: Path,
+    base_dir: Path | None = None,
+    worktree_name: str | None = None,
+) -> Path:
+    """Apply independent parent and leaf overrides to a derived destination."""
+    if base_dir is None:
+        base = derived.parent
+    else:
+        base = base_dir.expanduser()
+        if not base.is_absolute():
+            base = invocation_cwd / base
+        base = base.resolve()
+        if not base.is_dir():
+            raise PreconditionError(
+                "invalid_worktree_base",
+                f"worktree base must be an existing directory: {base}",
+            )
+    leaf = (
+        validate_worktree_name(worktree_name)
+        if worktree_name is not None
+        else derived.name
+    )
+    # Deliberately do not resolve the leaf: an existing symlink must remain visible
+    # to the repository destination guard rather than being followed.
+    return base / leaf
 
 
 def derive_worktree_path(
