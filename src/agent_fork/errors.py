@@ -39,3 +39,10 @@ class VerificationError(AgentForkError):
 
     code = "verify_failed"
     exit_code = 1
+
+
+class RegistryBusyError(AgentForkError):
+    """The XDG registry lock could not be acquired within its bounded wait."""
+
+    code = "registry_busy"
+    exit_code = 1

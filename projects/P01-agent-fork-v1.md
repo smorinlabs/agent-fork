@@ -59,8 +59,8 @@ Phase D — build (gate: everything green + reviews clean; every T preceded by i
 - [x] [P01-T11] Materialize (staged → unstaged → untracked [+ignored]) — exact, exact+ignored, and no-state preserve the declared Git-visible state
 - [x] [P01-TS08] Verification ladder + rollback tests (REQ-22, REQ-23) — G-VER 11/11 and G-RBK 6/6 green, including real filter divergence, producer failure, and signal stalls
 - [x] [P01-T12] Verify ladder + rollback — typed verification failure, precise cleanup, exact manual recovery, and SIGINT/SIGTERM exit mapping implemented
-- [ ] [P01-TS09] Registry locking/concurrency tests (REQ-41)
-- [ ] [P01-T13] Fork registry in XDG state (REQ-12)
+- [x] [P01-TS09] Registry locking/concurrency tests (REQ-41) — G-REG 7/7 green with atomicity, real different-name fork races, timeout, and lock-death proofs
+- [x] [P01-T13] Fork registry in XDG state (REQ-12) — stable schema, deterministic ordering, atomic locked writes, ownership lookup, and list rendering implemented
 - [ ] [P01-TS10] Agent detection/preflight/template tests incl. extra_args quoting boundary (REQ-26..30, D11)
 - [ ] [P01-T14] Per-agent detection, preflight, launch templates
 - [ ] [P01-TS11] `fork` command end-to-end tests

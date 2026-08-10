@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -28,6 +29,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-fork")
     parser.add_argument("--config", type=Path)
     commands = parser.add_subparsers(dest="command")
+    listing = commands.add_parser("list")
+    listing.add_argument("-o", "--output", choices=("text", "json"), default="text")
     config = commands.add_parser("config")
     actions = config.add_subparsers(dest="config_action", required=True)
     setter = actions.add_parser("set")
@@ -43,6 +46,30 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     environment = dict(os.environ)
     try:
+        if args.command == "list":
+            from agent_fork.registry import read_registry
+
+            entries = read_registry(env=environment)
+            if args.output == "json":
+                print(
+                    json.dumps(
+                        {
+                            "version": 1,
+                            "forks": [
+                                item.to_dict(include_exists=True) for item in entries
+                            ],
+                        },
+                        sort_keys=True,
+                    )
+                )
+            else:
+                for item in entries:
+                    exists = "yes" if Path(item.worktree).exists() else "no"
+                    print(
+                        f"{item.name}\t{item.branch}\t{item.worktree}\t"
+                        f"{item.agent}\t{exists}"
+                    )
+            return 0
         if args.command == "config" and args.config_action == "set":
             path = args.config or _user_config_path(environment)
             set_user_value(path, args.key, args.value)

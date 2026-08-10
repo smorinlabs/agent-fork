@@ -242,7 +242,7 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 ---
 
 ## G-REG — Registry & list
-Status: pending
+Status: done
 
 Purpose: registry and list — registry schema/ordering logic (U); XDG state, locking, atomic writes, the different-name concurrent race (F); `list` command output incl. `-o json` (C).
 
