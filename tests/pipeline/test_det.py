@@ -20,7 +20,6 @@ import pytest
         ),
     ],
 )
-@pytest.mark.skip(reason="pending: T-DET-04..T-DET-05 family")
 def test_agent_detection_ambiguous_or_absent_signals_exit_3(
     repo_scenario, signal_state
 ):
@@ -30,4 +29,20 @@ def test_agent_detection_ambiguous_or_absent_signals_exit_3(
     T-DET-05 — neither env signal present, no explicit flags, exits 3.
     Source: REQ-26
     """
-    raise NotImplementedError
+    from agent_fork.agents import detect_agent
+    from agent_fork.errors import AgentDetectionError
+
+    env = (
+        {
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_SESSION_ID": "claude-parent",
+            "CODEX_THREAD_ID": "codex-parent",
+        }
+        if signal_state == "both-present"
+        else {}
+    )
+    with pytest.raises(AgentDetectionError) as caught:
+        detect_agent(env)
+    assert caught.value.exit_code == 3
+    assert caught.value.code == "agent_not_detected"
+    assert "--agent" in str(caught.value)

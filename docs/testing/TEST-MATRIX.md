@@ -43,7 +43,7 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 ---
 
 ## G-DET — Agent detection
-Status: pending
+Status: done
 
 Purpose: agent detection — the env-signal ladder, explicit-flags-win rule, and ambiguity → exit 3.
 
