@@ -4,7 +4,7 @@
 - **Trunk:** [PROJECTS.md](../PROJECTS.md)
 - **Spec:** [REQUIREMENTS.md](../REQUIREMENTS.md) — REQ-01..42, pinned to CLI Design Standard v1.4.14
 - **Design:** [DESIGN-DECISIONS.md](../DESIGN-DECISIONS.md) — D1–D14 locked 2026-07-21
-- **Plan:** Phase C deliverable (superpowers writing-plans) — not written yet
+- **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — Phase C gate deliverable, awaiting owner approval
 - **Tracking:** [CONFORMANCE.md](../CONFORMANCE.md) — applicability map + waivers
 - **Prior art:** [RESEARCH.md](../RESEARCH.md) — agent-deck port source map; [recipes leaf](../research/reference/agent-session-fork-cli-recipes-2026-07-21.md)
 
