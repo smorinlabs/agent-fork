@@ -1,37 +1,147 @@
 # agent-fork
 
-`agent-fork` creates a Git branch and linked worktree carrying the current
-staged, unstaged, and untracked state, verifies the copy, and prints the exact
-command for continuing the current Claude Code or Codex conversation there. In
-a normal terminal it creates the same verified branch/worktree and prints a
-`cd` command without requiring an agent CLI.
+**Fork your repo and your agent session in one command.**
 
-The CLI is implemented for v0.1.0 but remains pre-release until the Phase F
-release gate. It requires Python 3.11+ and Git 2.19+. Managed session forks
-additionally require Claude Code 2.0.73+ or Codex 0.95+ (Codex native `fork`
-itself requires 0.81+).
+[![CI](https://github.com/smorinlabs/agent-fork/actions/workflows/ci.yml/badge.svg)](https://github.com/smorinlabs/agent-fork/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/smorinlabs/agent-fork/blob/main/LICENSE)
 
-## Companion skill
+You are deep in a Claude Code or Codex session. The agent has context you do not
+want to rebuild, and your working tree is full of uncommitted work. Now you want
+to try a *second* approach — without stashing, without losing the first one, and
+without starting the conversation over.
 
-The repository includes one canonical Agent Skills artifact at
-`.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`; Claude
-Code discovers the same artifact through `.claude/skills/agent-fork` as
-`/agent-fork`.
+`agent-fork` does that in one command. It creates a new branch and a linked Git
+worktree, copies your current staged, unstaged, and untracked files into it,
+verifies the copy matched, and prints the exact command that continues *this
+conversation* in that new worktree. Your original worktree and session are never
+touched.
 
-From an active agent session, invoke it with an optional fork name:
+Outside an agent session it does the same branch-and-worktree work and prints a
+`cd` command instead, so the same tool works in a plain terminal.
 
-```text
-$agent-fork my-experiment   # Codex
-/agent-fork my-experiment   # Claude Code
+## Demo
+
+```console
+$ agent-fork fork try-redis --dry-run
+branch: create fork/try-redis
+worktree: create /Users/you/code/myapp-fork-try-redis
+files-to-carry: staged=3 unstaged=7 untracked=2 ignored=0
+paste command: cd /Users/you/code/myapp-fork-try-redis && claude --session-id 9b74b9f2-f3d2-4060-b233-0121ac17ed7c --resume c854b79c-16b2-4863-a095-03d35d195ec9 --fork-session -n try-redis
+validation: local-only; no mutation performed
 ```
 
-The skill requires `agent-fork` on `PATH`, delegates all repository mechanics
-to `agent-fork fork --json`, and returns a command to paste into a fresh
-terminal. Until Phase F publishes v0.1.0, use the CLI from a source checkout.
+Drop `--dry-run` and the fork is created. Paste the final line into a fresh
+terminal and the agent picks up where it left off — same context, new branch,
+your uncommitted work already there.
 
-## Usage
+## Install
 
-Run inside an agent session or an ordinary terminal:
+```bash
+uv tool install git+https://github.com/smorinlabs/agent-fork
+```
+
+Or run it without installing:
+
+```bash
+uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
+```
+
+> PyPI and Homebrew releases land with v0.1.0.
+
+**Requirements:** Python 3.11+ and Git 2.19+. Forking an agent session
+additionally needs Claude Code 2.0.73+ or Codex 0.95+ (Codex's native `fork`
+itself requires 0.81+). Run `agent-fork doctor` to check all of this at once.
+
+## Quickstart
+
+```bash
+agent-fork doctor              # confirm Git, agent CLIs, config, and XDG paths
+agent-fork fork try-redis      # create the fork, print the paste command
+agent-fork list                # see the forks you have created
+agent-fork cleanup try-redis --yes   # remove one when you are done
+```
+
+## From inside your agent session
+
+You do not need to leave the conversation. This repository ships a companion
+skill — just type:
+
+```text
+/agent-fork try-redis      # Claude Code
+$agent-fork try-redis      # Codex
+```
+
+The skill detects the running agent and session for you, delegates every
+repository mechanic to `agent-fork fork --json`, and hands back the command to
+paste into a fresh terminal. The fork name is optional.
+
+The skill lives at one canonical Agent Skills artifact,
+`.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`; Claude
+Code discovers the same artifact through `.claude/skills/agent-fork` as
+`/agent-fork`. It requires `agent-fork` on `PATH`.
+
+## How it works
+
+1. **Detect** the agent and parent session from `CLAUDE_CODE_SESSION_ID` or
+   `CODEX_THREAD_ID` — or accept both explicitly as flags.
+2. **Anchor** to the parent's current commit and create the fork branch.
+3. **Create** a linked Git worktree at the destination.
+4. **Copy** staged, then unstaged, then untracked files into it, preserving
+   symlinks and the executable bit.
+5. **Verify** that the new worktree's Git-visible state matches what was
+   promised. A failed check rolls the fork back and reports exactly what to do.
+6. **Emit** the launch command for the detected agent, and record the fork in a
+   local registry so `list` and `cleanup` can find it later.
+
+Why not just `git worktree add`? That gives you an empty worktree at `HEAD`.
+`agent-fork` carries your uncommitted work across, proves the copy is faithful,
+rolls back cleanly when it is not, and continues the agent conversation rather
+than starting a new one.
+
+## Command reference
+
+| Command | Purpose |
+|---|---|
+| `agent-fork fork [NAME]` | Create a verified branch and worktree; print the paste command |
+| `agent-fork list` | List forks created by `agent-fork` |
+| `agent-fork cleanup <name\|branch\|worktree> --yes` | Remove a registered fork |
+| `agent-fork doctor` | Diagnose Git, agent, config, and XDG readiness |
+| `agent-fork config view\|get\|set\|validate` | Inspect or update configuration |
+| `agent-fork completion bash\|zsh\|fish` | Generate a shell completion script |
+| `agent-fork help [command]` | Show help for a command |
+
+Global options: `-V/--version`, `-v/--verbose`, `-q/--quiet`, `--debug`,
+`--config PATH`, and `-o/--output {table,text,json}` (`--json` is an alias for
+`-o json`).
+
+`cleanup` is registry-scoped unless `--force` is used. It refuses dirty or
+unpushed worktrees without `--force`, always refuses to remove the invoking
+working directory, and requires separate consent via `--yes`. Agent-owned
+session files are never removed.
+
+## `fork` options
+
+| Flag | Effect |
+|---|---|
+| `NAME` | Fork identity; derived from the current branch when omitted |
+| `--agent {claude,codex}` | Host agent; detected when omitted |
+| `--parent-session ID_OR_NAME` | Parent session/thread UUID, or a renamed Codex session name |
+| `--require-agent` | Refuse unless a single usable agent session is available |
+| `--no-agent` | Ignore agent signals; create only the branch and worktree |
+| `--branch BRANCH` | Explicit fork branch name |
+| `--worktree-dir PATH` | Use this exact worktree destination |
+| `--worktree-base-dir DIR` | Replace only the derived parent directory |
+| `--worktree-name COMPONENT` | Replace only the derived directory name |
+| `--with-state` / `--no-with-state` | Carry staged, unstaged, and untracked state (default: enabled) |
+| `--with-ignored` / `--no-with-ignored` | Also carry ignored files (default: disabled) |
+| `--verify` / `--no-verify` | Verify the completed fork (default: enabled) |
+| `--codex-session-name-resolution` / `--no-codex-session-name-resolution` | Resolve renamed Codex sessions (default: enabled) |
+| `--force` | Override only the Git-version floor |
+| `--dry-run` | Preview every planned mutation without changing anything |
+| `--copy` / `--no-copy` | Copy the paste command to the clipboard |
+
+Examples:
 
 ```bash
 agent-fork fork review-auth                 # auto-detect agent or Git-only
@@ -63,16 +173,24 @@ single usable session is available; `--no-agent` ignores agent signals. Set the
 default with `[fork] agent_mode = "auto" | "strict" | "git-only"` or
 `AGENT_FORK_AGENT_MODE`.
 
+### Choosing where the worktree lands
+
+`--worktree-dir` selects one exact destination. Alternatively,
+`--worktree-base-dir` and `--worktree-name` independently replace the parent and
+leaf of the configured/default destination and may be combined. An explicit base
+must already exist. The exact-path flag cannot be mixed with either partial
+override.
+
 ### Renamed Codex sessions
 
 Codex stores a rename separately from the rollout filename, so a name such as
-`hello-codex` cannot be used directly with `codex fork`. When an explicit
-Codex parent is not a UUID, `agent-fork` asks the installed local Codex
-app-server for exact name matches, replaces the name with the canonical thread
-UUID, verifies that UUID's rollout is present, and emits the normal
-`codex fork <uuid> -C <worktree>` command. UUID input bypasses this lookup.
-The lookup is local and bounded; `agent-fork` never reads Codex's internal
-SQLite database directly.
+`hello-codex` cannot be used directly with `codex fork`. When an explicit Codex
+parent is not a UUID, `agent-fork` asks the installed local Codex app-server for
+exact name matches, replaces the name with the canonical thread UUID, verifies
+that UUID's rollout is present, and emits the normal
+`codex fork <uuid> -C <worktree>` command. UUID input bypasses this lookup. The
+lookup is local and bounded; `agent-fork` never reads Codex's internal SQLite
+database directly.
 
 Name resolution is enabled by default. Disable it for a strict UUID-only path
 with `--no-codex-session-name-resolution`, or persist that choice:
@@ -82,92 +200,120 @@ with `--no-codex-session-name-resolution`, or persist that choice:
 session_name_resolution = false
 ```
 
-The corresponding config key is
-`agents.codex.session_name_resolution`. With resolution disabled, a non-UUID
-Codex parent is rejected before repository mutation. Missing and duplicate
-names are also rejected; duplicate diagnostics list the candidate UUIDs.
-This option is intentionally Codex-specific. If another agent later needs the
-same facility, a future design may add a generic option while retaining this
-name as a compatible alias.
+The corresponding config key is `agents.codex.session_name_resolution`. With
+resolution disabled, a non-UUID Codex parent is rejected before repository
+mutation. Missing and duplicate names are also rejected; duplicate diagnostics
+list the candidate UUIDs. This option is intentionally Codex-specific. If
+another agent later needs the same facility, a future design may add a generic
+option while retaining this name as a compatible alias.
 
-`--worktree-dir` selects one exact destination. Alternatively,
-`--worktree-base-dir` and `--worktree-name` independently replace the parent
-and leaf of the configured/default destination and may be combined. An explicit
-base must already exist. The exact-path flag cannot be mixed with either partial
-override.
+## Configuration
 
-Other commands:
+Configuration is TOML, discovered per the XDG/project precedence documented in
+[REQUIREMENTS.md](https://github.com/smorinlabs/agent-fork/blob/main/REQUIREMENTS.md).
+`--config PATH` replaces discovery entirely. State — the fork registry backing
+`list` and `cleanup` — lives under `$XDG_STATE_HOME/agent-fork`.
 
-```bash
-agent-fork list [-o json]
-agent-fork cleanup <name|branch|worktree> --yes
-agent-fork doctor [-o json]
-agent-fork config view|get|set|validate
-agent-fork completion bash|zsh|fish
-agent-fork help [command]
+| `[fork]` key | Default | Environment variable | Notes |
+|---|---|---|---|
+| `with_state` | `true` | — | Carry staged, unstaged, and untracked files |
+| `with_ignored` | `false` | — | Also carry ignored files; implies `with_state` |
+| `branch_prefix` | `"fork/"` | — | Whitespace falls back to the default |
+| `worktree_location` | `"sibling"` | — | `sibling`, `central` (XDG data), `subdirectory`, or a path template |
+| `agent_mode` | `"auto"` | `AGENT_FORK_AGENT_MODE` | `auto`, `strict`, or `git-only` |
+| `verify` | `true` | — | Run the verification ladder |
+| `copy` | `false` | — | Copy the paste command to the clipboard |
+| `output` | `"table"` | `AGENT_FORK_OUTPUT` | `table`, `text`, or `json` |
+
+Per-agent tables append arguments to the emitted command, each element
+individually shell-quoted:
+
+```toml
+[agents.claude]
+extra_args = []
+
+[agents.codex]
+extra_args = []
+session_name_resolution = true
 ```
 
-`cleanup` is registry-scoped unless `--force` is used. It refuses dirty or
-unpushed worktrees without `--force`, always refuses to remove the invoking
-working directory, and requires separate consent via `--yes`. Agent-owned
-session files are never removed.
+`AGENT_FORK_CONFIG` selects a config file, equivalent to `--config`.
 
-## State and repository behavior
+An explicit flag beats config **and** suppresses dependent config settings — a
+config `with_ignored = true` combined with `--no-with-state` carries no state.
 
-Exact-copy mode is the default. `--no-with-state` creates a clean worktree at
-the parent commit. `--with-ignored` additionally copies ignored files and may
-therefore copy secret-bearing files such as `.env`; it is deliberately off by
-default. The parent worktree and session transcript remain untouched.
+### Repository hooks
 
 `.worktreeinclude` may list ignored files to copy after verification. An
 optional `.agent-fork/worktree-setup.sh` runs non-fatally in the new worktree
 with `REPO_ROOT` and `WORKTREE_PATH` set.
 
-State is stored under `$XDG_STATE_HOME/agent-fork`; configuration follows the
-XDG/project precedence documented in [REQUIREMENTS.md](REQUIREMENTS.md).
+## Safety and guarantees
+
+- **Your parent worktree and session transcript are never modified.** The fork
+  is additive.
+- **Verification is on by default.** A failed check rolls the fork back and
+  reports the exact manual recovery steps.
+- **Ignored files stay put unless you ask.** `--with-ignored` may copy
+  secret-bearing files such as `.env` between working trees, which is precisely
+  why it is off by default.
+- **`cleanup` is deliberately hard to misuse.** It is registry-scoped, refuses
+  dirty or unpushed worktrees, refuses to delete the directory you are standing
+  in, and requires `--yes`. Agent-owned session files are never removed.
+- **Interrupts are handled.** SIGINT and SIGTERM exit 130 and 143 after rollback
+  where applicable.
+- **No network, no telemetry.** `agent-fork` makes no runtime network calls and
+  collects no data. Git operations against already-configured local repository
+  metadata remain local; package managers own installation and updates.
 
 ## Compatibility policy
 
 The v1 JSON result schema is open and stable within major version 0/1 as
-documented in [REQUIREMENTS.md](REQUIREMENTS.md). Incompatible CLI or schema
-changes require a major version change; compatible additions may appear in a
-minor release. Deprecated interfaces will be documented before removal.
+documented in
+[REQUIREMENTS.md](https://github.com/smorinlabs/agent-fork/blob/main/REQUIREMENTS.md).
+Incompatible CLI or schema changes require a major version change; compatible
+additions may appear in a minor release. Deprecated interfaces will be
+documented before removal.
 
-## Error catalog
+## Exit codes and error catalog
 
-Machine-format failures use `{"error":{"code","message"}}` on stderr. Codes
-are stable compatibility identifiers; messages may gain detail without changing
-their meaning.
+Under any machine format, a failure prints a single error object on stderr:
 
-| Exit | Codes |
-|---|---|
-| 1 | `runtime_error`, `verify_failed`, `registry_busy` |
-| 2 | `config_error` |
-| 3 | `agent_not_detected`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `cleanup_target_unknown` |
-| 5 | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits` |
+```json
+{"error":{"code":"config_error","message":"cannot discover project config: /tmp/notrepo is not a worktree"}}
+```
+
+Codes are stable compatibility identifiers; messages may gain detail without
+changing their meaning.
+
+| Exit | Meaning | Codes |
+|---|---|---|
+| 0 | Success | — |
+| 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy` |
+| 2 | Usage error or required prompt disabled | `config_error` |
+| 3 | Agent, session, or target not found | `agent_not_detected`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `cleanup_target_unknown` |
+| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits` |
+| 130 / 143 | Interrupted by SIGINT / SIGTERM | — |
 
 Exit 4 remains reserved because this local tool has no authentication failure
-class. SIGINT and SIGTERM exit 130 and 143 after rollback where applicable.
+class.
 
 ## Development
 
 ```bash
-make check
+make check         # environment and dependency preflight
 flox activate
-just all
-just check-matrix
-just clean-install
+just all           # format, lint, typecheck, test
+just check-matrix  # test-matrix drift guard
+just clean-install # disposable wheel-install check
 ```
 
-The design and evidence corpus is in [DESIGN-DECISIONS.md](DESIGN-DECISIONS.md),
-[REQUIREMENTS.md](REQUIREMENTS.md), [EXPERIMENTS.md](EXPERIMENTS.md), and
-[CONFORMANCE.md](CONFORMANCE.md).
-
-## Telemetry and networking
-
-None. `agent-fork` makes no runtime network calls and collects no data. Git
-operations against already configured local repository metadata remain local;
-package managers own installation and updates.
+The design and evidence corpus lives in
+[DESIGN-DECISIONS.md](https://github.com/smorinlabs/agent-fork/blob/main/DESIGN-DECISIONS.md),
+[REQUIREMENTS.md](https://github.com/smorinlabs/agent-fork/blob/main/REQUIREMENTS.md),
+[EXPERIMENTS.md](https://github.com/smorinlabs/agent-fork/blob/main/EXPERIMENTS.md),
+and
+[CONFORMANCE.md](https://github.com/smorinlabs/agent-fork/blob/main/CONFORMANCE.md).
 
 ## License
 
