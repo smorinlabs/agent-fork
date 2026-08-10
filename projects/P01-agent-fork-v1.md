@@ -4,7 +4,7 @@
 - **Trunk:** [PROJECTS.md](../PROJECTS.md)
 - **Spec:** [REQUIREMENTS.md](../REQUIREMENTS.md) — REQ-01..42, pinned to CLI Design Standard v1.4.14
 - **Design:** [DESIGN-DECISIONS.md](../DESIGN-DECISIONS.md) — D1–D14 locked 2026-07-21
-- **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — owner-approved 2026-08-10; [worktree destination controls](../docs/superpowers/plans/2026-08-10-worktree-destination-controls.md) — complete 2026-08-10; [Codex renamed-session resolution](../docs/superpowers/plans/2026-08-10-codex-renamed-session-resolution.md) — proposed 2026-08-10
+- **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — owner-approved 2026-08-10; [worktree destination controls](../docs/superpowers/plans/2026-08-10-worktree-destination-controls.md) — complete 2026-08-10; [Codex renamed-session resolution](../docs/superpowers/plans/2026-08-10-codex-renamed-session-resolution.md) — final proposal 2026-08-10
 - **Tracking:** [CONFORMANCE.md](../CONFORMANCE.md) — applicability map + waivers
 - **Prior art:** [RESEARCH.md](../RESEARCH.md) — agent-deck port source map; [recipes leaf](../research/reference/agent-session-fork-cli-recipes-2026-07-21.md)
 
