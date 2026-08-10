@@ -36,6 +36,7 @@
 | 2026-07-21 | 1.4.14 | plan | Interface spec seeded into REQUIREMENTS.md §3; no code exists yet; fixtures (R9.14) deferred to implementation start |
 | 2026-08-10 | 1.4.14 | Phase D implementation | CLI, row matrix, adversarial fixtures, and disposable wheel install green; companion skill and release channels remain gated to Phases E and F |
 | 2026-08-10 | 1.4.14 | Phase E companion skill | Shared Claude/Codex skill, deterministic JSON orchestration, failure contracts, and real dual-host paste-command demos green; release channels remain gated to Phase F |
+| 2026-08-10 | 1.4.14 | built-binary audit (P01-T19) | Pass after fixing semantic help/exit-code catalog (CLI-AUD-01) and inert diagnostic flags (CLI-AUD-02); existing R2.1 `cleanup` waiver unchanged; no new waivers. Evidence: `docs/testing/CLI-STANDARDS-AUDIT.md` |
 
 ## Phase D requirement trace
 

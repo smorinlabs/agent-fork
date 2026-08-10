@@ -213,6 +213,70 @@ def test_fork_help_exposes_partial_destination_flags(repo_scenario):
     assert b"--worktree-name" in output
 
 
+@pytest.mark.matrix("T-CLI-15")
+def test_help_documents_commands_options_and_exit_codes(repo_scenario):
+    """P01-T19 — publishable help explains the surface and exit contract."""
+    from conftest import run_cli
+
+    world = repo_scenario()
+    top = run_cli(["--help"], world.env, world.parent_path)
+    assert top.returncode == 0 and top.stderr == b""
+    for text in (
+        b"Fork the active coding-agent session",
+        b"fork",
+        b"Create a verified branch and worktree",
+        b"cleanup",
+        b"Remove a registered fork",
+        b"Exit codes:",
+        b"2 usage error",
+        b"3 agent/session/target not found",
+        b"5 conflict or precondition refusal",
+        b"130/143 interrupted",
+    ):
+        assert text in top.stdout
+
+    fork = run_cli(["help", "fork"], world.env, world.parent_path)
+    for text in (
+        b"Fork identity; derived from the current branch",
+        b"Host agent (claude or codex); detected",
+        b"Preview every planned local mutation",
+        b"Replace only the derived worktree parent directory",
+    ):
+        assert text in fork.stdout
+
+    cleanup = run_cli(["help", "cleanup"], world.env, world.parent_path)
+    for text in (
+        b"Fork name, branch, or worktree path",
+        b"Confirm removal non-interactively",
+        b"Never remove the invoking working",
+    ):
+        assert text in cleanup.stdout
+
+    verbose = run_cli(["-vv", "config", "validate"], world.env, world.parent_path)
+    assert verbose.returncode == 0
+    assert b"agent-fork: command=config" in verbose.stderr
+    assert b"agent-fork: cwd=" in verbose.stderr
+    quiet = run_cli(["-vv", "-q", "config", "validate"], world.env, world.parent_path)
+    assert quiet.returncode == 0 and quiet.stderr == b""
+
+    debug = run_cli(
+        [
+            "--debug",
+            "fork",
+            "bad-agent",
+            "--agent",
+            "alien",
+            "--parent-session",
+            "id",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    assert debug.returncode == 3
+    assert b"Traceback (most recent call last)" in debug.stderr
+    assert b"unknown agent 'alien'" in debug.stderr
+
+
 @pytest.mark.matrix("T-CLI-14")
 def test_exact_destination_conflicts_with_either_partial_before_inspection(
     repo_scenario,

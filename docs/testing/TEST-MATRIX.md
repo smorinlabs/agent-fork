@@ -385,6 +385,7 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-12 | `--clean` is rejected as an unknown flag in v1 — usage error, exit 2 (D2; alias deferred to v1.1+) | baseline | C | live | REQUIREMENTS §3.3 (D2) |
 | T-CLI-13 | fork help exposes both partial destination flags | baseline | C | live | D15; REQ-44 |
 | T-CLI-14 | exact and partial destination overrides are parser-mutually-exclusive | baseline | C | live | D15; REQ-44 |
+| T-CLI-15 | publishable help describes commands and core arguments/options, destructive cleanup safety, and the stable exit-code contract | baseline | C | live | CLI Design Standard R7.9/R7.12; REQ-11; P01-T19 |
 
 ---
 
