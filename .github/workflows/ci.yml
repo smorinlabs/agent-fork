@@ -25,3 +25,18 @@ jobs:
         run: just strict-collect
       - name: Check format, lint, types, and tests
         run: just all
+
+  conformance:
+    name: Clean-install CLI conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: extractions/setup-just@v3
+
+      - name: Build, install, and exercise the packaged entry point
+        run: just clean-install
+      - name: Exercise blocking CLI contract fixtures
+        run: uv run pytest tests/cli -q

@@ -1,38 +1,89 @@
 # agent-fork
 
-Fork a running coding-agent session: one command creates a new git branch +
-worktree carrying your current file state (staged, unstaged, untracked —
-gitignored opt-in), verifies the copy against the parent, and prints the
-exact paste command to continue the conversation in a forked session of the
-same agent in a new terminal.
+`agent-fork` creates a Git branch and linked worktree carrying the current
+staged, unstaged, and untracked state, verifies the copy, and prints the exact
+command for continuing the current Claude Code or Codex conversation there.
 
-**Status: pre-release scaffold — no working CLI yet.** The design is locked
-(see the design corpus below); implementation is in progress. v1 agents:
-**Claude Code** and **Codex**.
+The CLI is implemented for v0.1.0 but remains pre-release until the Phase E
+release gate. It requires Python 3.11+, Git 2.19+, Claude Code 2.0.73+ or Codex
+0.95+ (Codex native `fork` itself requires 0.81+).
 
-## Design corpus
+## Usage
 
-| Doc | Role |
-|---|---|
-| [DESIGN-DECISIONS.md](DESIGN-DECISIONS.md) | All 14 decisions (D1–D14), final config schema, v1 surface |
-| [REQUIREMENTS.md](REQUIREMENTS.md) | REQ-01..42 — full CLI spec, pinned to CLI Design Standard v1.4.14 |
-| [RESEARCH.md](RESEARCH.md) | agent-deck port source map, materialization sequence, launch recipes |
-| [CONFORMANCE.md](CONFORMANCE.md) | Standard applicability map + waivers |
+Run inside the agent session whose conversation should be forked:
+
+```bash
+agent-fork fork review-auth
+agent-fork fork review-auth --with-ignored
+agent-fork fork --no-with-state --dry-run
+agent-fork fork review-auth -o json
+```
+
+The agent and parent session are normally detected from
+`CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`. They can be supplied explicitly:
+
+```bash
+agent-fork fork review-auth \
+  --agent claude --parent-session '<session-uuid>' \
+  --branch review/auth --worktree-dir '../auth-review'
+```
+
+Other commands:
+
+```bash
+agent-fork list [-o json]
+agent-fork cleanup <name|branch|worktree> --yes
+agent-fork doctor [-o json]
+agent-fork config view|get|set|validate
+agent-fork completion bash|zsh|fish
+agent-fork help [command]
+```
+
+`cleanup` is registry-scoped unless `--force` is used. It refuses dirty or
+unpushed worktrees without `--force`, always refuses to remove the invoking
+working directory, and requires separate consent via `--yes`. Agent-owned
+session files are never removed.
+
+## State and repository behavior
+
+Exact-copy mode is the default. `--no-with-state` creates a clean worktree at
+the parent commit. `--with-ignored` additionally copies ignored files and may
+therefore copy secret-bearing files such as `.env`; it is deliberately off by
+default. The parent worktree and session transcript remain untouched.
+
+`.worktreeinclude` may list ignored files to copy after verification. An
+optional `.agent-fork/worktree-setup.sh` runs non-fatally in the new worktree
+with `REPO_ROOT` and `WORKTREE_PATH` set.
+
+State is stored under `$XDG_STATE_HOME/agent-fork`; configuration follows the
+XDG/project precedence documented in [REQUIREMENTS.md](REQUIREMENTS.md).
+
+## Compatibility policy
+
+The v1 JSON result schema is open and stable within major version 0/1 as
+documented in [REQUIREMENTS.md](REQUIREMENTS.md). Incompatible CLI or schema
+changes require a major version change; compatible additions may appear in a
+minor release. Deprecated interfaces will be documented before removal.
 
 ## Development
 
-Requires `git`, `uv`, `just`, and `flox` (agent CLIs for integration tests
-come from the Flox `agents` pkg-group).
-
 ```bash
-make check       # verify environment dependencies
-flox activate    # reproducible toolchain (optional outside CI)
-just all         # format, lint, typecheck, test
+make check
+flox activate
+just all
+just check-matrix
+just clean-install
 ```
 
-## Telemetry
+The design and evidence corpus is in [DESIGN-DECISIONS.md](DESIGN-DECISIONS.md),
+[REQUIREMENTS.md](REQUIREMENTS.md), [EXPERIMENTS.md](EXPERIMENTS.md), and
+[CONFORMANCE.md](CONFORMANCE.md).
 
-None. `agent-fork` makes zero network calls at runtime and collects no data.
+## Telemetry and networking
+
+None. `agent-fork` makes no runtime network calls and collects no data. Git
+operations against already configured local repository metadata remain local;
+package managers own installation and updates.
 
 ## License
 

@@ -69,7 +69,7 @@ Phase D — build (gate: everything green + reviews clean; every T preceded by i
 - [x] [P01-T16] `cleanup` / `list` / `doctor` / `config` / `completion` — full command tree, standard flags, completion scripts, aggregate doctor, and stable exit mapping implemented
 - [x] [P01-TS13] Machine output + error catalog tests (REQ-16, REQ-17, R7.8/R7.12) — G-OUT 11/11 green across TTY, locale, error catalog, and minimum schema
 - [x] [P01-T17] Output layer (`-o json`, stream separation, error objects) — stable locale-independent renderer and notice-only clipboard fallback implemented
-- [ ] [P01-TS14] Conformance fixtures in CI (R9.14: help shape, streams, exit codes, `--json`, bare/unknown invocation)
+- [x] [P01-TS14] Conformance fixtures in CI (R9.14: help shape, streams, exit codes, `--json`, bare/unknown invocation) — blocking job plus closed-fd/SIGPIPE and disposable wheel-install checks implemented and green locally
 - [ ] [P01-T18] GitHub Actions CI green from the start — implementation-start matrix + strict-collection job landed in Phase D Task 1; T18 remains reserved for the full R9.14 conformance job
 
 Phase E — ship v0.1.0 (gate: released + installable)

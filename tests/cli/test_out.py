@@ -37,12 +37,20 @@ def _agent_env(world, agent="claude", *, isolated_path=False):
     return environment
 
 
-def _fork(repo_scenario, name, *, agent="claude", output="text", copy=False):
+def _fork(
+    repo_scenario,
+    name,
+    *,
+    agent="claude",
+    output="text",
+    copy=False,
+    extra=(),
+):
     from conftest import run_cli
 
     world = repo_scenario("plain@main")
     environment = _agent_env(world, agent)
-    args = ["fork", name, "-o", output]
+    args = ["fork", name, "-o", output, *extra]
     if copy:
         args.append("--copy")
     return world, environment, run_cli(args, environment, world.parent_path)
@@ -145,16 +153,27 @@ def test_dry_run_lists_planned_mutations_and_local_only(repo_scenario):
         "plain@main", states=(staged(add="new.txt"), untracked("loose.txt"))
     )
     environment = _agent_env(world)
+    explicit_worktree = world.parent_path.parent / "explicit destination"
     completed = run_cli(
-        ["fork", "planned", "--dry-run"], environment, world.parent_path
+        [
+            "fork",
+            "planned",
+            "--branch",
+            "review/custom",
+            "--worktree-dir",
+            str(explicit_worktree),
+            "--dry-run",
+        ],
+        environment,
+        world.parent_path,
     )
     assert completed.returncode == 0 and completed.stderr == b""
     output = completed.stdout.decode()
-    assert "branch: create fork/planned" in output
-    assert "worktree: create" in output
+    assert "branch: create review/custom" in output
+    assert f"worktree: create {explicit_worktree}" in output
     assert "staged=1" in output and "untracked=1" in output
     assert "paste command:" in output and "local-only; no mutation" in output
-    assert not (world.parent_path.parent / "repo-fork-planned").exists()
+    assert not explicit_worktree.exists()
 
 
 @pytest.mark.matrix("T-OUT-09")
@@ -216,3 +235,31 @@ def test_json_success_object_carries_req17_minimum_fields(repo_scenario):
     assert document["verification"] == {"enabled": True, "passed": True}
     assert document["command"].endswith("--fork-session -n schema")
     assert document["notices"] == []
+
+    explicit = world.parent_path.parent / "actual explicit worktree"
+    _, _, overridden = _fork(
+        repo_scenario,
+        "overridden",
+        output="json",
+        extra=("--branch", "review/explicit", "--worktree-dir", str(explicit)),
+    )
+    overridden_document = json.loads(overridden.stdout)
+    assert overridden_document["fork"]["branch"] == "review/explicit"
+    assert overridden_document["fork"]["worktree"] == str(explicit)
+    assert explicit.is_dir()
+
+    from conftest import run_cli
+
+    configured = repo_scenario("plain@main")
+    config_path = configured.parent_path / ".agent-fork/agent-fork_config.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        '[agents.claude]\nextra_args = ["--model", "claude future"]\n'
+    )
+    configured_result = run_cli(
+        ["fork", "configured", "--json"],
+        _agent_env(configured),
+        configured.parent_path,
+    )
+    assert configured_result.returncode == 0
+    assert "--model 'claude future'" in json.loads(configured_result.stdout)["command"]

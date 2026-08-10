@@ -83,8 +83,8 @@ def test_setup_hook_runs_with_worktree_cwd_and_env(repo_scenario):
         world,
         hook=(
             "#!/bin/sh\n"
-            'printf \'%s\\n%s\\n%s\\n\' "$PWD" "$AGENT_FORK_REPO_ROOT" '
-            '"$AGENT_FORK_WORKTREE" > hook-env.txt\n'
+            'printf \'%s\\n%s\\n%s\\n\' "$PWD" "$REPO_ROOT" '
+            '"$WORKTREE_PATH" > hook-env.txt\n'
         ),
     )
     result = fork(_request(world, name="hook-env"), env=world.env)

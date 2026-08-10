@@ -10,6 +10,7 @@ import subprocess
 import sys
 from importlib.metadata import version
 from pathlib import Path
+from typing import cast
 
 from agent_fork.config import (
     XDG_RELATIVE_PATH,
@@ -45,6 +46,8 @@ def _parser() -> argparse.ArgumentParser:
     fork.add_argument("name", nargs="?")
     fork.add_argument("--agent")
     fork.add_argument("--parent-session")
+    fork.add_argument("--branch")
+    fork.add_argument("--worktree-dir", type=Path)
     fork.add_argument(
         "--with-state", action=argparse.BooleanOptionalAction, default=None
     )
@@ -55,10 +58,12 @@ def _parser() -> argparse.ArgumentParser:
     fork.add_argument("--force", action="store_true")
     fork.add_argument("--dry-run", action="store_true")
     fork.add_argument("--copy", action=argparse.BooleanOptionalAction, default=None)
-    fork.add_argument("-o", "--output", choices=("text", "json"), default=None)
+    fork.add_argument("-o", "--output", choices=("table", "text", "json"), default=None)
     fork.add_argument("--json", action="store_true")
     listing = commands.add_parser("list", allow_abbrev=False)
-    listing.add_argument("-o", "--output", choices=("text", "json"), default="text")
+    listing.add_argument(
+        "-o", "--output", choices=("table", "text", "json"), default="table"
+    )
     listing.add_argument("--json", action="store_true")
     cleanup = commands.add_parser("cleanup", allow_abbrev=False)
     cleanup.add_argument("target")
@@ -67,14 +72,19 @@ def _parser() -> argparse.ArgumentParser:
     cleanup.add_argument("--yes", action="store_true")
     cleanup.add_argument("--no-input", action="store_true")
     cleanup.add_argument("--dry-run", action="store_true")
-    cleanup.add_argument("-o", "--output", choices=("text", "json"), default="text")
+    cleanup.add_argument(
+        "-o", "--output", choices=("table", "text", "json"), default="table"
+    )
     cleanup.add_argument("--json", action="store_true")
     doctor = commands.add_parser("doctor", allow_abbrev=False)
-    doctor.add_argument("-o", "--output", choices=("text", "json"), default="text")
+    doctor.add_argument(
+        "-o", "--output", choices=("table", "text", "json"), default="table"
+    )
     doctor.add_argument("--json", action="store_true")
     completion = commands.add_parser("completion", allow_abbrev=False)
     completion.add_argument("shell", choices=("bash", "zsh", "fish"))
-    commands.add_parser("help", allow_abbrev=False)
+    help_command = commands.add_parser("help", allow_abbrev=False)
+    help_command.add_argument("topic", nargs="?")
     config = commands.add_parser("config", allow_abbrev=False)
     actions = config.add_subparsers(dest="config_action", required=True)
     setter = actions.add_parser("set", allow_abbrev=False)
@@ -82,7 +92,9 @@ def _parser() -> argparse.ArgumentParser:
     setter.add_argument("value")
     actions.add_parser("validate", allow_abbrev=False)
     viewer = actions.add_parser("view", allow_abbrev=False)
-    viewer.add_argument("-o", "--output", choices=("text", "json"), default="text")
+    viewer.add_argument(
+        "-o", "--output", choices=("table", "text", "json"), default="table"
+    )
     viewer.add_argument("--json", action="store_true")
     getter = actions.add_parser("get", allow_abbrev=False)
     getter.add_argument("key")
@@ -187,7 +199,23 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     else:
         name = sanitize_name(args.name)
     identity = naming_plan(name, branch_prefix=config.branch_prefix)
-    destination = _path_for_name(info, config, name, identity.branch, environment)
+    branch = args.branch or identity.branch
+    if args.branch:
+        valid = run_git(
+            parent_path,
+            ["check-ref-format", "--branch", branch],
+            env=environment,
+            check=False,
+        )
+        if valid.returncode != 0:
+            from agent_fork.errors import PreconditionError
+
+            raise PreconditionError("invalid_branch", f"invalid branch name: {branch}")
+    destination = (
+        args.worktree_dir.expanduser().resolve()
+        if args.worktree_dir is not None
+        else _path_for_name(info, config, name, branch, environment)
+    )
     extra_args = (
         config.claude_extra_args
         if context.agent == "claude"
@@ -204,14 +232,14 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             ["git", "--version"], env=environment, capture_output=True, text=True
         ).stdout
         preflight_git(git_version, force=args.force, verify=config.verify)
-        validate_fork_guards(parent_path, identity.branch, destination, env=environment)
+        validate_fork_guards(parent_path, branch, destination, env=environment)
 
         def count(arguments):
             data = run_git(parent_path, arguments, env=environment).stdout
             return len([value for value in data.split(b"\0") if value])
 
         dry = DryRunOutput(
-            identity.branch,
+            branch,
             destination,
             count(["diff", "--cached", "--name-only", "-z"]),
             count(["diff", "--name-only", "-z"]),
@@ -229,7 +257,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             parent=parent_path,
             destination=destination,
             name=name,
-            branch=identity.branch,
+            branch=branch,
             agent=context,
             with_state=config.with_state,
             with_ignored=config.with_ignored,
@@ -247,7 +275,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         agent=context.agent,
         parent_session_id=context.parent_session_id,
         name=name,
-        branch=identity.branch,
+        branch=branch,
         worktree=result.creation.path,
         anchor_commit=result.creation.anchor,
         with_state=config.with_state,
@@ -269,7 +297,20 @@ def main(argv: list[str] | None = None) -> int:
     environment = dict(os.environ)
     try:
         if args.command == "help":
-            _parser().print_help()
+            parser = _parser()
+            if args.topic is None:
+                parser.print_help()
+                return 0
+            subparsers = next(
+                action
+                for action in parser._actions
+                if isinstance(action, argparse._SubParsersAction)
+            )
+            selected = subparsers.choices.get(args.topic)
+            if selected is None:
+                parser.error(f"unknown help topic: {args.topic}")
+            selected = cast(argparse.ArgumentParser, selected)
+            selected.print_help()
             return 0
         if args.command == "completion":
             scripts = {

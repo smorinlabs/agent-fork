@@ -104,7 +104,7 @@ cross-validation tests may increase the total.
 | D2 — G-FIX | complete | all 24 rows green; 59 passed, 158 skipped overall; matrix, strict collection, lint, types, and oracle review green | Phase D branch | fixed absolute-path floor false-green and unmerged-stage index collapse during review |
 | D3 — mutation core | complete | foundations, G-GRD 14/14, G-ANC 8/8, G-MAT 20/20, G-VER 11/11, and G-RBK 6/6 green; 150 passed, 67 skipped overall | Phase D branch | exact state, verification, producer failure, rollback, and real SIGINT/SIGTERM stall paths proven across supported topologies |
 | D4 — integration | complete | all integration/command groups through G-CLI 12/12 green; real E1–E3 rerun passes; 216 passed, 1 retired skip overall | Phase D branch | full v1 command tree, fork/cleanup lifecycle, doctor, completions, human/JSON output, and stable exits green |
-| D5 — conformance | pending | — | — | — |
+| D5 — conformance | complete | all 37 CLI/conformance tests plus disposable sdist/wheel install and packaged entry-point smoke green; blocking CI job configured | Phase D branch | requirements trace found and fixed branch/path overrides, help topic, subparser abbreviation, hook env namespace, and clipboard-order gaps |
 | D6 — final Phase D gate | pending | — | final Phase D PR | owner review required |
 
 ## Terminal action

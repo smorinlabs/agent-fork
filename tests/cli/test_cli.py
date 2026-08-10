@@ -59,6 +59,15 @@ def test_standard_global_flags_present(repo_scenario):
         b"--debug",
     ):
         assert spelling in help_text
+    fork_help = run_cli(["help", "fork"], world.env, world.parent_path)
+    assert fork_help.returncode == 0
+    for spelling in (
+        b"--branch",
+        b"--worktree-dir",
+        b"--no-with-state",
+        b"--no-verify",
+    ):
+        assert spelling in fork_help.stdout
 
 
 @pytest.mark.matrix("T-CLI-03")

@@ -92,8 +92,8 @@ def run_setup_hook(
     environment = dict(env or os.environ)
     environment.update(
         {
-            "AGENT_FORK_REPO_ROOT": str(repo_root.resolve()),
-            "AGENT_FORK_WORKTREE": str(child.resolve()),
+            "REPO_ROOT": str(repo_root.resolve()),
+            "WORKTREE_PATH": str(child.resolve()),
         }
     )
     try:

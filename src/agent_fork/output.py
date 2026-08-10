@@ -107,17 +107,7 @@ def render_error(error: BaseException, *, machine: bool = False) -> str:
 
 
 def copy_to_clipboard(command: str) -> tuple[str, ...]:
-    """Try platform helpers, then OSC52 on a TTY; failure remains notice-only."""
-    candidates = (("pbcopy",), ("xclip", "-selection", "clipboard"))
-    for candidate in candidates:
-        executable = shutil.which(candidate[0])
-        if executable is None:
-            continue
-        completed = subprocess.run(
-            [executable, *candidate[1:]], input=command.encode(), capture_output=True
-        )
-        if completed.returncode == 0:
-            return ()
+    """Try OSC52, then platform helpers; failure remains notice-only."""
     try:
         import sys
 
@@ -128,4 +118,18 @@ def copy_to_clipboard(command: str) -> tuple[str, ...]:
             return ()
     except OSError:
         pass
+    candidates = (
+        ("pbcopy",),
+        ("xclip", "-selection", "clipboard"),
+        ("wl-copy",),
+    )
+    for candidate in candidates:
+        executable = shutil.which(candidate[0])
+        if executable is None:
+            continue
+        completed = subprocess.run(
+            [executable, *candidate[1:]], input=command.encode(), capture_output=True
+        )
+        if completed.returncode == 0:
+            return ()
     return ("clipboard copy failed; paste command remains available on stdout",)
