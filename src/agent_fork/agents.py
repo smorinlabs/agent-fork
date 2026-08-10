@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+import shlex
 import shutil
 import subprocess
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +34,24 @@ class PreflightResult:
     version: tuple[int, int, int]
     notices: tuple[str, ...]
     verify: bool = True
+
+
+@dataclass(frozen=True)
+class LaunchCommand:
+    command: str
+    child_session_id: str | None
+    extra_args: tuple[str, ...]
+
+    def dry_run_text(self) -> str:
+        rendered = ", ".join(repr(value) for value in self.extra_args) or "none"
+        return (
+            f"paste command: {self.command}\n"
+            f"extra_args: {rendered}\n"
+            "validation: local-only"
+        )
+
+    def json_fields(self) -> dict[str, object]:
+        return {"command": self.command, "extra_args": list(self.extra_args)}
 
 
 CLAUDE_FORK_MIN = (2, 0, 73)
@@ -156,6 +176,32 @@ def preflight_git(
     if not verify:
         raise ValueError("Git-floor force override must not disable verification")
     return (f"warning: --force overrides Git floor only: {message}",)
+
+
+def build_launch_command(
+    context: AgentContext,
+    *,
+    worktree: Path,
+    name: str,
+    extra_args: tuple[str, ...] = (),
+    child_session_id: str | None = None,
+) -> LaunchCommand:
+    """Build the locked REQ-28 template without splitting configured arguments."""
+    quote = shlex.quote
+    suffix = "".join(f" {quote(value)}" for value in extra_args)
+    if context.agent == "claude":
+        child = child_session_id or str(uuid.uuid4())
+        command = (
+            f"cd {quote(str(worktree))} && claude --session-id {quote(child)} "
+            f"--resume {quote(context.parent_session_id)} --fork-session "
+            f"-n {quote(name)}{suffix}"
+        )
+        return LaunchCommand(command, child, extra_args)
+    command = (
+        f"codex fork {quote(context.parent_session_id)} "
+        f"-C {quote(str(worktree))}{suffix}"
+    )
+    return LaunchCommand(command, None, extra_args)
 
 
 def detect_agent(

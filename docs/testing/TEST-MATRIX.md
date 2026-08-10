@@ -305,7 +305,7 @@ Varying axes: none of the shared four vary (baseline pinned).
 ---
 
 ## G-EMT — Emitted commands
-Status: pending
+Status: done
 
 Purpose: emitted commands — templates, uniform quoting, the `extra_args` boundary (spaces, quotes, `$`, `;`), fixed-prefix + quoted-suffix assertions.
 

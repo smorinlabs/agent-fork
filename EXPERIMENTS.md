@@ -3,6 +3,10 @@
 All experiments ran inside the isolated `agent-fork` guest against authenticated real
 CLIs. Executable coverage is in `tests/live/test_exp.py` (T-EXP-01..03).
 
+**Phase D template revalidation (2026-08-10):** after implementing the REQ-28
+builders and shell-quoting boundary, E1–E3 were rerun together against the real CLIs:
+`3 passed in 24.23s`. The locked templates and conclusions below remain unchanged.
+
 ## Environment
 
 - Claude Code 2.1.220

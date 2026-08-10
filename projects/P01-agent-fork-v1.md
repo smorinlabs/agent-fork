@@ -61,8 +61,8 @@ Phase D — build (gate: everything green + reviews clean; every T preceded by i
 - [x] [P01-T12] Verify ladder + rollback — typed verification failure, precise cleanup, exact manual recovery, and SIGINT/SIGTERM exit mapping implemented
 - [x] [P01-TS09] Registry locking/concurrency tests (REQ-41) — G-REG 7/7 green with atomicity, real different-name fork races, timeout, and lock-death proofs
 - [x] [P01-T13] Fork registry in XDG state (REQ-12) — stable schema, deterministic ordering, atomic locked writes, ownership lookup, and list rendering implemented
-- [ ] [P01-TS10] Agent detection/preflight/template tests incl. extra_args quoting boundary (REQ-26..30, D11)
-- [ ] [P01-T14] Per-agent detection, preflight, launch templates
+- [x] [P01-TS10] Agent detection/preflight/template tests incl. extra_args quoting boundary (REQ-26..30, D11) — G-DET, G-PRE, and G-EMT green; hostile shell execution and real E1–E3 rerun pass
+- [x] [P01-T14] Per-agent detection, preflight, launch templates — locked Claude/Codex REQ-28 builders and individually quoted extra_args implemented
 - [ ] [P01-TS11] `fork` command end-to-end tests
 - [ ] [P01-T15] `fork` command
 - [ ] [P01-TS12] `cleanup` / `list` / `doctor` / `config` / `completion` tests (REQ-31..34, R9.10)
