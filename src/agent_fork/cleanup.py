@@ -38,10 +38,14 @@ class CleanupPlan:
     owned: bool
 
     def render(self, *, keep_branch: bool = False) -> str:
-        branch = "preserve" if keep_branch else f"delete {self.branch}"
+        branch = (
+            "preserve"
+            if keep_branch
+            else f"delete {_escape_terminal_text(self.branch)}"
+        )
         return (
-            f"remove worktree {self.worktree}; branch: {branch}; "
-            f"registry: {self.entry.name}"
+            f"remove worktree {_escape_terminal_text(str(self.worktree))}; "
+            f"branch: {branch}; registry: {_escape_terminal_text(self.entry.name)}"
         )
 
 
@@ -102,7 +106,8 @@ class CleanupDetails:
                 "\n".join(
                     _unpushed_lines(
                         self,
-                        f"⚠ branch {branch} has {self.unpushed_count} {commit} "
+                        f"⚠ branch {_escape_terminal_text(branch)} has "
+                        f"{self.unpushed_count} {commit} "
                         "not reachable from any remote:",
                     )
                 )
@@ -180,7 +185,7 @@ def resolve_cleanup_target(
                 name=path.name, branch=branch, worktree=path, agent="unknown"
             )
             return CleanupPlan(entry, path, branch, _git_root(path, env=env), False)
-    raise CleanupTargetError(f"cleanup target not found: {target}")
+    raise CleanupTargetError(f"cleanup target not found: {target!r}")
 
 
 def _dirty_paths(
@@ -309,13 +314,17 @@ def _refusal_message(
 ) -> tuple[str, str]:
     if code == "cleanup_dirty_worktree":
         message = f"refusing to remove {plan.worktree}"
+        human_message = (
+            f"refusing to remove {_escape_terminal_text(str(plan.worktree))}"
+        )
         next_step = (
             "  Override with --allow-dirty (destroys them), or commit/stash first."
         )
     else:
         message = f"refusing to remove {plan.branch}"
+        human_message = f"refusing to remove {_escape_terminal_text(plan.branch)}"
         next_step = "  Override with --allow-unpushed (destroys them), or push first."
-    blocks = [message]
+    blocks = [human_message]
     if details.dirty_count:
         change = "change" if details.dirty_count == 1 else "changes"
         blocks.append(
