@@ -13,6 +13,16 @@ from agent_fork.registry import find_owned, remove_entry
 
 DETAIL_LIMIT = 10
 
+_CONTROL_ESCAPES = {
+    "\a": r"\a",
+    "\b": r"\b",
+    "\t": r"\t",
+    "\n": r"\n",
+    "\v": r"\v",
+    "\f": r"\f",
+    "\r": r"\r",
+}
+
 
 class CleanupTargetError(AgentForkError):
     code = "cleanup_target_unknown"
@@ -28,10 +38,14 @@ class CleanupPlan:
     owned: bool
 
     def render(self, *, keep_branch: bool = False) -> str:
-        branch = "preserve" if keep_branch else f"delete {self.branch}"
+        branch = (
+            "preserve"
+            if keep_branch
+            else f"delete {_escape_terminal_text(self.branch)}"
+        )
         return (
-            f"remove worktree {self.worktree}; branch: {branch}; "
-            f"registry: {self.entry.name}"
+            f"remove worktree {_escape_terminal_text(str(self.worktree))}; "
+            f"branch: {branch}; registry: {_escape_terminal_text(self.entry.name)}"
         )
 
 
@@ -92,7 +106,8 @@ class CleanupDetails:
                 "\n".join(
                     _unpushed_lines(
                         self,
-                        f"⚠ branch {branch} has {self.unpushed_count} {commit} "
+                        f"⚠ branch {_escape_terminal_text(branch)} has "
+                        f"{self.unpushed_count} {commit} "
                         "not reachable from any remote:",
                     )
                 )
@@ -170,7 +185,7 @@ def resolve_cleanup_target(
                 name=path.name, branch=branch, worktree=path, agent="unknown"
             )
             return CleanupPlan(entry, path, branch, _git_root(path, env=env), False)
-    raise CleanupTargetError(f"cleanup target not found: {target}")
+    raise CleanupTargetError(f"cleanup target not found: {target!r}")
 
 
 def _dirty_paths(
@@ -250,6 +265,25 @@ def _inspect(plan: CleanupPlan, *, env: Mapping[str, str]) -> CleanupDetails:
     )
 
 
+def _escape_terminal_text(value: str) -> str:
+    escaped: list[str] = []
+    for character in value:
+        codepoint = ord(character)
+        if character == "\\":
+            escaped.append(r"\\")
+        elif character in _CONTROL_ESCAPES:
+            escaped.append(_CONTROL_ESCAPES[character])
+        elif codepoint < 0x20 or 0x7F <= codepoint <= 0x9F:
+            escaped.append(f"\\x{codepoint:02x}")
+        elif 0xDC80 <= codepoint <= 0xDCFF:
+            escaped.append(f"\\x{codepoint - 0xDC00:02x}")
+        elif 0xD800 <= codepoint <= 0xDFFF:
+            escaped.append(f"\\u{codepoint:04x}")
+        else:
+            escaped.append(character)
+    return "".join(escaped)
+
+
 def _dirty_lines(details: CleanupDetails, heading: str) -> list[str]:
     lines = [heading]
     has_modifications = any(entry.status != "??" for entry in details.dirty)
@@ -258,7 +292,7 @@ def _dirty_lines(details: CleanupDetails, heading: str) -> list[str]:
         if entry.status == "??" and has_modifications and not untracked_started:
             lines.append("")
             untracked_started = True
-        lines.append(f"    {entry.status} {entry.path}")
+        lines.append(f"    {entry.status} {_escape_terminal_text(entry.path)}")
     if details.dirty_count > len(details.dirty):
         lines.append(f"    … and {details.dirty_count - len(details.dirty)} more")
     return lines
@@ -266,7 +300,10 @@ def _dirty_lines(details: CleanupDetails, heading: str) -> list[str]:
 
 def _unpushed_lines(details: CleanupDetails, heading: str) -> list[str]:
     lines = [heading]
-    lines.extend(f"    {entry.sha}  {entry.subject}" for entry in details.unpushed)
+    lines.extend(
+        f"    {entry.sha}  {_escape_terminal_text(entry.subject)}"
+        for entry in details.unpushed
+    )
     if details.unpushed_count > len(details.unpushed):
         lines.append(f"    … and {details.unpushed_count - len(details.unpushed)} more")
     return lines
@@ -277,13 +314,17 @@ def _refusal_message(
 ) -> tuple[str, str]:
     if code == "cleanup_dirty_worktree":
         message = f"refusing to remove {plan.worktree}"
+        human_message = (
+            f"refusing to remove {_escape_terminal_text(str(plan.worktree))}"
+        )
         next_step = (
             "  Override with --allow-dirty (destroys them), or commit/stash first."
         )
     else:
         message = f"refusing to remove {plan.branch}"
+        human_message = f"refusing to remove {_escape_terminal_text(plan.branch)}"
         next_step = "  Override with --allow-unpushed (destroys them), or push first."
-    blocks = [message]
+    blocks = [human_message]
     if details.dirty_count:
         change = "change" if details.dirty_count == 1 else "changes"
         blocks.append(

@@ -201,8 +201,10 @@ a JSON dry-run result places the same object at the top level on stdout:
 
 Each array contains at most 10 entries. Its `*_count` field reports the complete
 count, and its `*_truncated` field is `true` when additional entries were
-omitted. Dry runs that find overridden risk still exit `0`; a dirty or unpushed
-guard refusal exits `5`.
+omitted. Human diagnostics render backslashes, terminal control characters, and
+undecodable path bytes as visible C-style escapes such as `\\x1b`; structured
+JSON retains the underlying string values. Dry runs that find overridden risk
+still exit `0`; a dirty or unpushed guard refusal exits `5`.
 
 ## `fork` options
 

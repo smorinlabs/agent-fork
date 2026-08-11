@@ -299,9 +299,9 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 ## G-CLN — Cleanup
 Status: done
 
-Purpose: cleanup — targets, bounded dirty/unpushed reporting, granular and
-`--force` overrides, human/JSON previews, `--yes`/`--no-input` consent, the pty
-prompt, and never-delete-session-files.
+Purpose: cleanup — targets, bounded and terminal-safe dirty/unpushed reporting,
+granular and `--force` overrides, human/JSON previews, `--yes`/`--no-input`
+consent, the pty prompt, and never-delete-session-files.
 
 Varying axes: none of the shared four vary (baseline pinned); risk kind/count,
 CLI flag combinations, output format, and pty consent-prompt rows vary within
@@ -331,6 +331,7 @@ the group.
 | T-CLN-20 | `--allow-dirty` and `--allow-unpushed` override only their named guard | baseline | C | live | issue #16 section 3; REQ-32; DESIGN-DECISIONS D12 |
 | T-CLN-21 | JSON refusal and `--force --dry-run` result carry matching dirty and unpushed `details` objects | baseline | C | live | issue #16 section 4; REQ-17; REQ-18 |
 | T-CLN-22 | `--allow-dirty` and `--allow-unpushed` never override the invoking-cwd refusal | baseline | C | live | issue #16 section 3; REQ-32; DESIGN-DECISIONS D12 |
+| T-CLN-23 | Human cleanup diagnostics escape terminal control bytes in Git-controlled paths and commit subjects while JSON preserves the values | baseline | C | live | PR #17 late security review; issue #16 sections 1 and 4; REQ-17 |
 
 ---
 

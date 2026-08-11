@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -41,6 +42,7 @@ def _commit_unpushed(world, result, subject="wip: unpushed cleanup work"):
         ["git", "-C", str(result.creation.path), "commit", "-m", subject],
         env=world.env,
         check=True,
+        capture_output=True,
     )
     return (
         subprocess.run(
@@ -311,3 +313,69 @@ def test_granular_overrides_do_not_override_cwd_guard(repo_scenario):
         assert completed.returncode == 5
         assert b"cleanup_target_is_cwd" in completed.stderr
         assert result.creation.path.exists()
+
+
+@pytest.mark.matrix("T-CLN-23")
+def test_human_cleanup_details_escape_terminal_controls(repo_scenario):
+    from agent_fork.cleanup import (
+        CleanupDetails,
+        CleanupPlan,
+        DirtyPath,
+        UnpushedCommit,
+        _refusal_message,
+    )
+    from agent_fork.models import RegistryEntry
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "terminal-safe-details")
+    dirty_name = "literal\\path-\x1b[31m.txt"
+    subject = "wip: \x1b[32mgreen\x1b[0m"
+    (result.creation.path / dirty_name).write_text("untracked\n")
+    _commit_unpushed(world, result, subject)
+
+    human = run_cli(
+        ["cleanup", "terminal-safe-details", "--dry-run"],
+        world.env,
+        world.parent_path,
+    )
+    machine = run_cli(
+        ["cleanup", "terminal-safe-details", "--dry-run", "--json"],
+        world.env,
+        world.parent_path,
+    )
+
+    assert human.returncode == 5
+    assert b"\x1b" not in human.stderr
+    assert b"literal\\\\path-\\x1b[31m.txt" in human.stderr
+    assert b"wip: \\x1b[32mgreen\\x1b[0m" in human.stderr
+
+    details = json.loads(machine.stderr)["error"]["details"]
+    assert details["dirty"] == [{"path": dirty_name, "status": "??"}]
+    assert details["unpushed"][0]["subject"] == subject
+
+    unsafe = "value-\x1b[31m"
+    unsafe_worktree = Path(f"/tmp/{unsafe}")
+    entry = RegistryEntry.create(
+        name=unsafe,
+        branch=unsafe,
+        worktree=unsafe_worktree,
+        agent=None,
+    )
+    plan = CleanupPlan(entry, unsafe_worktree, unsafe, Path("/tmp/repo"), True)
+    rendered_details = CleanupDetails(
+        dirty=(DirtyPath("??", unsafe),),
+        dirty_count=1,
+        unpushed=(UnpushedCommit("abc1234", unsafe),),
+        unpushed_count=1,
+    )
+
+    assert "\x1b" not in plan.render()
+    assert "\\x1b" in plan.render()
+    assert "\x1b" not in rendered_details.render_preview(unsafe)
+    assert "\\x1b" in rendered_details.render_preview(unsafe)
+    raw_message, human_message = _refusal_message(
+        plan, rendered_details, code="cleanup_dirty_worktree"
+    )
+    assert "\x1b" in raw_message
+    assert "\x1b" not in human_message
+    assert "\\x1b" in human_message
