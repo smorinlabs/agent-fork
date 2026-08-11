@@ -39,7 +39,7 @@ def test_standard_global_flags_present(repo_scenario):
     for flag in ("-V", "--version"):
         completed = run_cli([flag], world.env, world.parent_path)
         assert completed.returncode == 0
-        assert completed.stdout == b"agent-fork 0.1.0\n"
+        assert completed.stdout == b"agent-fork 1.0.0\n"
     combined = run_cli(["-vv", "-q", "--debug"], world.env, world.parent_path)
     assert combined.returncode == 0 and b"usage: agent-fork" in combined.stdout
     path = world.parent_path.parent / "explicit.toml"

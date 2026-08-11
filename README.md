@@ -47,11 +47,38 @@ Or run it without installing:
 uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
 ```
 
-> PyPI and Homebrew releases land with v0.1.0.
+> PyPI and Homebrew releases land with v1.0.0.
 
 **Requirements:** Python 3.11+ and Git 2.19+. Forking an agent session
 additionally needs Claude Code 2.0.73+ or Codex 0.95+ (Codex's native `fork`
 itself requires 0.81+). Run `agent-fork doctor` to check all of this at once.
+
+### Local development installation
+
+Run these commands from the repository root before registry publication. The
+editable `uv` tool install keeps the command connected to this checkout. The
+two `skillsmith dev` commands create user-level development symlinks for Claude
+Code and Codex, so both agents discover the same canonical skill.
+
+```bash
+uv tool install --editable --force .
+skillsmith dev agent-fork --tool claude-code \
+  --source "$PWD/.agents/skills/agent-fork"
+skillsmith dev agent-fork --tool codex \
+  --source "$PWD/.agents/skills/agent-fork"
+```
+
+Verify the installed version and both placements:
+
+```bash
+agent-fork --version
+skillsmith list agent-fork --long
+```
+
+The version command must print `agent-fork 1.0.0`. The placement list must show
+`~/.claude/skills/agent-fork` for Claude Code and
+`~/.agents/skills/agent-fork` for Codex, both resolving to this repository's
+`.agents/skills/agent-fork` directory.
 
 ## Quickstart
 
@@ -149,10 +176,16 @@ agent-fork fork terminal-copy --no-agent    # explicitly Git-only
 agent-fork fork session-copy --require-agent
 agent-fork fork review-auth --with-ignored
 agent-fork fork --no-with-state --dry-run
+agent-fork fork --no-with-state --dry-run -o json
 agent-fork fork review-auth -o json
 agent-fork fork experiment --branch review/manual \
   --worktree-base-dir /work/forks --worktree-name 'Manual Worktree'
 ```
+
+Dry-run JSON is a preview schema rather than a completed-fork result. It sets
+`dry_run: true` and reports the planned branch and worktree creates, staged,
+unstaged, untracked, and ignored file counts, the paste command, notices,
+local validation status, and `mutation_performed: false`.
 
 The default `auto` mode detects the agent and parent session from
 `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`. They can be supplied explicitly:
@@ -300,20 +333,53 @@ class.
 
 ## Development
 
+The default gate is hermetic: it excludes authenticated real-agent tests and
+the two process-group signal tests that require an unrestricted runner.
+
 ```bash
 make check         # environment and dependency preflight
 flox activate
-just all           # format, lint, typecheck, test
-just check-matrix  # test-matrix drift guard
-just clean-install # disposable wheel-install check
+just all
+just check-matrix
+just clean-install
+just test-git-matrix
 ```
 
-The design and evidence corpus lives in
-[DESIGN-DECISIONS.md](https://github.com/smorinlabs/agent-fork/blob/main/DESIGN-DECISIONS.md),
-[REQUIREMENTS.md](https://github.com/smorinlabs/agent-fork/blob/main/REQUIREMENTS.md),
-[EXPERIMENTS.md](https://github.com/smorinlabs/agent-fork/blob/main/EXPERIMENTS.md),
-and
-[CONFORMANCE.md](https://github.com/smorinlabs/agent-fork/blob/main/CONFORMANCE.md).
+`just test-git-matrix` runs the intent-to-add compatibility gate with macOS
+Apple Git and the GNU Git pinned by Flox. Linux runs use the system Git and the
+same Flox Git.
+
+Flox owns the reproducible Python, Git, and test toolchain. Claude Code and
+Codex remain host-managed prerequisites because their release cadence and
+platform availability differ from the four-system Flox environment, including
+Intel macOS. Install and update those CLIs with their native package managers.
+
+Run the external-capability gates explicitly:
+
+```bash
+just test-live       # real Claude and Codex calls; may consume account quota
+just test-signals    # unrestricted process-group signaling; Linux CI owns this
+```
+
+`just test-live` first prints the selected path, resolved path, and version for
+both host CLIs. It stops before pytest unless both are installed and
+authenticated, `~/.claude` and `~/.codex` are writable, and the Anthropic and
+ChatGPT endpoints are reachable. A failed real-agent command includes its
+captured stdout and stderr. Override only the network probe hosts with
+`AGENT_FORK_LIVE_NETWORK_HOSTS=host1,host2` when an approved provider or proxy
+uses different endpoints.
+
+The design and evidence corpus is in [DESIGN-DECISIONS.md](DESIGN-DECISIONS.md),
+[REQUIREMENTS.md](REQUIREMENTS.md), [EXPERIMENTS.md](EXPERIMENTS.md), and
+[CONFORMANCE.md](CONFORMANCE.md).
+
+## Telemetry and networking
+
+None. `agent-fork` makes no runtime network calls and collects no data. Git
+operations against already configured local repository metadata remain local;
+package managers own installation and updates. The explicit `just test-live`
+development gate is separate from the product runtime and calls the installed
+Claude and Codex CLIs after its network/authentication preflight.
 
 ## License
 

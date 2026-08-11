@@ -8,12 +8,16 @@
 - **Tracking:** [CONFORMANCE.md](../CONFORMANCE.md) — applicability map + waivers
 - **Prior art:** [RESEARCH.md](../RESEARCH.md) — agent-deck port source map; [recipes leaf](../research/reference/agent-session-fork-cli-recipes-2026-07-21.md)
 
-## [~] Project P01: agent-fork v1 (v0.1.0)
-**Goal**: Ship `agent-fork` v0.1.0 — a Python CLI + companion skill that forks a
+## [~] Project P01: agent-fork v1 (v1.0.0)
+**Goal**: Ship `agent-fork` v1.0.0 — a Python CLI + companion skill that forks a
 running coding-agent session (Claude Code, Codex) into a new branch + verified
 git worktree carrying the current file state, and emits the exact paste command
 to continue in a forked session. Built strictly to the locked design corpus
 (precedence: DESIGN-DECISIONS.md → REQUIREMENTS.md → RESEARCH.md → CONFORMANCE.md).
+
+**Owner amendment (2026-08-10):** Raise the first release target from v0.1.0 to
+v1.0.0 after completing the implementation, companion-skill, and real-agent
+verification gates. Historical plans retain the original v0.1.0 target.
 
 - v1 refuses when native fork is impossible (D14 — no fallback ladder)
 - `[agents.<name>] extra_args` ships in v1, individually shell-quoted (D11)
@@ -28,7 +32,7 @@ to continue in a forked session. Built strictly to the locked design corpus
 Phase A — repo bootstrap (gate: repo live + PROJECTS.md)
 - [x] [P01-T01] git init; design-docs initial commit; create smorinlabs/agent-fork; verify org merge-method ruleset
 - [x] [P01-T02] Python scaffold: uv package, ruff, ty, `just all`, `make check` (REQ-35, REQ-39)
-- [x] [P01-T03] Flox dev env, tiered manifest with `agents` pkg-group (REQ-39)
+- [x] [P01-T03] Four-system Flox development toolchain with host-managed real-agent CLI prerequisites (REQ-39)
 - [x] [P01-T04] MIT LICENSE (REQ-37 — attribution removed 2026-07-22 by owner amendment)
 - [x] [P01-T05] PROJECTS.md via project harness + repo welcome announcement
 
@@ -89,19 +93,19 @@ Phase E.5 — separable worktree destination controls (gate: D15 + TDD implement
 - [x] [P01-TS22] Add companion-skill passthrough and managed-option protection tests
 - [x] [P01-T29] Close documentation, conformance, full gates, and real-agent proof — 246 passed/1 retired skip, clean install, disposable Codex fork and orphan-free cleanup green
 
-Phase F — ship v0.1.0 (gate: released + installable)
+Phase F — ship v1.0.0 (gate: released + installable)
 - [x] [P01-T32] Codex renamed-session resolution — bounded app-server lookup, UUID-only escape hatch, canonical identity flow, documentation, matrix coverage, and real VM E7 gate completed (2026-08-10)
 - [x] [P01-T31] Adaptive terminal/agent operation (D16/REQ-45) — `auto`, `strict`, and `git-only` modes; mode-aware doctor/output/registry; strict companion skill; full TDD gates green
 - [x] [P01-T19] CLI Design Standard v1.4.14 audit and approved second-level hardening — semantic help/diagnostics, authoritative error catalog, functional Bash/Zsh/Fish completions, and installed-wheel checks green; existing R2.1 waiver unchanged; no new waivers
 - [ ] [P01-T20] Release plumbing: release-please, PyPI + TestPyPI trusted publishing, Homebrew tap
-- [ ] [P01-T21] Cut v0.1.0 replacing the PyPI placeholder; verify `uv tool install` + `pipx install`
+- [ ] [P01-T21] Cut v1.0.0 replacing the PyPI placeholder; verify `uv tool install` + `pipx install`
 
 - [x] Regression Test Status — Phase D final suite 218 passed with only retired T-EXP-04 skipped; conformance fixtures and clean-install checks green in PR #8
 
 ### Deliverable
 ```bash
 $ uv tool install agent-fork && agent-fork --version
-agent-fork 0.1.0
+agent-fork 1.0.0
 ```
 
 ### Automated Verification

@@ -20,13 +20,9 @@ gnumake.pkg-path = "gnumake"
 zsh.pkg-path = "zsh"
 fish.pkg-path = "fish"
 
-# --- Agent runtime CLIs (integration tests marked requires_real_cli) ---
-# Isolated group: they track fast-moving nixpkgs revisions and would
-# otherwise over-constrain the stable toolchain in 'toplevel'.
-claude-code.pkg-path = "claude-code"
-claude-code.pkg-group = "agents"
-codex.pkg-path = "codex"
-codex.pkg-group = "agents"
+# Real-agent tests use host-managed Claude Code and Codex installations.
+# Their release cadence and platform support differ from this four-system
+# development environment; `just test-live` reports the exact host binaries.
 
 
 [vars]

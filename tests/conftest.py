@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import termios
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -903,19 +904,35 @@ def pty_run(args: list[str], env: dict[str, str], tty_fd: int):
         start_new_session=True,
     )
     os.close(slave)
-    captured_stdout, captured_stderr = process.communicate(timeout=10)
     chunks: list[bytes] = []
-    while True:
+    drain_errors: list[BaseException] = []
+
+    def drain_pty() -> None:
         try:
-            chunk = os.read(master, 65536)
-        except OSError as error:
-            if error.errno == errno.EIO:
-                break
-            raise
-        if not chunk:
-            break
-        chunks.append(chunk)
-    os.close(master)
+            while True:
+                try:
+                    chunk = os.read(master, 65536)
+                except OSError as error:
+                    if error.errno == errno.EIO:
+                        break
+                    raise
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        except BaseException as error:
+            drain_errors.append(error)
+
+    drain = threading.Thread(target=drain_pty, name="agent-fork-pty-drain")
+    drain.start()
+    try:
+        captured_stdout, captured_stderr = process.communicate(timeout=10)
+        drain.join(timeout=1)
+        if drain.is_alive():
+            raise RuntimeError("PTY drain did not finish after child exit")
+        if drain_errors:
+            raise drain_errors[0]
+    finally:
+        os.close(master)
     return PtyResult(
         returncode=process.returncode,
         stdout=captured_stdout or b"",

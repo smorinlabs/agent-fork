@@ -38,6 +38,9 @@
 | 2026-08-10 | 1.4.14 | Phase E companion skill | Shared Claude/Codex skill, deterministic JSON orchestration, failure contracts, and real dual-host paste-command demos green; release channels remain gated to Phase F |
 | 2026-08-10 | 1.4.14 | built-binary audit (P01-T19) | Pass after fixing semantic help/exit-code catalog (CLI-AUD-01) and inert diagnostic flags (CLI-AUD-02); existing R2.1 `cleanup` waiver unchanged; no new waivers. Evidence: `docs/testing/CLI-STANDARDS-AUDIT.md` |
 | 2026-08-10 | 1.4.14 | second-level hardening | Authoritative 21-code catalog, specific `config_error`, semantic three-shell completions, and help consistency rows T-OUT-14..16/T-CLI-16..20 green; no new waiver |
+| 2026-08-10 | 1.4.14 | local portability and test-gate repair | PTY capture drains concurrently; ITA transport passes Apple/Flox Git; Claude JSON object/event-array outputs normalize; hermetic, real-agent, Git-matrix, and unrestricted-Linux signal gates are explicit; no public CLI change or new waiver |
+| 2026-08-10 | 1.4.14 | issue #14 output-contract repair | `fork --dry-run -o json` and `--json` now emit the same stable preview schema instead of human text; T-OUT-21 protects R4.2/R7.2/R8.6; no waiver |
+| 2026-08-10 | 1.4.14 | macOS signal and live-agent gate repair | Git cleanup preserves active signal exceptions after macOS `EPERM`; real-agent failures expose captured output; preflight reports host executable identity/version; Flox retains the four-system development toolchain without pinning agent CLIs; no public CLI change or waiver |
 
 ## Phase D requirement trace
 
@@ -64,8 +67,8 @@ open implementation finding.
 | REQ-14 | Implemented | Curated config env plus read-only host-agent signals; sealed-env fixtures |
 | REQ-15 | Documented | No argv secrets; ignored-file/`.env` risk documented in README |
 | REQ-16 | Implemented | G-OUT stream purity, final paste block, and TTY invariance |
-| REQ-17 | Implemented | G-OUT minimum result/error schemas and stable error catalog |
-| REQ-18 | Implemented | T-OUT-08 complete local-only dry-run plan; cleanup dry-run T-CLN-13 |
+| REQ-17 | Implemented | G-OUT minimum completed-result, dry-run-preview, and error schemas plus stable error catalog |
+| REQ-18 | Implemented | T-OUT-08 human local-only plan, T-OUT-21 JSON preview contract, and cleanup dry-run T-CLN-13 |
 | REQ-19 | Implemented | G-GRD 14-row pre-mutation refusal matrix |
 | REQ-20 | Implemented | G-ANC eight topologies and atomic branch/worktree creation |
 | REQ-21 | Implemented | G-MAT 20-row exact/ignored/no-state transport matrix |
@@ -86,7 +89,7 @@ open implementation finding.
 | REQ-36 | Deferred | Publishing/release automation and channel validation are Phase F |
 | REQ-37 | Implemented | MIT license present; fresh implementation uses behavioral corpus only |
 | REQ-38 | Implemented for Phase D | Doctor, locale, signals/SIGPIPE, SemVer/deprecation docs, telemetry statement, blocking conformance CI |
-| REQ-39 | Implemented | Flox/uv/just/ruff/ty development environment and gates |
+| REQ-39 | Implemented | Four-system Flox/uv/just/ruff/ty/Git toolchain; host-managed agent CLIs; explicit hermetic/live/Git-matrix/signal gates |
 | REQ-40 | Implemented/documented | No runtime network client dependency or call; ignored-mode cost documented |
 | REQ-41 | Implemented | Atomic registry replacement, advisory timeout/death, concurrent forks, Git race |
 | REQ-42 | Implemented | G-EMT hostile shell execution with `shlex.quote` per element |

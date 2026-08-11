@@ -87,7 +87,28 @@ class DryRunOutput:
     command: str
     notices: tuple[str, ...] = ()
 
-    def render(self) -> str:
+    def document(self) -> dict[str, object]:
+        return {
+            "dry_run": True,
+            "plan": {
+                "branch": {"action": "create", "name": self.branch},
+                "worktree": {"action": "create", "path": str(self.worktree)},
+                "files_to_carry": {
+                    "staged": self.staged,
+                    "unstaged": self.unstaged,
+                    "untracked": self.untracked,
+                    "ignored": self.ignored,
+                },
+            },
+            "command": self.command,
+            "notices": list(self.notices),
+            "validation": {"scope": "local", "passed": True},
+            "mutation_performed": False,
+        }
+
+    def render(self, output: str = "text") -> str:
+        if output == "json":
+            return json_line(self.document())
         lines = [
             f"branch: create {self.branch}",
             f"worktree: create {self.worktree}",

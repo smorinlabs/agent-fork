@@ -88,6 +88,7 @@ def test_rollback_failure_emits_manual_recovery_text(repo_scenario, monkeypatch)
     )
 
 
+@pytest.mark.requires_process_group_signals
 @pytest.mark.parametrize(
     "sent,expected",
     [

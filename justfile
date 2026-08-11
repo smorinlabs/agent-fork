@@ -23,9 +23,22 @@ lint-fix:
 typecheck:
     uv run ty check
 
-# Run tests
+# Run hermetic tests; real-agent and unrestricted signal gates are explicit
 test:
-    uv run pytest
+    uv run pytest -m "not requires_real_cli and not requires_process_group_signals"
+
+# Run host-managed real-agent tests after identity, auth, state, and network preflights
+test-live:
+    uv run python scripts/check_live_tests.py
+    uv run pytest -m requires_real_cli
+
+# Run ITA compatibility coverage with system Git and Flox GNU Git
+test-git-matrix:
+    bash scripts/check_git_matrix.sh
+
+# Run rollback signal tests in an unrestricted process environment
+test-signals:
+    uv run pytest -m requires_process_group_signals
 
 # Validate TEST-MATRIX.md against the collected stub tree
 check-matrix:
@@ -39,5 +52,5 @@ strict-collect:
 clean-install:
     bash scripts/check_clean_install.sh
 
-# Format, lint, typecheck, test
+# Format, lint, typecheck, and hermetic tests
 all: fmt lint typecheck test

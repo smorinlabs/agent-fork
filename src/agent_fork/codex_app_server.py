@@ -114,7 +114,7 @@ def list_named_threads(
             {
                 "id": 1,
                 "method": "initialize",
-                "params": {"clientInfo": {"name": "agent-fork", "version": "0.1.0"}},
+                "params": {"clientInfo": {"name": "agent-fork", "version": "1.0.0"}},
             }
         )
         initialized = response(1)

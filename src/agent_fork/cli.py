@@ -490,7 +490,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             launch.command,
             agent_check.notices if context is not None else (),
         )
-        print(dry.render())
+        print(dry.render(output_kind))
         return 0
 
     result = fork(

@@ -135,7 +135,8 @@ def materialize(
                 ],
                 env=env,
             ).stdout
-            _apply_patch(child, ita_patch, ["--intent-to-add"], env=env)
+            _apply_patch(child, ita_patch, [], env=env)
+            run_git(child, ["add", "--intent-to-add", "--", path], env=env)
 
         unstaged_args = ["diff", "--binary", "--no-color", "--ita-invisible-in-index"]
         if ita_paths:

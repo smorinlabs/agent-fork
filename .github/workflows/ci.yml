@@ -13,11 +13,12 @@ jobs:
     name: Matrix, strict collection, and tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
-      - uses: extractions/setup-just@v3
+          prune-cache: true
+      - uses: extractions/setup-just@v4
 
       - name: Install completion syntax checkers
         run: sudo apt-get update && sudo apt-get install --yes zsh fish
@@ -28,16 +29,19 @@ jobs:
         run: just strict-collect
       - name: Check format, lint, types, and tests
         run: just all
+      - name: Check SIGINT and SIGTERM rollback
+        run: just test-signals
 
   conformance:
     name: Clean-install CLI conformance
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
-      - uses: extractions/setup-just@v3
+          prune-cache: true
+      - uses: extractions/setup-just@v4
 
       - name: Build, install, and exercise the packaged entry point
         run: just clean-install

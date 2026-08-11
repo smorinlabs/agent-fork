@@ -219,6 +219,58 @@ def test_dry_run_lists_planned_mutations_and_local_only(repo_scenario):
     assert not explicit_worktree.exists()
 
 
+@pytest.mark.matrix("T-OUT-21")
+def test_dry_run_honors_json_output_aliases_without_mutation(repo_scenario):
+    from conftest import run_cli, staged, untracked
+
+    world = repo_scenario(
+        "plain@main", states=(staged(add="new.txt"), untracked("loose.txt"))
+    )
+    environment = _agent_env(world)
+    destination = world.parent_path.parent / "json preview"
+    base_args = [
+        "fork",
+        "planned-json",
+        "--branch",
+        "review/json-preview",
+        "--worktree-dir",
+        str(destination),
+        "--dry-run",
+    ]
+
+    documents = []
+    for output_args in (("-o", "json"), ("--json",)):
+        completed = run_cli([*base_args, *output_args], environment, world.parent_path)
+        assert completed.returncode == 0 and completed.stderr == b""
+        documents.append(json.loads(completed.stdout))
+
+    for document in documents:
+        assert document == {
+            "dry_run": True,
+            "plan": {
+                "branch": {"action": "create", "name": "review/json-preview"},
+                "worktree": {"action": "create", "path": str(destination)},
+                "files_to_carry": {
+                    "staged": 1,
+                    "unstaged": 0,
+                    "untracked": 1,
+                    "ignored": 0,
+                },
+            },
+            "command": document["command"],
+            "notices": [],
+            "validation": {"scope": "local", "passed": True},
+            "mutation_performed": False,
+        }
+        assert document["command"].startswith(
+            f"cd '{destination}' && claude --session-id "
+        )
+        assert document["command"].endswith(
+            f"--resume {PARENT} --fork-session -n planned-json"
+        )
+    assert not destination.exists()
+
+
 @pytest.mark.matrix("T-OUT-09")
 def test_clipboard_copy_failure_emits_notice_only(repo_scenario):
     world = repo_scenario("plain@main")

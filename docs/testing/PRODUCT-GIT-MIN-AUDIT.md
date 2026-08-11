@@ -10,16 +10,23 @@
 The audit inventories the Git surface locked by REQ-19..25, REQ-31..32,
 DESIGN-DECISIONS D5, and amendments A1..A4/A10. Feature availability was
 checked against versioned upstream Git manuals and upstream release notes. The
-surface was then probed with both Git implementations installed in the guest:
+original surface audit probed both Git implementations installed in the guest.
+The Apple Git portability correction additionally ran its ITA regression gate
+with both Git implementations on the macOS host:
 
 ```text
 /usr/bin/git                                                    2.43.0
 .flox/run/aarch64-linux.agent-fork-dev/bin/git                  2.54.0
+/usr/bin/git (Apple Git-155, macOS 26.4)                        2.50.1
+Flox aarch64-darwin git                                         2.54.0
 ```
 
-Both targets successfully reported the same linked-worktree topology through
+All targets successfully reported the same linked-worktree topology through
 `rev-parse` and the same path/ref records through `worktree list --porcelain`.
-Both advertise and execute the limiting `apply --intent-to-add` behavior.
+Apple Git 2.50.1 does not safely execute `apply --intent-to-add` against a
+populated linked-worktree index: it replaces unrelated index entries. The
+portable ITA sequence is plain `apply` followed by `add --intent-to-add`; its
+regression gate passes with host Apple Git 2.50.1 and Flox GNU Git 2.54.0.
 
 ## Required production surface
 
@@ -30,7 +37,7 @@ Both advertise and execute the limiting `apply --intent-to-add` behavior.
 | worktree lifecycle | `worktree add -b`, `list --porcelain`, `remove --force`, `prune` | before 2.19 | supported |
 | guard state | `ls-files -u -z`; operation sentinels resolved below the Git dir | before 2.19 | supported |
 | staged transport | `diff --binary --no-color --cached --ita-invisible-in-index`; `apply --binary --index` | `--ita-invisible-in-index` documented by 2.17 | supported |
-| ITA transport | `apply --intent-to-add` | **2.19.0** | limiting feature |
+| ITA transport | `diff --ita-invisible-in-index`; plain `apply --binary`; `add --intent-to-add -- <path>` | before 2.19 | supported; avoids vendor-divergent `apply --intent-to-add` |
 | unstaged transport | `diff --binary --no-color`; `apply --binary` | before 2.19 | supported |
 | untracked/ignored transport | `ls-files --others -z --exclude-standard`; second pass with `--ignored` | before 2.19 | supported |
 | verification/cleanup | `status --porcelain=v1 -z` (optionally `--ignored`), `worktree list --porcelain`, `branch -D` | before 2.19 | supported |
@@ -38,20 +45,20 @@ Both advertise and execute the limiting `apply --intent-to-add` behavior.
 
 The implementation deliberately does not depend on newer conveniences such as
 `git branch --show-current` (2.22), `rev-parse --path-format` (2.31), or
-`worktree list --porcelain -z`. Avoiding them keeps the floor tied to the actual
-ITA preservation requirement rather than incidental parsing choices.
+`worktree list --porcelain -z`. Avoiding them keeps the floor tied to the
+audited command surface rather than incidental parsing choices.
 
-## Limiting evidence
+## Floor disposition
 
-The upstream Git 2.18 `git-apply` synopsis has no `--intent-to-add` option. The
-Git 2.19 manual adds `--intent-to-add`, and the Git 2.19 release notes explicitly
-identify it as newly learned behavior. Since REQ-21/A3 requires preservation of
-intent-to-add entries, 2.18 and older cannot implement the locked contract
-without changing semantics. Git 2.19 is therefore necessary.
+The original audit selected Git 2.19 because that release added
+`git apply --intent-to-add`. The Apple Git compatibility correction removes that
+flag from production and therefore removes it as a valid floor justification.
 
-No audited production feature requires a version newer than 2.19. The product
-floor is consequently 2.19.0—not the guest version and not the higher harness
-floor.
+`PRODUCT_GIT_MIN` remains 2.19.0 as a conservative supported floor. Lowering the
+published floor would broaden the compatibility contract and requires a
+dedicated full-suite audit on pre-2.19 Git; this repair does not make that
+separate product decision. No audited production feature requires a version
+newer than 2.19.
 
 ## Behavioral differences and mitigations
 
@@ -64,6 +71,10 @@ floor.
 - Git 2.28 changed default ITA diff presentation. The explicit
   `--ita-invisible-in-index` flag fixes the desired representation across the
   supported range.
+- Apple Git 2.50.1 `apply --intent-to-add` can replace a linked worktree's
+  populated index, leaving tracked files staged as deleted and simultaneously
+  untracked. AgentFork applies the ITA patch to the working tree first, then
+  marks only the intended path with `add --intent-to-add -- <path>`.
 - Git 2.43 and 2.54 differ in unrelated behaviors such as remote-head defaults.
   The fixture and product contracts resolve explicit commits/refs and do not
   depend on those defaults.
@@ -76,12 +87,14 @@ Run the following with each target Git first on `PATH`:
 
 ```bash
 git --version
-git apply -h
 git rev-parse --git-dir --git-common-dir --show-toplevel
 git worktree list --porcelain
+just test-git-matrix
 ```
 
-The Phase D fixture suite will exercise the full command surface and exact-copy
-semantics against the guest Git. Boundary behavior for arbitrary installed
-versions is tested through injected `git --version` output, so it does not
-require installing an obsolete Git executable.
+On macOS, that target runs once with `/usr/bin/git` and once inside the Flox
+environment. On Linux it runs with system Git and Flox Git. The Phase D fixture
+suite exercises the full command surface and exact-copy semantics. Boundary
+behavior for arbitrary installed versions is tested through injected
+`git --version` output, so it does not require installing an obsolete Git
+executable.
