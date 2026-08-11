@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 
 TEST_HARNESS_GIT_MIN = (2, 43)  # spec §2/§7.5 — F/C/R tiers hard-error below this
+PTY_PROCESS_TIMEOUT_SECONDS = 10
 
 
 def _parse_git_version(output: str) -> tuple[int, int, int]:
@@ -905,7 +906,7 @@ def pty_run(args: list[str], env: dict[str, str], tty_fd: int):
     )
     os.close(slave)
     chunks: list[bytes] = []
-    drain_errors: list[BaseException] = []
+    drain_errors: list[Exception] = []
 
     def drain_pty() -> None:
         try:
@@ -919,13 +920,32 @@ def pty_run(args: list[str], env: dict[str, str], tty_fd: int):
                 if not chunk:
                     break
                 chunks.append(chunk)
-        except BaseException as error:
+        except Exception as error:
             drain_errors.append(error)
 
     drain = threading.Thread(target=drain_pty, name="agent-fork-pty-drain", daemon=True)
     drain.start()
     try:
-        captured_stdout, captured_stderr = process.communicate(timeout=10)
+        try:
+            captured_stdout, captured_stderr = process.communicate(
+                timeout=PTY_PROCESS_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired:
+            if process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
+            drain.join(timeout=5)
+            raise
         drain.join(timeout=5)
         if drain.is_alive():
             raise RuntimeError("PTY drain did not finish after child exit")

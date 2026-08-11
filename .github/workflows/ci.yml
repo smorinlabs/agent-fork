@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
@@ -32,11 +34,30 @@ jobs:
       - name: Check SIGINT and SIGTERM rollback
         run: just test-signals
 
+  git-compatibility:
+    name: Apple Git and Flox Git compatibility
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          prune-cache: true
+      - uses: extractions/setup-just@v4
+      - uses: flox/install-flox-action@1128abd73431089ab9d871c893b4e72a729354e1 # v2.6.0
+
+      - name: Check intent-to-add transport with Apple Git and Flox Git
+        run: just test-git-matrix
+
   conformance:
     name: Clean-install CLI conformance
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true

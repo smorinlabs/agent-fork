@@ -24,35 +24,55 @@ import pytest
 CLAUDE = shutil.which("claude")
 CODEX = shutil.which("codex")
 ANSI = re.compile(rb"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+REAL_AGENT_TIMEOUT_SECONDS = 180
+
+
+def _text(value: str | bytes | None) -> str:
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value or ""
 
 
 def _run(
     args: list[str], cwd: Path, *, stdout: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
-    if stdout is None:
-        result = subprocess.run(
-            args,
-            cwd=cwd,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=180,
-            check=False,
-        )
-        captured_stdout = result.stdout or ""
-    else:
-        with stdout.open("w") as target:
+    try:
+        if stdout is None:
             result = subprocess.run(
                 args,
                 cwd=cwd,
                 stdin=subprocess.DEVNULL,
-                stdout=target,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 text=True,
-                timeout=180,
+                timeout=REAL_AGENT_TIMEOUT_SECONDS,
                 check=False,
             )
-        captured_stdout = stdout.read_text()
+            captured_stdout = result.stdout or ""
+        else:
+            with stdout.open("w") as target:
+                result = subprocess.run(
+                    args,
+                    cwd=cwd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=target,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=REAL_AGENT_TIMEOUT_SECONDS,
+                    check=False,
+                )
+            captured_stdout = stdout.read_text()
+    except subprocess.TimeoutExpired as error:
+        captured_stdout = (
+            stdout.read_text() if stdout is not None else _text(error.stdout)
+        )
+        rendered_stdout = captured_stdout.rstrip() or "<empty>"
+        rendered_stderr = _text(error.stderr).rstrip() or "<empty>"
+        raise RuntimeError(
+            f"real-agent command timed out after {REAL_AGENT_TIMEOUT_SECONDS} seconds: "
+            f"{shlex.join(args)}\n"
+            f"stdout:\n{rendered_stdout}\n"
+            f"stderr:\n{rendered_stderr}"
+        ) from error
     if result.returncode != 0:
         rendered_stdout = captured_stdout.rstrip() or "<empty>"
         rendered_stderr = (result.stderr or "").rstrip() or "<empty>"

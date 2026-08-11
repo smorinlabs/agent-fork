@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -11,15 +12,33 @@ import sys
 import tempfile
 from pathlib import Path
 
+COMMAND_TIMEOUT_SECONDS = 15
+
+
+def _text(value: str | bytes | None) -> str:
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value or ""
+
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=COMMAND_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        stdout = _text(error.stdout)
+        stderr = _text(error.stderr).rstrip()
+        timeout_message = (
+            f"command timed out after {COMMAND_TIMEOUT_SECONDS} seconds: "
+            f"{shlex.join(command)}"
+        )
+        stderr = f"{stderr}\n{timeout_message}".lstrip()
+        return subprocess.CompletedProcess(command, 124, stdout, stderr)
 
 
 def _cli_identity(label: str, executable: str) -> tuple[str | None, str | None]:

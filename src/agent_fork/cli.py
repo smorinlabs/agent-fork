@@ -481,11 +481,15 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         dry = DryRunOutput(
             branch,
             destination,
-            count(["diff", "--cached", "--name-only", "-z"]),
-            count(["diff", "--name-only", "-z"]),
-            count(["ls-files", "--others", "--exclude-standard", "-z"]),
+            count(["diff", "--cached", "--name-only", "-z"])
+            if config.with_state
+            else 0,
+            count(["diff", "--name-only", "-z"]) if config.with_state else 0,
+            count(["ls-files", "--others", "--exclude-standard", "-z"])
+            if config.with_state
+            else 0,
             count(["ls-files", "--others", "--ignored", "--exclude-standard", "-z"])
-            if config.with_ignored
+            if config.with_state and config.with_ignored
             else 0,
             launch.command,
             agent_check.notices if context is not None else (),

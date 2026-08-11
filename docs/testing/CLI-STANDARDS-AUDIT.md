@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-10  
 **Scope:** P01-T19 only  
-**Mode:** audit of the built `agent-fork 0.1.0` console script  
+**Mode:** audit of the built `agent-fork 1.0.0` console script
 **Profile:** Small-CLI, verb-first, publishable tier
 
 ## Authority and method

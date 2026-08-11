@@ -268,6 +268,17 @@ def test_dry_run_honors_json_output_aliases_without_mutation(repo_scenario):
         assert document["command"].endswith(
             f"--resume {PARENT} --fork-session -n planned-json"
         )
+
+    no_state = run_cli(
+        [*base_args, "--no-with-state", "--json"], environment, world.parent_path
+    )
+    assert no_state.returncode == 0 and no_state.stderr == b""
+    assert json.loads(no_state.stdout)["plan"]["files_to_carry"] == {
+        "staged": 0,
+        "unstaged": 0,
+        "untracked": 0,
+        "ignored": 0,
+    }
     assert not destination.exists()
 
 
