@@ -922,11 +922,11 @@ def pty_run(args: list[str], env: dict[str, str], tty_fd: int):
         except BaseException as error:
             drain_errors.append(error)
 
-    drain = threading.Thread(target=drain_pty, name="agent-fork-pty-drain")
+    drain = threading.Thread(target=drain_pty, name="agent-fork-pty-drain", daemon=True)
     drain.start()
     try:
         captured_stdout, captured_stderr = process.communicate(timeout=10)
-        drain.join(timeout=1)
+        drain.join(timeout=5)
         if drain.is_alive():
             raise RuntimeError("PTY drain did not finish after child exit")
         if drain_errors:

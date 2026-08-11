@@ -17,7 +17,8 @@ def test_console_entry_point_is_callable() -> None:
 
 
 def test_flox_environment_uses_host_managed_agent_clis() -> None:
-    manifest = tomllib.loads(Path(".flox/env/manifest.toml").read_text())
+    repo_root = Path(__file__).resolve().parents[1]
+    manifest = tomllib.loads((repo_root / ".flox/env/manifest.toml").read_text())
 
     installed = manifest["install"]
     assert "claude-code" not in installed
