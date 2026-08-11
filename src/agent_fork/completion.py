@@ -46,6 +46,8 @@ FORK_OPTIONS = (
 )
 CLEANUP_OPTIONS = (
     "--force",
+    "--allow-dirty",
+    "--allow-unpushed",
     "--keep-branch",
     "--yes",
     "--no-input",

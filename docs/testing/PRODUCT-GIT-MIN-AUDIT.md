@@ -41,7 +41,7 @@ regression gate passes with host Apple Git 2.50.1 and Flox GNU Git 2.54.0.
 | unstaged transport | `diff --binary --no-color`; `apply --binary` | before 2.19 | supported |
 | untracked/ignored transport | `ls-files --others -z --exclude-standard`; second pass with `--ignored` | before 2.19 | supported |
 | verification/cleanup | `status --porcelain=v1 -z` (optionally `--ignored`), `worktree list --porcelain`, `branch -D` | before 2.19 | supported |
-| unpushed cleanup guard | `rev-list`/`log` against configured upstream refs | before 2.19 | supported |
+| unpushed cleanup guard | `rev-list`/`log` exclusions via `--remotes`; bounded `log -z --max-count` detail | before 2.19 | supported |
 
 The implementation deliberately does not depend on newer conveniences such as
 `git branch --show-current` (2.22), `rev-parse --path-format` (2.31), or

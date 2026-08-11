@@ -299,9 +299,13 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 ## G-CLN — Cleanup
 Status: done
 
-Purpose: cleanup — targets, guards, `--force`/`--yes`/`--no-input` semantics, the consent prompt (pty), and never-delete-session-files.
+Purpose: cleanup — targets, bounded dirty/unpushed reporting, granular and
+`--force` overrides, human/JSON previews, `--yes`/`--no-input` consent, the pty
+prompt, and never-delete-session-files.
 
-Varying axes: none of the shared four vary (baseline pinned); CLI flag combinations and pty consent-prompt rows vary within the group.
+Varying axes: none of the shared four vary (baseline pinned); risk kind/count,
+CLI flag combinations, output format, and pty consent-prompt rows vary within
+the group.
 
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
@@ -320,6 +324,13 @@ Varying axes: none of the shared four vary (baseline pinned); CLI flag combinati
 | T-CLN-13 | `--dry-run` prints the removal plan without mutating | baseline | C | live | REQ-33; REQ-18 |
 | T-CLN-14 | guard combination — target is the invoking cwd, run with `--force` → still refuse, exit 5 (cwd guard is non-overridable) | baseline | F | live | REQ-32; DESIGN-DECISIONS D12 |
 | T-CLN-15 | flag combination — `--force` with `--no-input` and no `--yes` → fail, exit 2 (`--force` never substitutes for consent) | baseline | C | live | REQ-33; DESIGN-DECISIONS D12 |
+| T-CLN-16 | `cleanup --force --dry-run` on a dirty worktree reports each at-risk path and performs no mutation | baseline | C | live | issue #16 sections 1–2; REQ-18; REQ-32 |
+| T-CLN-17 | dirty-worktree refusal enumerates modified and untracked paths with porcelain statuses and names `--allow-dirty` | baseline | C | live | issue #16 sections 1 and 3; REQ-32 |
+| T-CLN-18 | unpushed-commit refusal enumerates each abbreviated SHA and subject and names `--allow-unpushed` | baseline | C | live | issue #16 sections 1 and 3; REQ-32 |
+| T-CLN-19 | dirty enumeration is capped at 10 entries with the remaining count reported in human and JSON errors | baseline | C | live | issue #16 sections 1 and 4; REQ-17 |
+| T-CLN-20 | `--allow-dirty` and `--allow-unpushed` override only their named guard | baseline | C | live | issue #16 section 3; REQ-32; DESIGN-DECISIONS D12 |
+| T-CLN-21 | JSON refusal and `--force --dry-run` result carry matching dirty and unpushed `details` objects | baseline | C | live | issue #16 section 4; REQ-17; REQ-18 |
+| T-CLN-22 | `--allow-dirty` and `--allow-unpushed` never override the invoking-cwd refusal | baseline | C | live | issue #16 section 3; REQ-32; DESIGN-DECISIONS D12 |
 
 ---
 

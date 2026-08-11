@@ -66,11 +66,20 @@ class PreconditionError(AgentForkError):
 
     exit_code = 5
 
-    def __init__(self, code: str, message: str):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        details: dict[str, object] | None = None,
+        human_message: str | None = None,
+    ):
         if code not in ERROR_CATALOG:
             raise ValueError(f"uncataloged precondition error code: {code}")
         super().__init__(message)
         self.code = code
+        self.details = details
+        self.human_message = human_message
 
 
 class VerificationError(AgentForkError):

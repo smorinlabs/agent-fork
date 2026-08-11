@@ -197,7 +197,17 @@ def _parser() -> argparse.ArgumentParser:
     cleanup.add_argument(
         "--force",
         action="store_true",
-        help="Allow unregistered, dirty, or unpushed targets",
+        help="Allow unregistered targets and override dirty/unpushed guards",
+    )
+    cleanup.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Override only the guard against uncommitted changes",
+    )
+    cleanup.add_argument(
+        "--allow-unpushed",
+        action="store_true",
+        help="Override only the guard against unpushed commits",
     )
     cleanup.add_argument(
         "--keep-branch", action="store_true", help="Remove only the worktree"
@@ -209,7 +219,9 @@ def _parser() -> argparse.ArgumentParser:
         "--no-input", action="store_true", help="Never prompt for confirmation"
     )
     cleanup.add_argument(
-        "--dry-run", action="store_true", help="Print the removal plan only"
+        "--dry-run",
+        action="store_true",
+        help="Inspect safety and print the removal plan without changing anything",
     )
     cleanup.add_argument(
         "-o",
@@ -650,6 +662,8 @@ def main(argv: list[str] | None = None) -> int:
                 cwd=Path.cwd(),
                 env=environment,
                 force=args.force,
+                allow_dirty=args.allow_dirty,
+                allow_unpushed=args.allow_unpushed,
                 keep_branch=args.keep_branch,
                 dry_run=args.dry_run,
             )
@@ -657,20 +671,23 @@ def main(argv: list[str] | None = None) -> int:
             if machine:
                 from agent_fork.output import json_line
 
-                print(
-                    json_line(
-                        {
-                            "removed": result.removed,
-                            "target": plan.entry.to_dict(),
-                            "keep_branch": args.keep_branch,
-                            "dry_run": args.dry_run,
-                            "notices": list(result.notices),
-                        }
-                    )
-                )
+                document = {
+                    "removed": result.removed,
+                    "target": plan.entry.to_dict(),
+                    "keep_branch": args.keep_branch,
+                    "dry_run": args.dry_run,
+                    "notices": list(result.notices),
+                }
+                if args.dry_run:
+                    document["details"] = result.details.document()
+                print(json_line(document))
             else:
                 prefix = "would " if args.dry_run else ""
                 print(prefix + plan.render(keep_branch=args.keep_branch))
+                if args.dry_run and result.details.has_risk:
+                    print(result.details.render_preview(plan.branch), file=sys.stderr)
+                if args.dry_run:
+                    print("nothing was removed")
                 for notice in result.notices:
                     print(notice)
             return 0
