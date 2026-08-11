@@ -10,7 +10,8 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · backend = git (jj reserved, no v1 values).
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
-- Total rows: 190 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
+- Total rows: 192 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -221,7 +222,7 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-09 | binary file, staged → cached `--binary` diff applies with `--index`, child byte-identical | baseline | F | live | REQ-21; RESEARCH §2.2 step 1 |
 | T-MAT-10 | binary file, unstaged → uncached `--binary` diff applies without `--index`, child byte-identical | baseline | F | live | REQ-21; RESEARCH §2.2 step 2 |
 | T-MAT-11 | rename+edit → child reflects the rename with edited content; manifest oracle confirms old path absent and new path's content correct | baseline | F | live | REQ-21; RESEARCH §2.2 |
-| T-MAT-12 | intent-to-add file transported → cached diff uses `--ita-invisible-in-index`, applied via `apply --intent-to-add`, child shows ` A` not `??` (ITA-aware oracle) | baseline | F | live | REQ-21 (A3) |
+| T-MAT-12 | intent-to-add file transported → cached diff uses `--ita-invisible-in-index`, working-tree patch uses plain `apply`, child is marked via `add --intent-to-add`, child shows `␠A` (`␠` denotes the leading status-column space) not `??`, and existing index entries remain intact | baseline | F | live | REQ-21 (A3) |
 | T-MAT-13 | empty directory in parent → documented absence in child (git-visible state copy only; empty-dir expectation declared per mode) | baseline | F | live | REQ-21; spec §6.5 |
 | T-MAT-14 | submodule present → treated opaque, gitlink OID (mode-160000) compared, submodule contents pruned from manifest; fixture built with command-scoped `-c protocol.file.allow=always` | baseline | F | live | RESEARCH §2.1 step 6; spec §6.3; RESEARCH §4 |
 | T-MAT-15 | parent strictly read-only during materialize → full manifest+index snapshot before/after, byte-identical | baseline | F | live | REQ-21; spec §6.5 item 3 |
@@ -267,10 +268,11 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 |---|---|---|---|---|---|
 | T-RBK-01 | materialize failure → rollback removes the worktree, removes the branch only if it was created this call | baseline | F | live | REQ-22; RESEARCH §2.1 step 10 |
 | T-RBK-02 | rollback itself fails → exact manual-recovery command text emitted (`rm -rf "<worktree>" && git -C "<root>" branch -D "<branch>"`) | baseline | F | live | REQ-22; RESEARCH §2.1 step 10 |
-| T-RBK-03 | SIGINT mid-materialize (parent-side step-2 diff stall) → exit 130, clean rollback of partial work | baseline | F | live | REQ-22; spec §6.6 signal window |
-| T-RBK-04 | SIGTERM mid-materialize (parent-side step-2 diff stall) → exit 143, clean rollback of partial work | baseline | F | live | REQ-22; spec §6.6 signal window |
+| T-RBK-03 | SIGINT mid-materialize (parent-side step-2 diff stall) → exit 130, clean rollback of partial work; owned by unrestricted Linux `just test-signals` gate | baseline | F | live | REQ-22; spec §6.6 signal window |
+| T-RBK-04 | SIGTERM mid-materialize (parent-side step-2 diff stall) → exit 143, clean rollback of partial work; owned by unrestricted Linux `just test-signals` gate | baseline | F | live | REQ-22; spec §6.6 signal window |
 | T-RBK-05 | producer-pipe-failure, verify on — fake `git` where `diff --cached` exits 1 with empty stdout → materialize fails, rollback runs, exit 1 | baseline | F | live | REQ-22; spec §5; spec §6.6 |
 | T-RBK-06 | producer-pipe-failure, verify off (`--no-verify`) — same fake failure → still fails, rollback runs, exit 1 | baseline | F | live | REQ-22; spec §5; spec §6.6 |
+| T-RBK-07 | interrupted Git cleanup observes an already-exited process before a redundant process-group signal, preserving the original interruption instead of masking it with macOS `EPERM` | baseline | U | live | REQ-22; macOS process-group regression |
 
 ---
 
@@ -386,6 +388,7 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-18 | managed-agent JSON reports `mode=agent` and preserves agent/session fields | agent=claude | C | live | REQ-45; D16 |
 | T-OUT-19 | renamed Codex JSON preserves canonical `parent_session_id` and additively reports `parent_session_name` | agent=codex | C | live | REQ-46; D17 |
 | T-OUT-20 | renamed Codex dry-run reports the resolution notice and UUID-based paste command | agent=codex | C | live | REQ-46; D17 |
+| T-OUT-21 | `fork --dry-run -o json` and `fork --dry-run --json` emit the same parseable preview object with every planned mutation and perform no mutation | baseline | C | live | REQ-17; REQ-18; issue #14; R4.2; R8.6 |
 
 ---
 
@@ -435,7 +438,7 @@ Varying axes: agent (claude/codex, must vary per §4 — E1/E3 claude, E2 codex)
 | ID | Scenario | Axes | Tier | row_status | Source |
 |---|---|---|---|---|---|
 | T-EXP-01 | E1 — Claude flag combo `--resume <id> --fork-session --session-id <pre-pinned> -n <name>` in one non-interactive invocation; asserts no flag silently no-ops | agent=claude | R | live | RESEARCH §7 E1; (EXPERIMENTS.md, Phase B) |
-| T-EXP-02 | E2 — Codex cross-cwd fork `codex fork <explicit-uuid>` plus `-C <worktree>` variant; asserts explicit ID bypasses cwd filtering and documents the TUI cwd-change prompt behavior | agent=codex | R | live | RESEARCH §7 E2; RESEARCH §5.1 Q4; (EXPERIMENTS.md, Phase B) |
+| T-EXP-02 | E2 — host-managed Codex cross-cwd fork `codex fork <explicit-uuid>` plus `-C <worktree>` variant; asserts explicit ID bypasses cwd filtering and documents the TUI cwd-change prompt behavior | agent=codex | R | live | RESEARCH §7 E2; RESEARCH §5.1 Q4; (EXPERIMENTS.md, Phase B) |
 | T-EXP-03 | E3 — Claude E2E: full paste command run in a real worktree; asserts full context recall, fresh UUID, parent transcript untouched | agent=claude | R | live | RESEARCH §7 E3; (EXPERIMENTS.md, Phase B) |
 | T-EXP-04 | E4 — `.jsonl`-copy last-resort fallback smoke test, retired until milestone v1.1 | agent=claude | R | retired | RESEARCH §7 E4; spec §8 A8 |
 | T-EXP-05 | E5 — absorbed into G-MAT/G-VER core TDD (mapping row — prevents restoration from stale RESEARCH §7) | n/a | n/a | n/a | RESEARCH §7 E5 |
@@ -474,6 +477,6 @@ Varying axes: topology (builder-vs-spec verification spans the topology set); mo
 | T-FIX-19 | git-version canary — origin/HEAD determinism: `git remote set-head origin -a`, applied by the remote constructor, makes origin/HEAD deterministic across git 2.43/2.50 | baseline | F | live | spec §6.4 |
 | T-FIX-20 | git-version canary — origin/HEAD deletion row exercises the detection fallback when origin/HEAD is absent | baseline | F | live | spec §6.4 |
 | T-FIX-21 | git-version canary — unborn-HEAD repo: git commands return rc=128 consistently across git 2.43/2.50 | topology=unborn(plain) | F | live | spec §5 |
-| T-FIX-22 | git-version canary — ITA flags (`--ita-invisible-in-index`, `apply --intent-to-add`) present/supported on both git 2.43 and 2.50 | baseline | F | live | spec §5; REQ-21 (A3) |
+| T-FIX-22 | git-version canary — `just test-git-matrix` proves the portable ITA sequence (`--ita-invisible-in-index`, plain `apply`, `add --intent-to-add`) preserves the ITA path and existing index entries with system Git and Flox Git | baseline | F | live | spec §5; REQ-21 (A3) |
 | T-FIX-23 | shim-interception canary — the producer-failure git shim logs non-empty argv for every intercepted call | baseline | F | live | spec §6.6; REQ-43 (A10) |
 | T-FIX-24 | harness git-floor gate — F/C/R-tier collection hard-errors when the installed git is below `TEST_HARNESS_GIT_MIN` (2.43); unit tests remain collectible on any git version | baseline | F | live | spec §7.5; spec §2 |

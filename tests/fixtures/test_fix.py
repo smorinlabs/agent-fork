@@ -323,12 +323,12 @@ def test_git_version_canary_unborn_head_rc_128(repo_scenario):
 
 
 @pytest.mark.matrix("T-FIX-22")
-def test_git_version_canary_ita_flags_supported(repo_scenario):
-    """T-FIX-22 — git-version canary: ITA flags are present/supported on both floors.
+def test_git_version_canary_ita_transport_supported(repo_scenario):
+    """T-FIX-22 — git-version canary: portable ITA transport works on test Git.
 
     Given:  a staged intent-to-add entry
-    Expect: `--ita-invisible-in-index` and `apply --intent-to-add` are present/supported
-            on both git 2.43 and git 2.50
+    Expect: `--ita-invisible-in-index`, plain `apply`, and `add --intent-to-add`
+            preserve both the ITA entry and the existing child index
     Source: spec §5; REQ-21 (A3)
     """
     from conftest import intent_to_add
@@ -360,19 +360,31 @@ def test_git_version_canary_ita_flags_supported(repo_scenario):
         check=True,
     )
     subprocess.run(
-        ["git", "-C", str(child), "apply", "--intent-to-add"],
+        ["git", "-C", str(child), "apply"],
         env=world.env,
         input=patch,
         check=True,
     )
-    cached = subprocess.run(
-        ["git", "-C", str(child), "diff", "--cached", "--quiet"], env=world.env
+    subprocess.run(
+        ["git", "-C", str(child), "add", "--intent-to-add", "--", "intent.txt"],
+        env=world.env,
+        check=True,
     )
-    unstaged = subprocess.run(
-        ["git", "-C", str(child), "diff", "--quiet"], env=world.env
-    )
-    assert cached.returncode == 0
-    assert unstaged.returncode == 1
+    status = subprocess.run(
+        ["git", "-C", str(child), "status", "--porcelain=v1", "-z"],
+        env=world.env,
+        stdout=subprocess.PIPE,
+        check=True,
+    ).stdout
+    index = subprocess.run(
+        ["git", "-C", str(child), "ls-files", "--stage", "-z"],
+        env=world.env,
+        stdout=subprocess.PIPE,
+        check=True,
+    ).stdout
+    assert status == b" A intent.txt\0"
+    assert b"\tintent.txt\0" in index
+    assert b"\ttracked.txt\0" in index
 
 
 @pytest.mark.matrix("T-FIX-23")

@@ -258,8 +258,8 @@ def test_intent_to_add_file_transported_as_ita(repo_scenario):
     """T-MAT-12 — an intent-to-add file transports as ITA, not as an untracked file.
 
     Given:  a file staged with `git add -N` (intent-to-add)
-    Expect: cached diff uses `--ita-invisible-in-index`, applied via `apply
-            --intent-to-add`; child shows ` A` not `??` (ITA-aware oracle)
+    Expect: cached diff uses `--ita-invisible-in-index`, the working-tree patch is
+            applied before `git add -N`; child shows ` A` not `??` (ITA-aware oracle)
     Source: REQ-21 (A3)
     """
     from conftest import intent_to_add

@@ -8,6 +8,7 @@ import json
 import os
 import re
 import select
+import shlex
 import shutil
 import struct
 import subprocess
@@ -16,38 +17,72 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 CLAUDE = shutil.which("claude")
 CODEX = shutil.which("codex")
 ANSI = re.compile(rb"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+REAL_AGENT_TIMEOUT_SECONDS = 180
+
+
+def _text(value: str | bytes | None) -> str:
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value or ""
 
 
 def _run(
     args: list[str], cwd: Path, *, stdout: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
-    if stdout is None:
-        return subprocess.run(
-            args,
-            cwd=cwd,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=180,
-            check=True,
+    try:
+        if stdout is None:
+            result = subprocess.run(
+                args,
+                cwd=cwd,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=REAL_AGENT_TIMEOUT_SECONDS,
+                check=False,
+            )
+            captured_stdout = result.stdout or ""
+        else:
+            with stdout.open("w") as target:
+                result = subprocess.run(
+                    args,
+                    cwd=cwd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=target,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=REAL_AGENT_TIMEOUT_SECONDS,
+                    check=False,
+                )
+            captured_stdout = stdout.read_text()
+    except subprocess.TimeoutExpired as error:
+        captured_stdout = (
+            stdout.read_text() if stdout is not None else _text(error.stdout)
         )
-    with stdout.open("w") as target:
-        return subprocess.run(
-            args,
-            cwd=cwd,
-            stdin=subprocess.DEVNULL,
-            stdout=target,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=180,
-            check=True,
+        rendered_stdout = captured_stdout.rstrip() or "<empty>"
+        rendered_stderr = _text(error.stderr).rstrip() or "<empty>"
+        raise RuntimeError(
+            f"real-agent command timed out after {REAL_AGENT_TIMEOUT_SECONDS} seconds: "
+            f"{shlex.join(args)}\n"
+            f"stdout:\n{rendered_stdout}\n"
+            f"stderr:\n{rendered_stderr}"
+        ) from error
+    if result.returncode != 0:
+        rendered_stdout = captured_stdout.rstrip() or "<empty>"
+        rendered_stderr = (result.stderr or "").rstrip() or "<empty>"
+        raise RuntimeError(
+            f"real-agent command failed with exit {result.returncode}: "
+            f"{shlex.join(args)}\n"
+            f"stdout:\n{rendered_stdout}\n"
+            f"stderr:\n{rendered_stderr}"
         )
+    return result
 
 
 @pytest.mark.matrix("T-EXP-07")
@@ -90,6 +125,27 @@ def _claude_transcript(cwd: Path, session_id: str) -> Path:
     encoded = re.sub(r"[^a-zA-Z0-9]", "-", str(cwd))
     config_dir = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
     return config_dir / "projects" / encoded / f"{session_id}.jsonl"
+
+
+def _claude_result_record(payload: object) -> dict[str, object]:
+    if isinstance(payload, dict):
+        return cast(dict[str, object], payload)
+    if isinstance(payload, list):
+        results = [
+            record
+            for record in payload
+            if isinstance(record, dict) and record.get("type") == "result"
+        ]
+        if len(results) == 1:
+            return cast(dict[str, object], results[0])
+        raise ValueError(
+            "Claude JSON event array contains "
+            f"{len(results)} result records; expected 1"
+        )
+    raise TypeError(
+        "Claude JSON output must be an object or event array, got "
+        f"{type(payload).__name__}"
+    )
 
 
 @dataclass(frozen=True)
@@ -163,7 +219,7 @@ def claude_fork(tmp_path_factory: pytest.TempPathFactory) -> ClaudeForkResult:
         child=child,
         parent_hash_before=before,
         parent_hash_after=hashlib.sha256(parent_transcript.read_bytes()).hexdigest(),
-        child_output=json.loads(child_out.read_text()),
+        child_output=_claude_result_record(json.loads(child_out.read_text())),
         child_transcript=_claude_transcript(child, child_id).read_text(),
     )
 

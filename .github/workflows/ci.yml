@@ -13,11 +13,14 @@ jobs:
     name: Matrix, strict collection, and tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
-      - uses: extractions/setup-just@v3
+          prune-cache: true
+      - uses: extractions/setup-just@v4
 
       - name: Install completion syntax checkers
         run: sudo apt-get update && sudo apt-get install --yes zsh fish
@@ -28,16 +31,38 @@ jobs:
         run: just strict-collect
       - name: Check format, lint, types, and tests
         run: just all
+      - name: Check SIGINT and SIGTERM rollback
+        run: just test-signals
+
+  git-compatibility:
+    name: Apple Git and Flox Git compatibility
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          prune-cache: true
+      - uses: extractions/setup-just@v4
+      - uses: flox/install-flox-action@1128abd73431089ab9d871c893b4e72a729354e1 # v2.6.0
+
+      - name: Check intent-to-add transport with Apple Git and Flox Git
+        run: just test-git-matrix
 
   conformance:
     name: Clean-install CLI conformance
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
-      - uses: extractions/setup-just@v3
+          prune-cache: true
+      - uses: extractions/setup-just@v4
 
       - name: Build, install, and exercise the packaged entry point
         run: just clean-install

@@ -14,15 +14,35 @@ PRODUCT_GIT_MIN = (2, 19, 0)
 _ACTIVE = threading.local()
 
 
+def _signal_process_group(
+    process: subprocess.Popen[bytes], signum: signal.Signals
+) -> None:
+    """Signal one owned process group without masking an active exception."""
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signum)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        # macOS can report EPERM after another signal killed the group leader
+        # but before the Popen object reaped it. Re-poll before falling back to
+        # the direct child, and keep cleanup best-effort so the original
+        # interruption remains observable.
+        if process.poll() is not None:
+            return
+        try:
+            process.send_signal(signum)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
 def terminate_active_git() -> None:
     """Terminate the current Git process group during signal cleanup, if any."""
     process = getattr(_ACTIVE, "process", None)
-    if process is None or process.poll() is not None:
+    if process is None:
         return
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    _signal_process_group(process, signal.SIGKILL)
 
 
 @dataclass(frozen=True)
@@ -62,18 +82,15 @@ def run_git(
     try:
         stdout, stderr = process.communicate(input=input_bytes)
     except BaseException:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        _signal_process_group(process, signal.SIGTERM)
         try:
             process.wait(timeout=1)
         except subprocess.TimeoutExpired:
+            _signal_process_group(process, signal.SIGKILL)
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
                 pass
-            process.wait()
         raise
     finally:
         if getattr(_ACTIVE, "process", None) is process:
