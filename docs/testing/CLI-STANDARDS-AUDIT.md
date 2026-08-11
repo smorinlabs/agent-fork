@@ -84,3 +84,9 @@ in README, as recommended by the review.
 
 No MUST or SHOULD deviation was introduced, so no new waiver or upstream
 standard amendment is required.
+
+The standard delegates detailed terminal rendering to a separate standard. A
+late security review of PR #17 nevertheless found that Git-controlled paths and
+commit subjects could inject terminal control bytes into human diagnostics.
+T-CLN-23 protects the product fix: human output uses visible C-style escapes,
+while the stable JSON values remain unchanged.
