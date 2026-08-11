@@ -41,6 +41,7 @@
 | 2026-08-10 | 1.4.14 | local portability and test-gate repair | PTY capture drains concurrently; ITA transport passes Apple/Flox Git; Claude JSON object/event-array outputs normalize; hermetic, real-agent, Git-matrix, and unrestricted-Linux signal gates are explicit; no public CLI change or new waiver |
 | 2026-08-10 | 1.4.14 | issue #14 output-contract repair | `fork --dry-run -o json` and `--json` now emit the same stable preview schema instead of human text; T-OUT-21 protects R4.2/R7.2/R8.6; no waiver |
 | 2026-08-10 | 1.4.14 | macOS signal and live-agent gate repair | Git cleanup preserves active signal exceptions after macOS `EPERM`; real-agent failures expose captured output; preflight reports host executable identity/version; Flox retains the four-system development toolchain without pinning agent CLIs; no public CLI change or waiver |
+| 2026-08-10 | 1.4.14 | issue #16 cleanup-safety reporting | Cleanup enumerates bounded dirty/unpushed risk, preserves full inspection under forced previews, adds compatible JSON `details` and granular overrides, keeps warnings on stderr, and preserves separate consent plus the non-overridable cwd guard; T-CLN-16..22 protect R7.1/R7.2/R7.8/R8.1/R8.6/R9.3; no waiver |
 
 ## Phase D requirement trace
 
@@ -67,8 +68,8 @@ open implementation finding.
 | REQ-14 | Implemented | Curated config env plus read-only host-agent signals; sealed-env fixtures |
 | REQ-15 | Documented | No argv secrets; ignored-file/`.env` risk documented in README |
 | REQ-16 | Implemented | G-OUT stream purity, final paste block, and TTY invariance |
-| REQ-17 | Implemented | G-OUT minimum completed-result, dry-run-preview, and error schemas plus stable error catalog |
-| REQ-18 | Implemented | T-OUT-08 human local-only plan, T-OUT-21 JSON preview contract, and cleanup dry-run T-CLN-13 |
+| REQ-17 | Implemented | G-OUT minimum completed-result, dry-run-preview, and error schemas plus stable error catalog; cleanup error/result `details` protected by T-CLN-19/T-CLN-21 |
+| REQ-18 | Implemented | T-OUT-08 human local-only plan, T-OUT-21 JSON preview contract, and cleanup dry-run/no-mutation reporting T-CLN-13/T-CLN-16/T-CLN-21 |
 | REQ-19 | Implemented | G-GRD 14-row pre-mutation refusal matrix |
 | REQ-20 | Implemented | G-ANC eight topologies and atomic branch/worktree creation |
 | REQ-21 | Implemented | G-MAT 20-row exact/ignored/no-state transport matrix |
@@ -82,7 +83,7 @@ open implementation finding.
 | REQ-29 | Implemented | G-PRE diagnostic refusals and no-mutation proof |
 | REQ-30 | Implemented | One name feeds branch/path/Claude title; quoted extras |
 | REQ-31 | Implemented | G-CLN target forms, worktree/branch/registry removal |
-| REQ-32 | Implemented | Dirty/unpushed/cwd guards and force boundary |
+| REQ-32 | Implemented | Dirty/unpushed/cwd guards, bounded diagnostics, granular overrides, and the unchanged force boundary; T-CLN-05..08/T-CLN-14/T-CLN-16..22 |
 | REQ-33 | Implemented | Consent, no-input, force separation, PTY prompt, dry-run |
 | REQ-34 | Implemented | T-CLN-12 external session file invariant and resumability notice |
 | REQ-35 | Implemented | Python floor, minimal dependencies, wheel, and console entry point clean-install |

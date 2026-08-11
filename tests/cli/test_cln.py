@@ -1,5 +1,8 @@
 """G-CLN command consent and dry-run rows."""
 
+import json
+import subprocess
+
 import pytest
 
 
@@ -24,6 +27,31 @@ def _forked(repo_scenario, name):
         env=world.env,
     )
     return world, result
+
+
+def _commit_unpushed(world, result, subject="wip: unpushed cleanup work"):
+    path = result.creation.path / "commit.txt"
+    path.write_text("unpushed\n")
+    subprocess.run(
+        ["git", "-C", str(result.creation.path), "add", "commit.txt"],
+        env=world.env,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(result.creation.path), "commit", "-m", subject],
+        env=world.env,
+        check=True,
+    )
+    return (
+        subprocess.run(
+            ["git", "-C", str(result.creation.path), "rev-parse", "--short", "HEAD"],
+            env=world.env,
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
 
 
 @pytest.mark.matrix("T-CLN-09")
@@ -91,3 +119,195 @@ def test_force_does_not_substitute_for_consent(repo_scenario):
     assert completed.returncode == 2
     assert b"requires --yes" in completed.stderr
     assert result.creation.path.exists()
+
+
+@pytest.mark.matrix("T-CLN-16")
+def test_force_dry_run_reports_dirty_paths_without_mutating(repo_scenario):
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "force-dry-dirty")
+    (result.creation.path / "tracked.txt").write_text("modified\n")
+    (result.creation.path / "important_untracked.txt").write_text("untracked\n")
+
+    completed = run_cli(
+        ["cleanup", "force-dry-dirty", "--force", "--dry-run"],
+        world.env,
+        world.parent_path,
+    )
+
+    assert completed.returncode == 0
+    assert b"would remove worktree" in completed.stdout
+    assert b"nothing was removed" in completed.stdout
+    assert b"WOULD DESTROY 2 uncommitted changes" in completed.stderr
+    assert b" M tracked.txt" in completed.stderr
+    assert b"?? important_untracked.txt" in completed.stderr
+    assert result.creation.path.exists()
+
+
+@pytest.mark.matrix("T-CLN-17")
+def test_dirty_refusal_reports_modified_and_untracked_paths(repo_scenario):
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "dirty-details")
+    (result.creation.path / "tracked.txt").write_text("modified\n")
+    (result.creation.path / "important_untracked.txt").write_text("untracked\n")
+
+    completed = run_cli(
+        ["cleanup", "dirty-details", "--dry-run"], world.env, world.parent_path
+    )
+
+    assert completed.returncode == 5 and completed.stdout == b""
+    assert b"cleanup_dirty_worktree: refusing to remove" in completed.stderr
+    assert b"2 uncommitted changes" in completed.stderr
+    assert b" M tracked.txt" in completed.stderr
+    assert b"?? important_untracked.txt" in completed.stderr
+    assert b"Override with --allow-dirty" in completed.stderr
+    assert result.creation.path.exists()
+
+
+@pytest.mark.matrix("T-CLN-18")
+def test_unpushed_refusal_reports_commit_sha_and_subject(repo_scenario):
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "unpushed-details")
+    subject = "wip: preserve parser experiment"
+    short_sha = _commit_unpushed(world, result, subject)
+
+    completed = run_cli(
+        ["cleanup", "unpushed-details", "--dry-run"],
+        world.env,
+        world.parent_path,
+    )
+
+    assert completed.returncode == 5 and completed.stdout == b""
+    assert b"cleanup_unpushed_commits: refusing to remove fork/unpushed-details" in (
+        completed.stderr
+    )
+    assert b"1 commit not reachable from any remote" in completed.stderr
+    assert short_sha.encode() in completed.stderr
+    assert subject.encode() in completed.stderr
+    assert b"Override with --allow-unpushed" in completed.stderr
+    assert result.creation.path.exists()
+
+
+@pytest.mark.matrix("T-CLN-19")
+def test_dirty_enumeration_is_bounded_in_human_and_json_errors(repo_scenario):
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "bounded-dirty")
+    (result.creation.path / "tracked.txt").write_text("modified\n")
+    for index in range(11):
+        (result.creation.path / f"untracked-{index:02}.txt").write_text("untracked\n")
+
+    human = run_cli(
+        ["cleanup", "bounded-dirty", "--dry-run"], world.env, world.parent_path
+    )
+    machine = run_cli(
+        ["cleanup", "bounded-dirty", "--dry-run", "--json"],
+        world.env,
+        world.parent_path,
+    )
+
+    assert human.returncode == 5
+    assert b" M tracked.txt" in human.stderr
+    assert b"untracked-08.txt" in human.stderr
+    assert b"untracked-09.txt" not in human.stderr
+    assert "… and 2 more".encode() in human.stderr
+    document = json.loads(machine.stderr)
+    details = document["error"]["details"]
+    assert details["dirty_count"] == 12
+    assert details["dirty_truncated"] is True
+    assert len(details["dirty"]) == 10
+    assert details["dirty"][0]["status"] == " M"
+    assert all(item["status"] == "??" for item in details["dirty"][1:])
+    assert result.creation.path.exists()
+
+
+@pytest.mark.matrix("T-CLN-20")
+def test_granular_overrides_are_independent(repo_scenario):
+    from conftest import run_cli
+
+    dirty_world, dirty_result = _forked(repo_scenario, "allow-dirty")
+    (dirty_result.creation.path / "dirty.txt").write_text("dirty\n")
+    dirty_allowed = run_cli(
+        ["cleanup", "allow-dirty", "--allow-dirty", "--yes"],
+        dirty_world.env,
+        dirty_world.parent_path,
+    )
+    assert dirty_allowed.returncode == 0
+    assert not dirty_result.creation.path.exists()
+
+    both_world, both_result = _forked(repo_scenario, "dirty-and-unpushed")
+    _commit_unpushed(both_world, both_result)
+    (both_result.creation.path / "dirty.txt").write_text("dirty\n")
+    still_refused = run_cli(
+        ["cleanup", "dirty-and-unpushed", "--allow-dirty", "--yes"],
+        both_world.env,
+        both_world.parent_path,
+    )
+    assert still_refused.returncode == 5
+    assert b"cleanup_unpushed_commits" in still_refused.stderr
+    assert both_result.creation.path.exists()
+
+    unpushed_world, unpushed_result = _forked(repo_scenario, "allow-unpushed")
+    _commit_unpushed(unpushed_world, unpushed_result)
+    unpushed_allowed = run_cli(
+        ["cleanup", "allow-unpushed", "--allow-unpushed", "--yes"],
+        unpushed_world.env,
+        unpushed_world.parent_path,
+    )
+    assert unpushed_allowed.returncode == 0
+    assert not unpushed_result.creation.path.exists()
+
+
+@pytest.mark.matrix("T-CLN-21")
+def test_json_error_and_forced_preview_carry_the_same_details(repo_scenario):
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "json-details")
+    short_sha = _commit_unpushed(world, result, "wip: json details")
+    (result.creation.path / "tracked.txt").write_text("modified\n")
+    (result.creation.path / "important_untracked.txt").write_text("untracked\n")
+
+    refused = run_cli(
+        ["cleanup", "json-details", "--dry-run", "--json"],
+        world.env,
+        world.parent_path,
+    )
+    preview = run_cli(
+        ["cleanup", "json-details", "--force", "--dry-run", "--json"],
+        world.env,
+        world.parent_path,
+    )
+
+    assert refused.returncode == 5 and refused.stdout == b""
+    error = json.loads(refused.stderr)["error"]
+    assert error["code"] == "cleanup_dirty_worktree"
+    assert error["message"] == f"refusing to remove {result.creation.path}"
+    assert preview.returncode == 0 and preview.stderr == b""
+    result_document = json.loads(preview.stdout)
+    assert result_document["details"] == error["details"]
+    assert result_document["details"]["dirty"] == [
+        {"path": "tracked.txt", "status": " M"},
+        {"path": "important_untracked.txt", "status": "??"},
+    ]
+    assert result_document["details"]["unpushed"] == [
+        {"sha": short_sha, "subject": "wip: json details"}
+    ]
+    assert result_document["removed"] is False
+    assert result.creation.path.exists()
+
+
+@pytest.mark.matrix("T-CLN-22")
+def test_granular_overrides_do_not_override_cwd_guard(repo_scenario):
+    from conftest import run_cli
+
+    for index, flag in enumerate(("--allow-dirty", "--allow-unpushed")):
+        name = f"cwd-granular-{index}"
+        world, result = _forked(repo_scenario, name)
+        completed = run_cli(
+            ["cleanup", name, flag, "--dry-run"], world.env, result.creation.path
+        )
+        assert completed.returncode == 5
+        assert b"cleanup_target_is_cwd" in completed.stderr
+        assert result.creation.path.exists()

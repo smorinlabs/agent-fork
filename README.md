@@ -138,14 +138,71 @@ than starting a new one.
 | `agent-fork completion bash\|zsh\|fish` | Generate a shell completion script |
 | `agent-fork help [command]` | Show help for a command |
 
-Global options: `-V/--version`, `-v/--verbose`, `-q/--quiet`, `--debug`,
-`--config PATH`, and `-o/--output {table,text,json}` (`--json` is an alias for
-`-o json`).
+Global options: `-V/--version`, `-v/--verbose`, `-q/--quiet`, `--debug`, and
+`--config PATH`. Commands that emit formatted results (`fork`, `list`,
+`cleanup`, `doctor`, and `config view`) accept
+`-o/--output {table,text,json}`; `--json` is an alias for `-o json`.
 
-`cleanup` is registry-scoped unless `--force` is used. It refuses dirty or
-unpushed worktrees without `--force`, always refuses to remove the invoking
-working directory, and requires separate consent via `--yes`. Agent-owned
-session files are never removed.
+`cleanup` is registry-scoped unless `--force` is used. It always inspects the
+target for uncommitted changes and commits that are not reachable from a remote.
+Without the matching override, it refuses and lists up to 10 at-risk paths or
+commits before reporting how many additional entries were omitted. Untracked
+paths are grouped separately from modified paths.
+
+`--force` keeps its 1.x behavior: it extends targeting beyond registered forks
+and overrides both Git safety guards. `--allow-dirty` and `--allow-unpushed`
+override only their named guard. None of these flags replaces consent via
+`--yes`, and none overrides the refusal to remove the invoking working
+directory. Agent-owned session files are never removed.
+
+## `cleanup` options
+
+| Flag | Effect |
+|---|---|
+| `TARGET` | Select a fork by registered name, branch, or worktree path |
+| `--force` | Allow an unregistered target and override both the dirty and unpushed guards |
+| `--allow-dirty` | Override only the guard against uncommitted changes |
+| `--allow-unpushed` | Override only the guard against commits absent from every remote |
+| `--keep-branch` | Remove the worktree but preserve its branch |
+| `--yes` | Supply non-interactive consent; it does not override safety guards |
+| `--no-input` | Never prompt; fail unless required consent was supplied with `--yes` |
+| `--dry-run` | Run the full safety inspection and preview removal without mutating |
+| `-o/--output {table,text,json}` | Select the result format |
+| `--json` | Alias for `--output json` |
+
+Examples:
+
+```bash
+agent-fork cleanup review-auth --dry-run
+agent-fork cleanup review-auth --allow-dirty --yes
+agent-fork cleanup ../unregistered-worktree --force --dry-run
+agent-fork cleanup review-auth --force --dry-run --json
+```
+
+A human forced preview writes its removal plan to stdout and its at-risk warning
+to stderr. A JSON guard refusal places `details` inside the stderr error object;
+a JSON dry-run result places the same object at the top level on stdout:
+
+```json
+{
+  "dirty": [
+    {"status": " M", "path": "tracked.txt"},
+    {"status": "??", "path": "important_untracked.txt"}
+  ],
+  "dirty_count": 2,
+  "dirty_truncated": false,
+  "unpushed": [
+    {"sha": "a1b2c3d", "subject": "wip: parser rewrite"}
+  ],
+  "unpushed_count": 1,
+  "unpushed_truncated": false
+}
+```
+
+Each array contains at most 10 entries. Its `*_count` field reports the complete
+count, and its `*_truncated` field is `true` when additional entries were
+omitted. Dry runs that find overridden risk still exit `0`; a dirty or unpushed
+guard refusal exits `5`.
 
 ## `fork` options
 
@@ -290,9 +347,11 @@ with `REPO_ROOT` and `WORKTREE_PATH` set.
 - **Ignored files stay put unless you ask.** `--with-ignored` may copy
   secret-bearing files such as `.env` between working trees, which is precisely
   why it is off by default.
-- **`cleanup` is deliberately hard to misuse.** It is registry-scoped, refuses
-  dirty or unpushed worktrees, refuses to delete the directory you are standing
-  in, and requires `--yes`. Agent-owned session files are never removed.
+- **`cleanup` is deliberately hard to misuse.** It is registry-scoped and
+  refuses dirty or unpushed worktrees unless `--force` or the matching granular
+  override is supplied. It always refuses to delete the directory you are
+  standing in and requires separate consent through `--yes`. Agent-owned
+  session files are never removed.
 - **Interrupts are handled.** SIGINT and SIGTERM exit 130 and 143 after rollback
   where applicable.
 - **No network, no telemetry.** `agent-fork` makes no runtime network calls and
@@ -301,8 +360,8 @@ with `REPO_ROOT` and `WORKTREE_PATH` set.
 
 ## Compatibility policy
 
-The v1 JSON result schema is open and stable within major version 0/1 as
-documented in
+The v1 JSON result schema is open and stable within major version 1 as documented
+in
 [REQUIREMENTS.md](https://github.com/smorinlabs/agent-fork/blob/main/REQUIREMENTS.md).
 Incompatible CLI or schema changes require a major version change; compatible
 additions may appear in a minor release. Deprecated interfaces will be
@@ -317,7 +376,8 @@ Under any machine format, a failure prints a single error object on stderr:
 ```
 
 Codes are stable compatibility identifiers; messages may gain detail without
-changing their meaning.
+changing their meaning. Error objects may add a documented `details` object;
+cleanup guard refusals use the cleanup schema shown above.
 
 | Exit | Meaning | Codes |
 |---|---|---|
@@ -341,6 +401,7 @@ make check         # environment and dependency preflight
 flox activate
 just all
 just check-matrix
+just strict-collect
 just clean-install
 just test-git-matrix
 ```

@@ -125,8 +125,13 @@ class DryRunOutput:
 def render_error(error: BaseException, *, machine: bool = False) -> str:
     code = error.code if isinstance(error, AgentForkError) else "runtime_error"
     if machine:
-        return json_line({"error": {"code": code, "message": str(error)}})
-    return f"{code}: {error}"
+        document: dict[str, object] = {"code": code, "message": str(error)}
+        details = getattr(error, "details", None)
+        if details is not None:
+            document["details"] = details
+        return json_line({"error": document})
+    message = getattr(error, "human_message", None) or str(error)
+    return f"{code}: {message}"
 
 
 def copy_to_clipboard(command: str) -> tuple[str, ...]:
