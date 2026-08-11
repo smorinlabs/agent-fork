@@ -170,6 +170,40 @@ def _parser() -> argparse.ArgumentParser:
         help="Select result format",
     )
     fork.add_argument("--json", action="store_true", help="Alias for --output json")
+    session = commands.add_parser(
+        "session",
+        allow_abbrev=False,
+        help="Inspect or validate the current agent session",
+        description="Report agent-neutral current-session and parent evidence.",
+    )
+    session.add_argument(
+        "-o",
+        "--output",
+        choices=("table", "text", "json"),
+        default="table",
+        help="Select result format",
+    )
+    session.add_argument("--json", action="store_true", help="Alias for --output json")
+    session_actions = session.add_subparsers(dest="session_action")
+    session_validate = session_actions.add_parser(
+        "validate", allow_abbrev=False, help="Assert detected session facts"
+    )
+    session_validate.add_argument("--agent", choices=("claude", "codex"))
+    session_validate.add_argument("--session-id", metavar="ID")
+    session_validate.add_argument("--parent-session-id", metavar="ID")
+    parent_assertion = session_validate.add_mutually_exclusive_group()
+    parent_assertion.add_argument("--has-parent", action="store_true")
+    parent_assertion.add_argument("--no-parent", action="store_true")
+    session_validate.add_argument(
+        "-o",
+        "--output",
+        choices=("table", "text", "json"),
+        default="table",
+        help="Select result format",
+    )
+    session_validate.add_argument(
+        "--json", action="store_true", help="Alias for --output json"
+    )
     listing = commands.add_parser(
         "list",
         allow_abbrev=False,
@@ -571,6 +605,13 @@ def main(argv: list[str] | None = None) -> int:
         and (args.agent is not None or args.parent_session is not None)
     ):
         parser.error("--no-agent cannot be combined with --agent or --parent-session")
+    if (
+        args.command == "session"
+        and args.session_action == "validate"
+        and args.no_parent
+        and args.parent_session_id is not None
+    ):
+        parser.error("--no-parent cannot be combined with --parent-session-id")
     environment = dict(os.environ)
     try:
         if args.verbose and not args.quiet:
@@ -635,6 +676,68 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if all(check.ok for check in checks) else 1
         if args.command == "fork":
             return _fork_cli(args, environment)
+        if args.command == "session":
+            from agent_fork.output import json_line, terminal_text
+            from agent_fork.session import (
+                SessionAssertions,
+                inspect_session,
+                validate_session,
+            )
+
+            inspection = inspect_session(environment, cwd=Path.cwd())
+            machine = args.json or args.output == "json"
+            if args.session_action == "validate":
+                has_parent = (
+                    True
+                    if args.has_parent or args.parent_session_id is not None
+                    else False
+                    if args.no_parent
+                    else None
+                )
+                document = validate_session(
+                    inspection,
+                    SessionAssertions(
+                        agent=args.agent,
+                        session_id=args.session_id,
+                        parent_session_id=args.parent_session_id,
+                        has_parent=has_parent,
+                    ),
+                )
+                if machine:
+                    print(json_line(document))
+                else:
+                    print("session valid")
+                return 0
+            if machine:
+                print(json_line(inspection.document()))
+            elif inspection.current_session is None:
+                print(f"session: {inspection.lineage_status}")
+            else:
+                current = inspection.current_session
+                print(f"agent: {terminal_text(inspection.agent)}")
+                print(f"current session: {terminal_text(current.id)}")
+                print(
+                    "current name: "
+                    + (terminal_text(current.name) if current.name is not None else "-")
+                )
+                if inspection.parent_session is None:
+                    print("parent session: -")
+                else:
+                    print(
+                        "parent session: " + terminal_text(inspection.parent_session.id)
+                    )
+                    print(
+                        "parent name: "
+                        + (
+                            terminal_text(inspection.parent_session.name)
+                            if inspection.parent_session.name is not None
+                            else "-"
+                        )
+                    )
+                print(f"lineage: {terminal_text(inspection.lineage_status)}")
+                for notice in inspection.notices:
+                    print(f"notice: {terminal_text(notice)}")
+            return 0
         if args.command == "cleanup":
             from agent_fork.cleanup import cleanup, resolve_cleanup_target
 

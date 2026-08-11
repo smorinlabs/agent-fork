@@ -22,6 +22,7 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
     "session_resolution_unavailable": ErrorSpec(
         3, "session-name resolver is unavailable"
     ),
+    "session_validation_failed": ErrorSpec(3, "session assertions did not match"),
     "cleanup_target_unknown": ErrorSpec(3, "cleanup target is not registered or found"),
     "conflict_branch_exists": ErrorSpec(5, "fork branch already exists"),
     "conflict_branch_worktree": ErrorSpec(5, "branch is attached to a worktree"),
@@ -110,4 +111,9 @@ class SessionNameAmbiguousError(AgentForkError):
 
 class SessionResolutionUnavailableError(AgentForkError):
     code = "session_resolution_unavailable"
+    exit_code = 3
+
+
+class SessionValidationError(AgentForkError):
+    code = "session_validation_failed"
     exit_code = 3

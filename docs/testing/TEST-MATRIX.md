@@ -440,6 +440,40 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 
 ---
 
+## G-SES — Session inspection and assertions
+Status: done
+
+Purpose: agent-neutral current-session reporting, sourced parent evidence, and composable validation assertions.
+
+Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and output format.
+
+| ID | Scenario | Axes | Tier | row_status | Source |
+|---|---|---|---|---|---|
+| T-SES-01 | no agent signals produce observational `not_detected` evidence | baseline | U | live | REQ-47; D18 |
+| T-SES-02 | Claude environment conjunction identifies the current session and source | agent=claude | U | live | REQ-47; D18 |
+| T-SES-03 | simultaneous Claude and Codex signals report ambiguity | baseline | U | live | REQ-47; D18 |
+| T-SES-04 | exact Claude transcript metadata resolves the current display name | agent=claude | U | live | REQ-47; D18 |
+| T-SES-05 | Claude lineage and planned name remain explicitly claimed evidence | agent=claude | U | live | REQ-47; D18 |
+| T-SES-06 | versioned XDG lineage claims round-trip and replace deterministically | baseline | U | live | REQ-47; D18 |
+| T-SES-07 | agent/current/parent/presence assertions compose with AND semantics | agent=codex | U | live | REQ-47; D18 |
+| T-SES-08 | missing or mismatched assertions raise the typed validation failure | baseline | U | live | REQ-47; D18 |
+| T-SES-09 | no-session JSON inspection succeeds with the stable evidence schema | baseline | C | live | REQ-47; D18 |
+| T-SES-10 | unconstrained validate requires a detectable current session | baseline | C | live | REQ-47; D18 |
+| T-SES-11 | CLI agent, current-ID, and no-parent assertions pass together | agent=claude | C | live | REQ-47; D18 |
+| T-SES-12 | parent-ID plus no-parent is an exit-2 usage conflict | baseline | C | live | REQ-47; D18 |
+| T-SES-13 | `session --json` is byte-identical to `session -o json` | baseline | C | live | REQ-47; D18 |
+| T-SES-14 | Codex `thread/read` returns the current name and `forkedFromId` parent | agent=codex | U | live | REQ-47; D18 |
+| T-SES-15 | cleanup removes the worktree registry entry but retains Claude lineage | agent=claude | F | live | REQ-47; D18 |
+| T-SES-16 | lineage-write failure compensates the registry and rolls back Git resources | agent=claude | F | live | REQ-47; D18 |
+| T-SES-17 | real Claude `-p` shell observation matches the outer result session ID | agent=claude | R | live | REQ-47; D18; EXPERIMENTS E8 |
+| T-SES-18 | real Codex `exec --json` shell observation matches `thread.started` | agent=codex | R | live | REQ-47; D18; EXPERIMENTS E9 |
+| T-SES-19 | human session output escapes terminal controls in agent-owned values | baseline | C | live | REQ-47; D18 |
+| T-SES-20 | a real resumed Claude child observes its recorded parent claim | agent=claude | R | live | REQ-47; D18; EXPERIMENTS E10 |
+| T-SES-21 | a hostile Claude session ID cannot escape the bounded transcript path | agent=claude | U | live | REQ-47; D18 |
+| T-SES-22 | inspection works outside Git and performs no lineage-store write | baseline | C | live | REQ-47; D18 |
+
+---
+
 ## G-EXP — Live experiments
 Status: done
 

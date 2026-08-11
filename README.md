@@ -85,6 +85,7 @@ The version command must print `agent-fork 1.0.0`. The placement list must show
 ```bash
 agent-fork doctor              # confirm Git, agent CLIs, config, and XDG paths
 agent-fork fork try-redis      # create the fork, print the paste command
+agent-fork session -o json     # inspect current session and parent evidence
 agent-fork list                # see the forks you have created
 agent-fork cleanup try-redis --yes   # remove one when you are done
 ```
@@ -131,6 +132,7 @@ than starting a new one.
 | Command | Purpose |
 |---|---|
 | `agent-fork fork [NAME]` | Create a verified branch and worktree; print the paste command |
+| `agent-fork session [validate]` | Inspect session evidence or assert expected identity and lineage |
 | `agent-fork list` | List forks created by `agent-fork` |
 | `agent-fork cleanup <name\|branch\|worktree> --yes` | Remove a registered fork |
 | `agent-fork doctor` | Diagnose Git, agent, config, and XDG readiness |
@@ -140,7 +142,7 @@ than starting a new one.
 
 Global options: `-V/--version`, `-v/--verbose`, `-q/--quiet`, `--debug`, and
 `--config PATH`. Commands that emit formatted results (`fork`, `list`,
-`cleanup`, `doctor`, and `config view`) accept
+`session`, `cleanup`, `doctor`, and `config view`) accept
 `-o/--output {table,text,json}`; `--json` is an alias for `-o json`.
 
 `cleanup` is registry-scoped unless `--force` is used. It always inspects the
@@ -154,6 +156,32 @@ and overrides both Git safety guards. `--allow-dirty` and `--allow-unpushed`
 override only their named guard. None of these flags replaces consent via
 `--yes`, and none overrides the refusal to remove the invoking working
 directory. Agent-owned session files are never removed.
+
+## Session inspection and validation
+
+Use the same interface inside Claude Code or Codex:
+
+```bash
+agent-fork session
+agent-fork session -o json
+agent-fork session validate --agent codex --has-parent
+agent-fork session validate \
+  --session-id "$EXPECTED_CHILD" \
+  --parent-session-id "$EXPECTED_PARENT" -o json
+```
+
+Inspection reports sourced evidence and succeeds with `not_detected` in an
+ordinary terminal. Validation without constraints requires any unambiguous
+supported current session. Optional `--agent`, `--session-id`,
+`--parent-session-id`, and `--has-parent`/`--no-parent` assertions compose with
+AND semantics.
+
+Parent means parent evidence, not proof that a transcript still exists. Codex
+name and parent evidence comes from its bounded local app-server. Agent
+Fork-created Claude children retain a prompt-free XDG provenance claim because
+Claude transcripts do not preserve the source session UUID. Missing evidence
+is not proof that a session was never forked. Inspection makes no network calls
+and does not modify agent state.
 
 ## `cleanup` options
 
@@ -386,7 +414,7 @@ cleanup guard refusals use the cleanup schema shown above.
 | 0 | Success | — |
 | 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy` |
 | 2 | Usage error or required prompt disabled | `config_error` |
-| 3 | Agent, session, or target not found | `agent_not_detected`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `cleanup_target_unknown` |
+| 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown` |
 | 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits` |
 | 130 / 143 | Interrupted by SIGINT / SIGTERM | — |
 

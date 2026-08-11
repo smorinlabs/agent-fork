@@ -4,7 +4,7 @@
 - **Trunk:** [PROJECTS.md](../PROJECTS.md)
 - **Spec:** [REQUIREMENTS.md](../REQUIREMENTS.md) — REQ-01..42, pinned to CLI Design Standard v1.4.14
 - **Design:** [DESIGN-DECISIONS.md](../DESIGN-DECISIONS.md) — D1–D14 locked 2026-07-21
-- **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — owner-approved 2026-08-10; [worktree destination controls](../docs/superpowers/plans/2026-08-10-worktree-destination-controls.md) — complete 2026-08-10; [Codex renamed-session resolution](../docs/superpowers/plans/2026-08-10-codex-renamed-session-resolution.md) — final proposal 2026-08-10
+- **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — owner-approved 2026-08-10; [worktree destination controls](../docs/superpowers/plans/2026-08-10-worktree-destination-controls.md) — complete 2026-08-10; [Codex renamed-session resolution](../docs/superpowers/plans/2026-08-10-codex-renamed-session-resolution.md) — final proposal 2026-08-10; [session inspection and assertion](../docs/superpowers/plans/2026-08-11-session-inspection-validation.md) — proposed 2026-08-11
 - **Tracking:** [CONFORMANCE.md](../CONFORMANCE.md) — applicability map + waivers
 - **Prior art:** [RESEARCH.md](../RESEARCH.md) — agent-deck port source map; [recipes leaf](../research/reference/agent-session-fork-cli-recipes-2026-07-21.md)
 
@@ -99,6 +99,10 @@ Phase F — ship v1.0.0 (gate: released + installable)
 - [x] [P01-T19] CLI Design Standard v1.4.14 audit and approved second-level hardening — semantic help/diagnostics, authoritative error catalog, functional Bash/Zsh/Fish completions, and installed-wheel checks green; existing R2.1 waiver unchanged; no new waivers
 - [ ] [P01-T20] Release plumbing: release-please, PyPI + TestPyPI trusted publishing, Homebrew tap
 - [ ] [P01-T21] Cut v1.0.0 replacing the PyPI placeholder; verify `uv tool install` + `pipx install`
+
+Session inspection follow-up (gate: owner-approved design, TDD, real-agent proof)
+- [x] [P01-TS23] Add G-SES TDD matrix for agent-neutral inspection, assertion constraints, evidence sources, and real Claude/Codex acceptance — 22 canonical rows green
+- [x] [P01-T33] Implement `agent-fork session` and `session validate` per the 2026-08-11 plan — hermetic and real-agent gates green; stopped at SES-G6 before PR
 
 - [x] Regression Test Status — Phase D final suite 218 passed with only retired T-EXP-04 skipped; conformance fixtures and clean-install checks green in PR #8
 

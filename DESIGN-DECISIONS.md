@@ -25,6 +25,7 @@
 | D15 | Partial worktree destination overrides | **Independent base and leaf flags; exact path remains exclusive** | ★ owner-approved 2026-08-10 |
 | D16 | Agent integration mode | **Adaptive `auto`; explicit `strict` and `git-only` controls** | ★ owner-approved 2026-08-10 |
 | D17 | Codex renamed sessions | **Feature-detected app-server resolution; default on with UUID-only escape hatch** | ★ owner-approved 2026-08-10 |
+| D18 | Session inspection | **Agent-neutral evidence report plus composable assertions; parent means evidence, not transcript existence** | ★ owner-approved 2026-08-11 |
 
 ## Decisions in detail
 
@@ -110,6 +111,17 @@ protocol and always emits the canonical UUID. Resolution is enabled by default;
 Canonical UUIDs bypass app-server. Protocol failures refuse with UUID guidance;
 there is never a direct SQLite fallback. The Codex-specific flag is retained if
 a future generic session-name-resolution control is introduced.
+
+### D18 — Session inspection and assertions (owner-approved 2026-08-11)
+
+`agent-fork session` reports ambient Claude/Codex identity, optional local name,
+and optional parent evidence without requiring Git or mutating agent state.
+`session validate` asserts detection by default and composes `--agent`,
+`--session-id`, `--parent-session-id`, and `--has-parent`/`--no-parent` with AND
+semantics. Codex evidence comes from its local app-server. Agent Fork-created
+Claude children use a versioned XDG provenance claim because Claude transcripts
+do not retain the source session UUID. Missing parent evidence is not proof that
+a session was never forked.
 
 ## Resulting v1 surface (consolidated)
 

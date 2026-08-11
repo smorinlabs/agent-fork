@@ -24,7 +24,8 @@ PAGE_SIZE = 100
 @dataclass(frozen=True)
 class CodexThread:
     id: str
-    name: str
+    name: str | None
+    forked_from_id: str | None = None
 
 
 def _failure(detail: str) -> SessionResolutionUnavailableError:
@@ -35,8 +36,12 @@ def _failure(detail: str) -> SessionResolutionUnavailableError:
     )
 
 
-def list_named_threads(
-    executable: str, name: str, env: Mapping[str, str]
+def _query_threads(
+    executable: str,
+    env: Mapping[str, str],
+    *,
+    name: str | None = None,
+    thread_id: str | None = None,
 ) -> tuple[CodexThread, ...]:
     """Return bounded exact-name candidates through Codex-owned state access."""
     try:
@@ -121,6 +126,31 @@ def list_named_threads(
         if "error" in initialized or not isinstance(initialized.get("result"), dict):
             raise _failure("app-server initialization is unsupported")
         send({"method": "initialized", "params": {}})
+        if thread_id is not None:
+            send(
+                {
+                    "id": 2,
+                    "method": "thread/read",
+                    "params": {"threadId": thread_id, "includeTurns": False},
+                }
+            )
+            reply = response(2)
+            if "error" in reply:
+                return ()
+            result = reply.get("result")
+            thread = result.get("thread") if isinstance(result, dict) else None
+            if not isinstance(thread, dict) or thread.get("id") != thread_id:
+                raise _failure("thread/read returned an unsupported schema")
+            found_name = thread.get("name")
+            parent = thread.get("forkedFromId")
+            return (
+                CodexThread(
+                    thread_id,
+                    found_name if isinstance(found_name, str) else None,
+                    parent if isinstance(parent, str) else None,
+                ),
+            )
+        assert name is not None
         cursor: str | None = None
         seen_cursors: set[str] = set()
         candidates: list[CodexThread] = []
@@ -154,9 +184,16 @@ def list_named_threads(
             for item in data:
                 if not isinstance(item, dict) or item.get("name") != name:
                     continue
-                thread_id = item.get("id")
-                if isinstance(thread_id, str):
-                    candidates.append(CodexThread(thread_id, name))
+                item_id = item.get("id")
+                if isinstance(item_id, str):
+                    parent = item.get("forkedFromId")
+                    candidates.append(
+                        CodexThread(
+                            item_id,
+                            name,
+                            parent if isinstance(parent, str) else None,
+                        )
+                    )
             next_cursor = result.get("nextCursor")
             if next_cursor is None:
                 return tuple(candidates)
@@ -177,3 +214,18 @@ def list_named_threads(
         process.stdin.close()
         process.stdout.close()
         process.stderr.close()
+
+
+def list_named_threads(
+    executable: str, name: str, env: Mapping[str, str]
+) -> tuple[CodexThread, ...]:
+    """Return bounded exact-name candidates through Codex-owned state access."""
+    return _query_threads(executable, env, name=name)
+
+
+def read_thread(
+    executable: str, thread_id: str, env: Mapping[str, str]
+) -> CodexThread | None:
+    """Read one exact thread through the bounded Codex-owned app-server path."""
+    matches = _query_threads(executable, env, thread_id=thread_id)
+    return matches[0] if matches else None

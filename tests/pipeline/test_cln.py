@@ -77,6 +77,23 @@ def test_cleanup_removes_and_prunes_worktree(repo_scenario):
     assert str(forked.creation.path) not in listing
 
 
+@pytest.mark.matrix("T-SES-15")
+def test_cleanup_retains_claude_lineage(repo_scenario):
+    from agent_fork.cleanup import cleanup, resolve_cleanup_target
+    from agent_fork.lineage import find_lineage
+
+    world, _ = _forked(repo_scenario, name="lineage-retained")
+    child = "33333333-3333-3333-3333-333333333333"
+    assert find_lineage("claude", child, env=world.env) is not None
+    plan = resolve_cleanup_target(
+        "lineage-retained", cwd=world.parent_path, env=world.env
+    )
+    cleanup(plan, cwd=world.parent_path, env=world.env)
+    claim = find_lineage("claude", child, env=world.env)
+    assert claim is not None
+    assert claim.parent_session_id == "11111111-1111-1111-1111-111111111111"
+
+
 @pytest.mark.matrix("T-CLN-03")
 def test_cleanup_deletes_branch_unless_keep_branch(repo_scenario):
     from agent_fork.cleanup import cleanup, resolve_cleanup_target

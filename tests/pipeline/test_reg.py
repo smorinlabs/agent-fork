@@ -141,3 +141,34 @@ def test_registry_ownership_check_feeds_cleanup_refusal(repo_scenario):
     registry_path(world.env).write_text('{"version":1,"forks":[')
     with pytest.raises(ValueError, match="invalid agent-fork registry"):
         find_owned("mine", env=world.env)
+
+
+@pytest.mark.matrix("T-SES-16")
+def test_lineage_write_failure_compensates_registry_and_worktree(
+    repo_scenario, monkeypatch
+):
+    from agent_fork.agents import AgentContext
+    from agent_fork.pipeline import ForkRequest, fork
+    from agent_fork.registry import read_registry
+
+    world = repo_scenario()
+    destination = world.parent_path.parent / "lineage-failure"
+    monkeypatch.setattr(
+        "agent_fork.pipeline.add_lineage",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("lineage failed")),
+    )
+    request = ForkRequest(
+        parent=world.parent_path,
+        destination=destination,
+        name="lineage-failure",
+        branch="fork/lineage-failure",
+        agent=AgentContext("claude", "11111111-1111-1111-1111-111111111111"),
+        agent_executable="/fake/claude",
+        agent_version_output="Claude Code 2.1.220",
+        git_version_output="git version 2.43.0",
+        child_session_id="33333333-3333-3333-3333-333333333333",
+    )
+    with pytest.raises(OSError, match="lineage failed"):
+        fork(request, env=world.env)
+    assert not destination.exists()
+    assert read_registry(env=world.env) == []

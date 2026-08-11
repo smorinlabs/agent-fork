@@ -83,3 +83,42 @@ startup. `--no-codex-session-name-resolution` and
 `[agents.codex] session_name_resolution = false` retain a deterministic
 UUID-only escape hatch. T-EXP-07 rechecks the real local path and performs no
 repository mutation.
+
+## E8–E10 — Session inspection and lineage — 2026-08-11
+
+The session command was exercised through real authenticated agent tool calls,
+not only through injected environment fixtures.
+
+### E8 — Claude `-p` current identity
+
+A fresh persisted Claude Code 2.1.220 `-p --output-format json` session was
+restricted to Bash and instructed to run `agent-fork session -o json`. The
+outer result `session_id` exactly matched the inner
+`current_session.id`; Agent Fork reported `agent=claude`. Because the live
+harness itself runs under Codex, it explicitly removed the unrelated inherited
+`CODEX_THREAD_ID` when spawning Claude.
+
+Result: **pass**.
+
+### E9 — Codex `exec --json` current identity
+
+A fresh persisted Codex CLI 0.147.0 `exec --json` session ran the same command.
+The outer `thread.started.thread_id` exactly matched the inner
+`current_session.id`; Agent Fork reported `agent=codex`. The local app-server
+lookup completed without notices.
+
+Result: **pass**.
+
+### E10 — resumed Claude child parent claim
+
+A real Claude child created with a pinned UUID and native `--fork-session` was
+given the corresponding prompt-free Agent Fork lineage claim, resumed, and
+instructed to inspect itself. It observed its own child UUID from
+`CLAUDE_CODE_SESSION_ID` and reported the known source UUID as parent evidence
+with `id_status=claimed`. The temporary lineage claim was removed after the
+test; transcript content was neither read into the result nor stored by Agent
+Fork.
+
+Result: **pass**. This validates the evidence distinction: current identity is
+observed from the live environment, while Claude parent identity is a durable
+Agent Fork provenance claim.
