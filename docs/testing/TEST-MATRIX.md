@@ -19,7 +19,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 ---
 
 ## G-CFG — Config resolution
-Status: tdd
+Status: done
 
 Purpose: config resolution — tri-state keys, the implication rule, precedence chain, and env vars (U); config-file walk-up/boundary rows (F); `config set`/`config validate` round-trip via the CLI (C).
 
