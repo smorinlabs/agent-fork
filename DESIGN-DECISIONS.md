@@ -27,6 +27,7 @@
 | D17 | Codex renamed sessions | **Feature-detected app-server resolution; default on with UUID-only escape hatch** | ★ owner-approved 2026-08-10 |
 | D18 | Session inspection | **Agent-neutral evidence report plus composable assertions; parent means evidence, not transcript existence** | ★ owner-approved 2026-08-11 |
 | D19 | Claude parent inference | **Explicit opt-in structural inference; sharded screening cache; inferred evidence remains separate from planned claims** | ★ owner-approved 2026-08-11 |
+| D20 | Direct companion skill | **Delegate to existing session/fork commands; CLI owns automatic topic-branch naming** | ★ owner-approved 2026-08-11 |
 
 ## Decisions in detail
 
@@ -115,6 +116,16 @@ a future generic session-name-resolution control is introduced.
 
 ### D18 — Session inspection and assertions (owner-approved 2026-08-11)
 
+`agent-fork session` reports ambient Claude/Codex identity, optional local name,
+optional parent evidence, the invocation directory, and optional Git repository
+context without mutating agent or repository state. `session validate` asserts
+detection by default and composes `--agent`, `--session-id`,
+`--parent-session-id`, and `--has-parent`/`--no-parent` with AND semantics.
+Codex evidence comes from its local app-server. Agent Fork-created Claude
+children use a versioned XDG provenance claim because Claude transcripts do not
+retain the source session UUID. Missing parent evidence is not proof that a
+session was never forked.
+
 ### D19 — Claude parent inference and lineage management (owner-approved 2026-08-11)
 Claude historical parent discovery is explicit under `session claude-parent` and
 never runs during ordinary inspection. Inference requires `--current`,
@@ -132,18 +143,22 @@ fingerprints, algorithm version, analysis index generation, and a
 target-specific candidate-universe digest. Stale inference is visible but does
 not satisfy validation.
 
-`agent-fork session` reports ambient Claude/Codex identity, optional local name,
-and optional parent evidence without requiring Git or mutating agent state.
-`session validate` asserts detection by default and composes `--agent`,
-`--session-id`, `--parent-session-id`, and `--has-parent`/`--no-parent` with AND
-semantics. Codex evidence comes from its local app-server. Agent Fork-created
-Claude children use a versioned XDG provenance claim because Claude transcripts
-do not retain the source session UUID. Missing parent evidence is not proof that
-a session was never forked.
+### D20 — Direct companion skill and repository-aware session context (owner-approved 2026-08-11)
+
+The canonical Claude Code/Codex skill calls the installed CLI directly. Exact
+`--session` and agent-session inspection requests call
+`agent-fork session --json`. Explicit name hints normalize to conservative
+lowercase kebab case before `agent-fork fork '<name>' --require-agent --json`.
+An unnamed fork inspects the session first: a known topic branch proceeds with
+`agent-fork fork --require-agent --json` so the CLI retains date and collision
+suffixing; default, detached, or unclassified branches require a recommended or
+user-selected explicit name. Unsupported option-like input refuses. The skill
+preserves missing-install, malformed-JSON, nonzero-error, and exact continuation
+command behavior but contains no executable wrapper and no Git implementation.
 
 ## Resulting v1 surface (consolidated)
 
-- **Commands:** `fork [NAME] [--branch B] [--worktree-dir P | --worktree-base-dir B [--worktree-name N] | --worktree-name N]` · `cleanup <TARGET>` · `list` · `doctor` · `config view|get|set|validate` · `completion <shell>` · `help` — bare `agent-fork` prints help (D1).
+- **Commands:** `fork [NAME] [--branch B] [--worktree-dir P | --worktree-base-dir B [--worktree-name N] | --worktree-name N]` · `session [validate|claude-parent ...]` · `cleanup <TARGET>` · `list` · `doctor` · `config view|get|set|validate` · `completion <shell>` · `help` — bare `agent-fork` prints help (D1).
 - **Emitted commands** (quoted uniformly; `<extra>` = D11 args):
   - Claude: `cd '<worktree>' && claude --session-id "<uuid>" --resume <parent-id> --fork-session -n '<fork-name>'<extra>` (`-n` pending experiment E1)
   - Codex: `cd '<worktree>' && codex fork <parent-thread-id><extra>` (`-C` variant + cwd-prompt handling pending E2)

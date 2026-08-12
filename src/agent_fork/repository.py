@@ -37,6 +37,41 @@ class WorktreeCreation:
     parent_on_default: bool
 
 
+@dataclass(frozen=True)
+class DefaultBranchClassification:
+    remote_default_branch: str | None
+    candidates: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WorkingTreeStatus:
+    staged: int
+    unstaged: int
+    untracked: int
+    unmerged: int
+    operation: str | None
+
+    @property
+    def clean(self) -> bool:
+        return (
+            self.staged == 0
+            and self.unstaged == 0
+            and self.untracked == 0
+            and self.unmerged == 0
+            and self.operation is None
+        )
+
+    def document(self) -> dict[str, object]:
+        return {
+            "clean": self.clean,
+            "staged": self.staged,
+            "unstaged": self.unstaged,
+            "untracked": self.untracked,
+            "unmerged": self.unmerged,
+            "operation": self.operation,
+        }
+
+
 def _resolve_git_path(parent: Path, value: str) -> Path:
     candidate = Path(value)
     if not candidate.is_absolute():
@@ -103,11 +138,87 @@ _OPERATION_SENTINELS = {
 }
 
 
-def _mid_operation(info: RepositoryInfo) -> str | None:
+def mid_operation(info: RepositoryInfo) -> str | None:
     for operation, sentinels in _OPERATION_SENTINELS.items():
         if any((info.git_dir / sentinel).exists() for sentinel in sentinels):
             return operation
     return None
+
+
+def current_branch(parent: Path, *, env: Mapping[str, str] | None = None) -> str | None:
+    result = run_git(
+        parent,
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        env=env,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.decode(errors="replace").strip()
+
+
+def classify_default_branches(
+    parent: Path, *, env: Mapping[str, str] | None = None
+) -> DefaultBranchClassification:
+    remote_default: str | None = None
+    remote = run_git(
+        parent,
+        ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        env=env,
+        check=False,
+    )
+    if remote.returncode == 0:
+        remote_default = (
+            remote.stdout.decode(errors="replace").strip().removeprefix("origin/")
+        )
+
+    candidates: list[str] = []
+    if remote_default:
+        candidates.append(remote_default)
+    for fallback in ("main", "master"):
+        present = run_git(
+            parent,
+            ["show-ref", "--verify", "--quiet", f"refs/heads/{fallback}"],
+            env=env,
+            check=False,
+        )
+        if present.returncode == 0 and fallback not in candidates:
+            candidates.append(fallback)
+    return DefaultBranchClassification(remote_default, tuple(candidates))
+
+
+def count_paths(
+    parent: Path,
+    arguments: list[str],
+    *,
+    env: Mapping[str, str] | None = None,
+) -> int:
+    data = run_git(parent, arguments, env=env).stdout
+    return len({value for value in data.split(b"\0") if value})
+
+
+def inspect_working_tree_status(
+    info: RepositoryInfo, *, env: Mapping[str, str] | None = None
+) -> WorkingTreeStatus | None:
+    if info.bare:
+        return None
+    assert info.worktree_root is not None
+    parent = info.worktree_root
+    unmerged = run_git(parent, ["ls-files", "-u", "-z"], env=env).stdout
+    unmerged_paths = {
+        record.split(b"\t", 1)[1] for record in unmerged.split(b"\0") if b"\t" in record
+    }
+    return WorkingTreeStatus(
+        staged=count_paths(parent, ["diff", "--cached", "--name-only", "-z"], env=env),
+        unstaged=count_paths(parent, ["diff", "--name-only", "-z"], env=env),
+        untracked=count_paths(
+            parent,
+            ["ls-files", "--others", "--exclude-standard", "-z"],
+            env=env,
+        ),
+        unmerged=len(unmerged_paths),
+        operation=mid_operation(info),
+    )
 
 
 def _abort_hint(operation: str, parent: Path) -> str:
@@ -146,7 +257,7 @@ def validate_fork_guards(
         raise PreconditionError(
             "conflict_worktree_path", f"worktree path already exists: {destination}"
         )
-    operation = _mid_operation(info)
+    operation = mid_operation(info)
     if operation is not None:
         raise PreconditionError(
             "parent_mid_operation",
@@ -194,34 +305,8 @@ def create_worktree_at_anchor(
     """Atomically ask Git to create branch+worktree and classify race losses."""
     info = inspect_repository(parent, env=env)
     resolved_anchor = anchor or resolve_anchor(parent, env=env)
-    symbolic = run_git(
-        parent, ["symbolic-ref", "--quiet", "--short", "HEAD"], env=env, check=False
-    )
-    parent_branch = (
-        symbolic.stdout.decode().strip() if symbolic.returncode == 0 else None
-    )
-    default_candidates: set[str] = set()
-    remote_default = run_git(
-        parent,
-        ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
-        env=env,
-        check=False,
-    )
-    if remote_default.returncode == 0:
-        default_candidates.add(
-            remote_default.stdout.decode().strip().removeprefix("origin/")
-        )
-    for fallback in ("main", "master"):
-        if (
-            run_git(
-                parent,
-                ["show-ref", "--verify", "--quiet", f"refs/heads/{fallback}"],
-                env=env,
-                check=False,
-            ).returncode
-            == 0
-        ):
-            default_candidates.add(fallback)
+    parent_branch = current_branch(parent, env=env)
+    default_branches = classify_default_branches(parent, env=env)
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
         run_git(
@@ -255,5 +340,5 @@ def create_worktree_at_anchor(
         common_dir=info.common_dir,
         parent_branch=parent_branch,
         parent_detached=parent_branch is None,
-        parent_on_default=parent_branch in default_candidates,
+        parent_on_default=parent_branch in default_branches.candidates,
     )

@@ -85,7 +85,7 @@ The version command must print `agent-fork 1.0.0`. The placement list must show
 ```bash
 agent-fork doctor              # confirm Git, agent CLIs, config, and XDG paths
 agent-fork fork try-redis      # create the fork, print the paste command
-agent-fork session -o json     # inspect current session and parent evidence
+agent-fork session --json      # inspect session, directory, and Git context
 agent-fork list                # see the forks you have created
 agent-fork cleanup try-redis --yes   # remove one when you are done
 ```
@@ -96,13 +96,21 @@ You do not need to leave the conversation. This repository ships a companion
 skill — just type:
 
 ```text
-/agent-fork try-redis      # Claude Code
-$agent-fork try-redis      # Codex
+/agent-fork --session       # Claude: inspect this agent session
+$agent-fork --session       # Codex: inspect this agent session
+/agent-fork try-redis       # Claude: explicit fork name
+$agent-fork try-redis       # Codex: explicit fork name
+/agent-fork                 # fork with context-aware naming
 ```
 
-The skill detects the running agent and session for you, delegates every
-repository mechanic to `agent-fork fork --json`, and hands back the command to
-paste into a fresh terminal. The fork name is optional.
+The skill calls the installed CLI directly. Inspection uses
+`agent-fork session --json`; forking uses
+`agent-fork fork ... --require-agent --json`. An explicit name hint is
+normalized to lowercase kebab case. With no
+name, a topic branch uses the CLI's date-bearing automatic name and collision
+suffixes. A default, detached, or unclassified branch gets one recommended name
+and asks before mutation. Advanced CLI flags are intentionally direct-CLI use
+cases rather than skill arguments.
 
 The skill lives at one canonical Agent Skills artifact,
 `.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`; Claude
@@ -170,18 +178,23 @@ agent-fork session validate \
   --parent-session-id "$EXPECTED_PARENT" -o json
 ```
 
-Inspection reports sourced evidence and succeeds with `not_detected` in an
-ordinary terminal. Validation without constraints requires any unambiguous
-supported current session. Optional `--agent`, `--session-id`,
-`--parent-session-id`, and `--has-parent`/`--no-parent` assertions compose with
-AND semantics.
+Inspection reports sourced evidence, the resolved invocation directory, and
+nullable Git repository context. Repository context includes the worktree root,
+branch or detached state, remote/default-branch candidates, default membership,
+linked/bare topology, and clean/staged/unstaged/untracked/unmerged/operation
+status. A bare repository has null working-tree status. Outside Git—or when Git
+context is unavailable—the session evidence remains usable and `repository` is
+null. Inspection succeeds with `not_detected` in an ordinary terminal.
+Validation without constraints requires any unambiguous supported current
+session. Optional `--agent`, `--session-id`, `--parent-session-id`, and
+`--has-parent`/`--no-parent` assertions compose with AND semantics.
 
 Parent means parent evidence, not proof that a transcript still exists. Codex
 name and parent evidence comes from its bounded local app-server. Agent
 Fork-created Claude children retain a prompt-free XDG provenance claim because
 Claude transcripts do not preserve the source session UUID. Missing evidence
 is not proof that a session was never forked. Inspection makes no network calls
-and does not modify agent state.
+and does not modify agent or repository state.
 
 ### Claude parent inference
 

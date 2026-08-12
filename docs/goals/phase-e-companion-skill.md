@@ -1,9 +1,14 @@
 # Goal: complete the companion agent skill
 
 **Created:** 2026-08-10
-**Status:** owner review
+**Status:** complete; orchestration mechanism superseded by D20 on 2026-08-11
 **Branch:** `feat/phase-e-companion-skill`
 **Worktree:** `/work/agent-fork-phase-e`
+
+**Superseded mechanism:** The direct companion-skill plan replaces this goal's
+skill-side explicit-identity orchestration with `agent-fork session --json` and
+`agent-fork fork ... --require-agent --json`. The real-host evidence below
+remains historical acceptance evidence.
 
 ## Objective
 

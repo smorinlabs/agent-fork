@@ -107,4 +107,37 @@ def test_session_does_not_require_git_or_write_state(repo_scenario):
     assert not path.exists()
     result = run_cli(["session", "-o", "json"], world.env, outside)
     assert result.returncode == 0
+    document = json.loads(result.stdout)
+    assert document["directory"] == str(outside.resolve())
+    assert document["repository"] is None
     assert not path.exists()
+
+
+@pytest.mark.matrix("T-SES-27")
+def test_human_session_always_labels_and_escapes_repository_context(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario("plain@branch")
+    directory = world.parent_path / "unsafe-\x1b[31m-\u202e"
+    directory.mkdir()
+    environments = (
+        world.env,
+        {
+            **world.env,
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_SESSION_ID": "claude",
+            "CODEX_THREAD_ID": "codex",
+        },
+    )
+
+    for env in environments:
+        result = run_cli(["session"], env, directory)
+        assert result.returncode == 0 and result.stderr == b""
+        assert b"directory:" in result.stdout
+        assert b"repository:" in result.stdout
+        assert b"branch: feature" in result.stdout
+        assert b"worktree: linked=no bare=no" in result.stdout
+        assert b"status: clean" in result.stdout
+        assert b"\x1b" not in result.stdout
+        assert b"\\u001b[31m" in result.stdout
+        assert b"\\u202e" in result.stdout

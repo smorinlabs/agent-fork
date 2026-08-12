@@ -1,8 +1,7 @@
 # Direct companion skill and repository-aware session context — SDD/TDD plan
 
 **Date:** 2026-08-11
-**Status:** Owner-approved 2026-08-11; P01 decomposition recorded;
-implementation not started
+**Status:** Implemented and verified 2026-08-11; stopped before release work
 **Scope:** Replace the companion wrapper with direct CLI delegation, add
 repository context to the existing session result, and stop before release work
 **Project:** P01 — agent-fork v1
@@ -606,3 +605,30 @@ but a topic-to-default branch change could bypass the intended name prompt.
 
 Closing that race requires a new conditional CLI contract or a combined command.
 Both are optional hardening and are excluded from this minimal replacement.
+
+## 14. Implementation evidence
+
+- G-SES T-SES-22..27 pass, and the focused session/skill suite reports 29
+  passing tests.
+- `just all` reports 356 passed, 1 skipped, and 9 live/signal tests deselected.
+  Matrix, strict collection, clean-install, Apple/Flox Git, and unrestricted
+  signal gates pass separately.
+- The host-managed gate reports 7 real-agent tests passing with Claude Code
+  2.1.228 and Codex CLI 0.147.0.
+- Skill validation and 8 focused artifact tests pass. Claude Code and Codex
+  user placements both resolve to the canonical worktree skill; the installed
+  CLI is the editable build from that same worktree.
+- Fresh Claude and Codex inspection prompts selected `session --json` and
+  reported their exact outer session IDs plus repository context. A Claude
+  explicit-name fork normalized `Review Auth` to `review-auth`. A Codex unnamed
+  topic-branch fork omitted the positional name and produced the CLI-owned
+  `topic-forward-0811` name.
+- Fresh negative prompts covered default-branch recommendation, `--status`,
+  `--sesion`, mixed `--session` input, empty normalization, ambiguous agent
+  signals, absent Git context, explicit collision, and shell-like name text.
+  The first mixed-input run exposed a route-classification defect; moving the
+  whole-argument gate ahead of every route fixed it, and the exact retry made
+  no CLI call.
+- All disposable worktrees and branches were removed through `agent-fork
+  cleanup`; the registry is empty. Agent transcript files remain resumable by
+  design.

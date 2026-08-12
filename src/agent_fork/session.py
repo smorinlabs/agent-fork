@@ -9,8 +9,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_fork.errors import SessionValidationError
+from agent_fork.errors import PreconditionError, SessionValidationError
 from agent_fork.lineage import find_lineage
+from agent_fork.repository import (
+    WorkingTreeStatus,
+    classify_default_branches,
+    current_branch,
+    inspect_repository,
+    inspect_working_tree_status,
+)
 
 CLAUDE_TRANSCRIPT_LIMIT = 1_048_576
 CLAUDE_RECORD_LIMIT = 10_000
@@ -37,11 +44,47 @@ class SessionEvidence:
 
 
 @dataclass(frozen=True)
+class SessionRepository:
+    root: Path
+    branch: str | None
+    remote_default_branch: str | None
+    default_branch_candidates: tuple[str, ...]
+    linked_worktree: bool
+    bare: bool
+    status: WorkingTreeStatus | None
+
+    @property
+    def detached(self) -> bool:
+        return self.branch is None
+
+    @property
+    def on_default_branch(self) -> bool | None:
+        if not self.default_branch_candidates:
+            return None
+        return self.branch in self.default_branch_candidates
+
+    def document(self) -> dict[str, object]:
+        return {
+            "root": str(self.root),
+            "branch": self.branch,
+            "detached": self.detached,
+            "remote_default_branch": self.remote_default_branch,
+            "default_branch_candidates": list(self.default_branch_candidates),
+            "on_default_branch": self.on_default_branch,
+            "linked_worktree": self.linked_worktree,
+            "bare": self.bare,
+            "status": self.status.document() if self.status is not None else None,
+        }
+
+
+@dataclass(frozen=True)
 class SessionInspection:
     agent: str | None
     current_session: SessionEvidence | None
     parent_session: SessionEvidence | None
     lineage_status: str
+    directory: Path
+    repository: SessionRepository | None
     notices: tuple[str, ...] = ()
 
     def document(self) -> dict[str, object]:
@@ -58,6 +101,10 @@ class SessionInspection:
                 "status": self.lineage_status,
             },
             "notices": list(self.notices),
+            "directory": str(self.directory),
+            "repository": (
+                self.repository.document() if self.repository is not None else None
+            ),
         }
 
 
@@ -113,26 +160,74 @@ def _claude_name(
     return name, "resolved" if name is not None else "not_found"
 
 
+def _repository_notice(error: Exception) -> str:
+    detail = str(error).strip() or type(error).__name__
+    limit = 500
+    if len(detail) > limit:
+        detail = detail[: limit - 3] + "..."
+    return f"repository context unavailable: {detail}"
+
+
+def _session_repository(
+    directory: Path, env: Mapping[str, str]
+) -> tuple[SessionRepository | None, tuple[str, ...]]:
+    try:
+        info = inspect_repository(directory, env=env)
+        branch = current_branch(info.parent_path, env=env)
+        defaults = classify_default_branches(info.parent_path, env=env)
+        status = inspect_working_tree_status(info, env=env)
+    except PreconditionError as error:
+        if error.code == "not_git_repository":
+            return None, ()
+        return None, (_repository_notice(error),)
+    except Exception as error:
+        return None, (_repository_notice(error),)
+    return (
+        SessionRepository(
+            root=info.worktree_root or info.parent_path,
+            branch=branch,
+            remote_default_branch=defaults.remote_default_branch,
+            default_branch_candidates=defaults.candidates,
+            linked_worktree=info.linked_worktree,
+            bare=info.bare,
+            status=status,
+        ),
+        (),
+    )
+
+
 def inspect_session(
     env: Mapping[str, str], *, cwd: Path | None = None
 ) -> SessionInspection:
     """Inspect ambient identity and bounded local evidence without mutation."""
-    directory = Path.cwd() if cwd is None else cwd
+    directory = (Path.cwd() if cwd is None else cwd).resolve()
+    repository, repository_notices = _session_repository(directory, env)
+    notices = list(repository_notices)
     claude_id = env.get("CLAUDE_CODE_SESSION_ID")
     claude = env.get("CLAUDECODE") == "1" and bool(claude_id)
     codex_id = env.get("CODEX_THREAD_ID")
     codex = bool(codex_id)
     if claude and codex:
+        notices.append("both Claude and Codex session signals are present")
         return SessionInspection(
-            None,
-            None,
-            None,
-            "ambiguous",
-            ("both Claude and Codex session signals are present",),
+            agent=None,
+            current_session=None,
+            parent_session=None,
+            lineage_status="ambiguous",
+            directory=directory,
+            repository=repository,
+            notices=tuple(notices),
         )
     if not claude and not codex:
-        return SessionInspection(None, None, None, "not_detected")
-    notices: list[str] = []
+        return SessionInspection(
+            agent=None,
+            current_session=None,
+            parent_session=None,
+            lineage_status="not_detected",
+            directory=directory,
+            repository=repository,
+            notices=tuple(notices),
+        )
     if claude:
         assert claude_id is not None
         name, name_status = _claude_name(env, directory, claude_id)
@@ -195,14 +290,17 @@ def inspect_session(
             else None
         )
         return SessionInspection(
-            "claude",
-            current,
-            parent,
-            "claimed"
+            agent="claude",
+            current_session=current,
+            parent_session=parent,
+            lineage_status="claimed"
             if claim is not None
             else inference.status
             if inference
             else "not_found",
+            directory=directory,
+            repository=repository,
+            notices=tuple(notices),
         )
 
     assert codex_id is not None
@@ -212,7 +310,15 @@ def inspect_session(
         current = SessionEvidence(
             codex_id, "CODEX_THREAD_ID", name_status="unavailable"
         )
-        return SessionInspection("codex", current, None, "unavailable", tuple(notices))
+        return SessionInspection(
+            agent="codex",
+            current_session=current,
+            parent_session=None,
+            lineage_status="unavailable",
+            directory=directory,
+            repository=repository,
+            notices=tuple(notices),
+        )
     try:
         from agent_fork.codex_app_server import read_thread
 
@@ -222,10 +328,26 @@ def inspect_session(
         current = SessionEvidence(
             codex_id, "CODEX_THREAD_ID", name_status="unavailable"
         )
-        return SessionInspection("codex", current, None, "unavailable", tuple(notices))
+        return SessionInspection(
+            agent="codex",
+            current_session=current,
+            parent_session=None,
+            lineage_status="unavailable",
+            directory=directory,
+            repository=repository,
+            notices=tuple(notices),
+        )
     if thread is None:
         current = SessionEvidence(codex_id, "CODEX_THREAD_ID", name_status="not_found")
-        return SessionInspection("codex", current, None, "not_found")
+        return SessionInspection(
+            agent="codex",
+            current_session=current,
+            parent_session=None,
+            lineage_status="not_found",
+            directory=directory,
+            repository=repository,
+            notices=tuple(notices),
+        )
     current = SessionEvidence(
         codex_id,
         "CODEX_THREAD_ID",
@@ -254,7 +376,13 @@ def inspect_session(
             "resolved",
         )
     return SessionInspection(
-        "codex", current, parent, "resolved" if parent else "not_found", tuple(notices)
+        agent="codex",
+        current_session=current,
+        parent_session=parent,
+        lineage_status="resolved" if parent else "not_found",
+        directory=directory,
+        repository=repository,
+        notices=tuple(notices),
     )
 
 

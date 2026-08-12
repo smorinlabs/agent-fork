@@ -1,183 +1,90 @@
 from __future__ import annotations
 
-import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 SKILL = ROOT / ".agents/skills/agent-fork"
-SCRIPT = SKILL / "scripts/fork_session.py"
+SKILL_MD = SKILL / "SKILL.md"
+WRAPPER = SKILL / "scripts/fork_session.py"
 
 
-def _shim(tmp_path: Path) -> tuple[Path, Path]:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    binary = tmp_path / "agent-fork"
-    argv_log = tmp_path / "argv.json"
-    binary.write_text(
-        "#!/usr/bin/env python3\n"
-        "import json, os, sys\n"
-        "open(os.environ['ARGV_LOG'], 'w').write(json.dumps(sys.argv[1:]))\n"
-        "if os.environ.get('SHIM_MODE') == 'invalid':\n"
-        "    print('not-json')\n"
-        "    raise SystemExit(0)\n"
-        "print(json.dumps({'command': 'codex -C /tmp/fork resume --fork abc', "
-        "'fork': {'name': 'demo', 'branch': 'fork/demo', 'worktree': '/tmp/fork'}}))\n"
-    )
-    binary.chmod(0o755)
-    return binary, argv_log
+def _text() -> str:
+    return SKILL_MD.read_text()
 
 
-def _run(
-    tmp_path: Path, host: str, *arguments: str, shim_mode: str = ""
-) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-    _, argv_log = _shim(tmp_path)
-    env = {"PATH": f"{tmp_path}:{os.environ['PATH']}", "ARGV_LOG": str(argv_log)}
-    if shim_mode:
-        env["SHIM_MODE"] = shim_mode
-    if host == "claude":
-        env.update(CLAUDECODE="1", CLAUDE_CODE_SESSION_ID="claude-parent")
-    elif host == "codex":
-        env["CODEX_THREAD_ID"] = "codex-parent"
-    completed = subprocess.run(
-        [sys.executable, str(SCRIPT), *arguments],
-        cwd=ROOT,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    argv = json.loads(argv_log.read_text()) if argv_log.exists() else []
-    return completed, argv
-
-
-def test_skill_is_shared_by_codex_and_claude() -> None:
+def test_skill_is_one_shared_claude_and_codex_artifact() -> None:
     claude_skill = ROOT / ".claude/skills/agent-fork"
     assert claude_skill.resolve() == SKILL.resolve()
-    text = (SKILL / "SKILL.md").read_text()
+    text = _text()
     assert text.startswith("---\nname: agent-fork\ndescription:")
+    assert text.count("\n---\n") == 1
+    assert len(text.splitlines()) < 500
+
+
+def test_skill_locks_session_and_fork_command_routes() -> None:
+    text = _text()
+    assert "agent-fork session --json" in text
+    assert "agent-fork fork '<normalized-name>' --require-agent --json" in text
+    assert "agent-fork fork --require-agent --json" in text
+    assert "Do not add `--agent` or `--parent-session`" in text
+
+
+def test_omitted_name_uses_session_context_and_cli_automatic_naming() -> None:
+    text = _text()
+    assert "`repository.on_default_branch` is `false`" in text
+    assert "Do not pass a positional name" in text
+    assert "date and collision suffixes" in text
+    assert "recommend one concise name" in text
+    assert "If `agent` or `current_session` is null" in text
+    assert "If `repository` is null" in text
+
+
+def test_name_classification_precedes_restricted_normalization() -> None:
+    text = _text()
+    assert "Classify before normalizing" in text
+    assert "[a-z0-9]+(?:-[a-z0-9]+)*" in text
+    assert '"Review Auth" -> "review-auth"' in text
+    assert '"feature/auth-refresh" -> "feature-auth-refresh"' in text
+    assert "Ask for another name if normalization is empty" in text
+    assert "shell-quoted argument" in text
+
+
+def test_option_like_input_refuses_without_mutation() -> None:
+    text = _text()
+    assert "Apply the argument gate first" in text
+    assert "Never remove `--session`" in text
+    assert "Every other token beginning with `-`" in text
+    assert "`--session` combined with any other text" in text
+    assert "`--sesion`" in text
+    assert "`--status`" in text
+    assert "Use `--session`" in text
+    assert "/agent-fork [name hint]" in text
+    assert "/agent-fork --session" in text
+
+
+def test_failure_and_success_json_contracts_remain_explicit() -> None:
+    text = _text()
+    assert "uv tool install agent-fork" in text
+    assert "Invalid agent-fork JSON output" in text
+    assert "`fork.name`, `fork.branch`, and `fork.worktree`" in text
+    assert "exact returned `command` string" in text
+    assert "Preserve nonzero CLI output" in text
     assert "Do not retry with guessed session IDs" in text
+    assert "Do not search transcripts" in text
+    assert "Do not run hand-written Git commands" in text
 
 
-def test_claude_invocation_passes_explicit_identity_and_json(tmp_path: Path) -> None:
-    completed, argv = _run(tmp_path, "claude", "my-fork", "--with-ignored")
-    assert completed.returncode == 0
-    assert argv == [
-        "fork",
-        "my-fork",
-        "--with-ignored",
-        "--require-agent",
-        "--agent",
-        "claude",
-        "--parent-session",
-        "claude-parent",
-        "--json",
-    ]
-    assert completed.stdout.endswith("codex -C /tmp/fork resume --fork abc\n")
+def test_wrapper_is_removed_without_a_replacement_executable() -> None:
+    text = _text()
+    assert not WRAPPER.exists()
+    assert "fork_session.py" not in text
+    assert "scripts/" not in text
+    assert not (SKILL / "scripts").exists()
 
 
-def test_codex_invocation_passes_explicit_identity_and_json(tmp_path: Path) -> None:
-    completed, argv = _run(tmp_path, "codex")
-    assert completed.returncode == 0
-    assert argv == [
-        "fork",
-        "--require-agent",
-        "--agent",
-        "codex",
-        "--parent-session",
-        "codex-parent",
-        "--json",
-    ]
-    assert "Paste this command into a fresh terminal:" in completed.stdout
-
-
-def test_ambiguous_or_missing_host_refuses(tmp_path: Path) -> None:
-    missing, _ = _run(tmp_path / "missing", "none")
-    both_path = tmp_path / "both"
-    _, argv_log = _shim(both_path)
-    env = {
-        "PATH": f"{both_path}:{os.environ['PATH']}",
-        "ARGV_LOG": str(argv_log),
-        "CLAUDECODE": "1",
-        "CLAUDE_CODE_SESSION_ID": "claude-parent",
-        "CODEX_THREAD_ID": "codex-parent",
-    }
-    both = subprocess.run(
-        [sys.executable, str(SCRIPT)], env=env, text=True, capture_output=True
-    )
-    assert missing.returncode == both.returncode == 3
-    assert "no active Claude Code or Codex" in missing.stderr
-    assert "both Claude Code and Codex" in both.stderr
-
-
-def test_skill_managed_identity_cannot_be_overridden(tmp_path: Path) -> None:
-    completed, argv = _run(tmp_path, "codex", "--agent=claude")
-    assert completed.returncode == 3
-    assert argv == []
-    assert "Cannot override skill-managed option" in completed.stderr
-
-
-def test_missing_cli_has_install_hint(tmp_path: Path) -> None:
-    env = {"PATH": str(tmp_path), "CODEX_THREAD_ID": "codex-parent"}
-    completed = subprocess.run(
-        [sys.executable, str(SCRIPT)], env=env, text=True, capture_output=True
-    )
-    assert completed.returncode == 127
-    assert "uv tool install agent-fork" in completed.stderr
-
-
-def test_malformed_cli_json_is_diagnostic(tmp_path: Path) -> None:
-    completed, _ = _run(tmp_path, "codex", shim_mode="invalid")
-    assert completed.returncode == 1
-    assert "Invalid agent-fork JSON output" in completed.stderr
-
-
-def test_destination_and_branch_options_pass_through_before_managed_identity(
-    tmp_path: Path,
-) -> None:
-    completed, argv = _run(
-        tmp_path,
-        "codex",
-        "experiment",
-        "--branch",
-        "review/manual",
-        "--worktree-base-dir",
-        "/work/forks",
-        "--worktree-name",
-        "Manual Worktree",
-    )
-    assert completed.returncode == 0
-    assert argv[:8] == [
-        "fork",
-        "experiment",
-        "--branch",
-        "review/manual",
-        "--worktree-base-dir",
-        "/work/forks",
-        "--worktree-name",
-        "Manual Worktree",
-    ]
-    assert argv[8:] == [
-        "--require-agent",
-        "--agent",
-        "codex",
-        "--parent-session",
-        "codex-parent",
-        "--json",
-    ]
-
-
-def test_new_passthrough_does_not_relax_managed_option_rejection(
-    tmp_path: Path,
-) -> None:
-    completed, argv = _run(tmp_path, "claude", "--worktree-name", "leaf", "--json")
-    assert completed.returncode == 3
-    assert argv == []
-
-
-def test_agent_mode_options_are_skill_managed(tmp_path: Path) -> None:
-    for option in ("--require-agent", "--no-agent"):
-        completed, argv = _run(tmp_path / option.removeprefix("--"), "claude", option)
-        assert completed.returncode == 3
-        assert argv == []
+def test_generated_metadata_exposes_both_routes() -> None:
+    metadata = (SKILL / "agents/openai.yaml").read_text()
+    assert 'display_name: "Agent Fork"' in metadata
+    assert 'short_description: "Inspect or fork the current agent session"' in metadata
+    assert "$agent-fork" in metadata
+    assert "inspect or fork" in metadata.lower()
