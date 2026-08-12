@@ -2,9 +2,9 @@
 
 **References**
 - **Trunk:** [PROJECTS.md](../PROJECTS.md)
-- **Spec:** [REQUIREMENTS.md](../REQUIREMENTS.md) — REQ-01..42, pinned to CLI Design Standard v1.4.14
-- **Design:** [DESIGN-DECISIONS.md](../DESIGN-DECISIONS.md) — D1–D14 locked 2026-07-21
-- **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — owner-approved 2026-08-10; [worktree destination controls](../docs/superpowers/plans/2026-08-10-worktree-destination-controls.md) — complete 2026-08-10; [Codex renamed-session resolution](../docs/superpowers/plans/2026-08-10-codex-renamed-session-resolution.md) — final proposal 2026-08-10; [session inspection and assertion](../docs/superpowers/plans/2026-08-11-session-inspection-validation.md) — implemented through SES-G5; [Claude parent inference design](../docs/superpowers/plans/2026-08-11-claude-parent-inference.md), [implementation plan](../docs/superpowers/plans/2026-08-11-claude-parent-inference-implementation.md), and [implementation-plan adversarial review](../docs/superpowers/plans/2026-08-11-claude-parent-inference-implementation-adversarial-review.md) — revision required before CPI-G0
+- **Spec:** [REQUIREMENTS.md](../REQUIREMENTS.md) — REQ-01..48 implemented; REQ-49 approved in the direct companion-skill plan; pinned to CLI Design Standard v1.4.14
+- **Design:** [DESIGN-DECISIONS.md](../DESIGN-DECISIONS.md) — D1–D19 implemented; D20 approved in the direct companion-skill plan
+- **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — owner-approved 2026-08-10; [worktree destination controls](../docs/superpowers/plans/2026-08-10-worktree-destination-controls.md) — complete 2026-08-10; [Codex renamed-session resolution](../docs/superpowers/plans/2026-08-10-codex-renamed-session-resolution.md) — complete 2026-08-10; [session inspection and assertion](../docs/superpowers/plans/2026-08-11-session-inspection-validation.md) — implemented through SES-G5; [Claude parent inference design](../docs/superpowers/plans/2026-08-11-claude-parent-inference.md), [implementation plan](../docs/superpowers/plans/2026-08-11-claude-parent-inference-implementation.md), and [implementation-plan adversarial review](../docs/superpowers/plans/2026-08-11-claude-parent-inference-implementation-adversarial-review.md) — complete through CPI-G8; [direct companion skill and repository-aware session context](../docs/superpowers/plans/2026-08-11-direct-companion-skill-session.md) and [adversarial review](../docs/superpowers/plans/2026-08-11-direct-companion-skill-session-adversarial-review.md) — owner-approved 2026-08-11
 - **Tracking:** [CONFORMANCE.md](../CONFORMANCE.md) — applicability map + waivers
 - **Prior art:** [RESEARCH.md](../RESEARCH.md) — agent-deck port source map; [recipes leaf](../research/reference/agent-session-fork-cli-recipes-2026-07-21.md)
 
@@ -112,6 +112,12 @@ Claude parent inference follow-up (gate: CPI-G0..G8; stop before PR)
 - [x] [P01-T36] Implement separate inferred-lineage persistence and ordinary inspection integration
 - [x] [P01-T37] Implement `session claude-parent list|show|infer|delete`, output, completions, and deletion safety
 - [x] [P01-T38] Complete hermetic, performance, real-Claude, correctness, and adversarial gates; stopped at CPI-G8
+
+Direct companion skill and repository-aware session follow-up (gate: approved plan, TDD, real-agent proof; stop before release)
+- [ ] [P01-TS26] Lock D20/REQ-49, repair the related corpus and conformance drift, extend T-SES-22, and add T-SES-23..27 as behavior-RED tests with matrix tracking intact
+- [ ] [P01-T39] Extend the existing `session` result with additive invocation-directory, repository-topology, default-branch, worktree, and Git-status context across every identity outcome
+- [ ] [P01-T40] Replace `scripts/fork_session.py` with direct agentic-skill routing for session inspection, explicit names, and CLI-owned automatic topic-branch naming while preserving diagnostic and output contracts
+- [ ] [P01-T41] Close README, corpus, conformance, skill metadata, placement, full local gates, and fresh Claude Code/Codex forward tests; stop before release or publish work
 
 - [x] Regression Test Status — Phase D final suite 218 passed with only retired T-EXP-04 skipped; conformance fixtures and clean-install checks green in PR #8
 
