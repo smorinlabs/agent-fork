@@ -470,7 +470,12 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 | T-SES-19 | human session output escapes terminal controls in agent-owned values | baseline | C | live | REQ-47; D18 |
 | T-SES-20 | a real resumed Claude child observes its recorded parent claim | agent=claude | R | live | REQ-47; D18; EXPERIMENTS E10 |
 | T-SES-21 | a hostile Claude session ID cannot escape the bounded transcript path | agent=claude | U | live | REQ-47; D18 |
-| T-SES-22 | inspection works outside Git and performs no lineage-store write | baseline | C | live | REQ-47; D18 |
+| T-SES-22 | inspection works outside Git, reports the directory with null repository context, and performs no lineage-store write | baseline | C | live | REQ-47; REQ-49; D18; D20 |
+| T-SES-23 | every identity outcome preserves existing evidence and adds the exact resolved invocation directory | baseline | U | live | REQ-49; D20 |
+| T-SES-24 | default, topic, detached, linked, and bare repository contexts classify deterministically | baseline | U | live | REQ-49; D20 |
+| T-SES-25 | clean, staged, unstaged, untracked, unmerged, and operation status is exact | baseline | U | live | REQ-49; D20 |
+| T-SES-26 | repository-context failure preserves identity, returns null context, and adds a bounded notice | baseline | U | live | REQ-49; D20 |
+| T-SES-27 | human output labels and escapes repository-controlled context for every identity outcome | baseline | C | live | REQ-49; D20 |
 
 ---
 

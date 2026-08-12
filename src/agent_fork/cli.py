@@ -406,6 +406,8 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     from agent_fork.output import DryRunOutput, ForkOutput, copy_to_clipboard
     from agent_fork.pipeline import ForkRequest, fork
     from agent_fork.repository import (
+        count_paths,
+        current_branch,
         inspect_repository,
         resolve_anchor,
         validate_fork_guards,
@@ -446,15 +448,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     parent_path = info.worktree_root or info.parent_path
     if parent_path != info.parent_path:
         info = inspect_repository(parent_path, env=environment)
-    symbolic = run_git(
-        parent_path,
-        ["symbolic-ref", "--quiet", "--short", "HEAD"],
-        env=environment,
-        check=False,
-    )
-    parent_branch = (
-        symbolic.stdout.decode().strip() if symbolic.returncode == 0 else None
-    )
+    parent_branch = current_branch(parent_path, env=environment)
     anchor = resolve_anchor(info.parent_path, env=environment)
     auto = derive_auto_name(parent_branch, detached_sha=anchor)
 
@@ -559,8 +553,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         validate_fork_guards(parent_path, branch, destination, env=environment)
 
         def count(arguments):
-            data = run_git(parent_path, arguments, env=environment).stdout
-            return len([value for value in data.split(b"\0") if value])
+            return count_paths(parent_path, arguments, env=environment)
 
         dry = DryRunOutput(
             branch,
@@ -1007,7 +1000,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             if machine:
                 print(json_line(inspection.document()))
-            elif inspection.current_session is None:
+                return 0
+            if inspection.current_session is None:
                 print(f"session: {inspection.lineage_status}")
             else:
                 current = inspection.current_session
@@ -1032,8 +1026,44 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     )
                 print(f"lineage: {terminal_text(inspection.lineage_status)}")
-                for notice in inspection.notices:
-                    print(f"notice: {terminal_text(notice)}")
+            for notice in inspection.notices:
+                print(f"notice: {terminal_text(notice)}")
+            print(f"directory: {terminal_text(inspection.directory)}")
+            repository = inspection.repository
+            if repository is None:
+                print("repository: -")
+            else:
+                print(f"repository: {terminal_text(repository.root)}")
+                print(
+                    "branch: "
+                    + (
+                        terminal_text(repository.branch)
+                        if repository.branch is not None
+                        else "(detached)"
+                    )
+                )
+                print(
+                    "worktree: "
+                    f"linked={'yes' if repository.linked_worktree else 'no'} "
+                    f"bare={'yes' if repository.bare else 'no'}"
+                )
+                status = repository.status
+                if status is None:
+                    print("status: unavailable")
+                elif status.clean:
+                    print("status: clean")
+                else:
+                    operation = (
+                        terminal_text(status.operation)
+                        if status.operation is not None
+                        else "-"
+                    )
+                    print(
+                        "status: "
+                        f"staged={status.staged} unstaged={status.unstaged} "
+                        f"untracked={status.untracked} unmerged={status.unmerged} "
+                        f"operation={operation}"
+                    )
             return 0
         if args.command == "cleanup":
             from agent_fork.cleanup import cleanup, resolve_cleanup_target

@@ -14,11 +14,11 @@
 | Config (§5) | yes | — |
 | Networked (§10) | no | fully local tool; zero runtime network calls (REQ-40) |
 | Destructive ops (§8) | yes | `cleanup` removes worktrees/branches |
-| Scripted consumers (R7.2/R7.8) | yes | the agent-fork *skill* consumes `-o json` (REQ-04) |
+| Scripted consumers (R7.2/R7.8) | yes | the agent-fork *skill* consumes `--json` (REQ-04/REQ-49) |
 | Async / long-running | no | synchronous local operations; no operation IDs |
 | Streaming / watch | no | no streaming output |
 | Plugins (R9.11) | no | no extension model planned |
-| Caching / offline (R5.9) | no | no remote data; nothing cached (state registry is not a cache) |
+| Caching / offline (R5.9) | yes | Claude parent inference uses bounded, prompt-free, sharded local cache metadata (REQ-48); runtime remains offline |
 | Secrets handled (R5.5/R5.6) | no | accepts no secrets; R5.5 argv ban still honored. Note: `--with-ignored` can *copy* secret-bearing files (e.g. `.env`) between working trees — documented behavior + off-default (REQ-15), not secret input/output handling |
 
 ## Waived SHOULDs
@@ -42,19 +42,20 @@
 | 2026-08-10 | 1.4.14 | issue #14 output-contract repair | `fork --dry-run -o json` and `--json` now emit the same stable preview schema instead of human text; T-OUT-21 protects R4.2/R7.2/R8.6; no waiver |
 | 2026-08-10 | 1.4.14 | macOS signal and live-agent gate repair | Git cleanup preserves active signal exceptions after macOS `EPERM`; real-agent failures expose captured output; preflight reports host executable identity/version; Flox retains the four-system development toolchain without pinning agent CLIs; no public CLI change or waiver |
 | 2026-08-10 | 1.4.14 | issue #16 cleanup-safety reporting | Cleanup enumerates bounded dirty/unpushed risk, preserves full inspection under forced previews, adds compatible JSON `details` and granular overrides, escapes Git-controlled terminal text in human diagnostics, keeps raw JSON values, and preserves separate consent plus the non-overridable cwd guard; T-CLN-16..23 protect R7.1/R7.2/R7.8/R8.1/R8.6/R9.3; no waiver |
+| 2026-08-11 | 1.4.14 | direct companion skill and session context | Skill delegates directly to `session --json` and `fork --require-agent --json`; session output adds directory and repository context; the wrapper is removed; local, host-managed, and fresh Claude/Codex forward gates pass; no new waiver |
 
-## Phase D requirement trace
+## Requirement trace
 
 `Implemented` means product behavior and direct test evidence exist. `Documented`
 means the requirement is a policy or packaging property verified by inspection.
-`Deferred` identifies work outside the approved Phase D boundary rather than an
+`Deferred` identifies work outside the approved implementation boundary rather than an
 open implementation finding.
 
-| Requirement | Disposition | Phase D evidence |
+| Requirement | Disposition | Evidence |
 |---|---|---|
 | REQ-01 | Implemented | CLI owns repository detection through cleanup; G-GRD..G-CLN |
-| REQ-02 | Implemented | Phase E skill detects the host/session and passes explicit identity to the CLI; focused tests plus real Claude/Codex demos |
-| REQ-03 | Implemented | G-DET explicit precedence and Claude/Codex fallback detection |
+| REQ-02 | Implemented | Direct skill routes inspection and fork intent to the existing JSON CLI commands; focused skill tests and fresh Claude/Codex forward tests |
+| REQ-03 | Implemented | G-DET explicit precedence and ambient Claude/Codex detection; the direct skill uses ambient detection as its primary path |
 | REQ-04 | Implemented | Skill consumes and validates G-OUT JSON, then renders the returned command; malformed output fails diagnostically |
 | REQ-05 | Implemented | Canonical `.agents/skills/agent-fork` artifact is shared through `.claude/skills/agent-fork`; missing CLI emits install hint |
 | REQ-06 | Implemented | T-CLI-01 bare help, exit 0 |
@@ -77,7 +78,7 @@ open implementation finding.
 | REQ-23 | Implemented | G-VER full ladder, ignored-aware comparison, opt-out, rollback |
 | REQ-24 | Implemented | G-INC include precedence and non-fatal setup hook |
 | REQ-25 | Implemented | Opaque gitlink handling and submodule notices in G-MAT |
-| REQ-26 | Implemented | G-DET; pre-0.95 Codex ladder remains tombstoned per A7 |
+| REQ-26 | Implemented | G-DET ambient strict detection; the direct skill selects it through `--require-agent`; pre-0.95 Codex ladder remains tombstoned per A7 |
 | REQ-27 | Implemented | G-PRE CLI/version/rollout matrix |
 | REQ-28 | Implemented + real-validated | G-EMT locked templates; E1–E3 rerun 2026-08-10 |
 | REQ-29 | Implemented | G-PRE diagnostic refusals and no-mutation proof |
@@ -96,8 +97,13 @@ open implementation finding.
 | REQ-42 | Implemented | G-EMT hostile shell execution with `shlex.quote` per element |
 | REQ-43 | Implemented | Sole PATH-resolved Git primitive plus shim canary/fault injection |
 | REQ-44 | Implemented | G-LOC-08..17, G-NAM-08..12, T-CLI-13..14, and T-OUT-12..13 cover independent destination composition, validation, collisions, and output compatibility |
+| REQ-45 | Implemented | G-DET/T-CLI-21..23 cover adaptive auto, strict, and Git-only behavior |
+| REQ-46 | Implemented | G-CEX and T-CLI-24 cover bounded Codex app-server name resolution and UUID-only behavior |
+| REQ-47 | Implemented | G-SES T-SES-01..22 cover agent-neutral inspection, validation, local evidence, and real-agent acceptance |
+| REQ-48 | Implemented | G-CPI covers bounded structural inference, sharded screening cache, separate persistence, and management actions |
+| REQ-49 | Implemented | G-SES T-SES-22..27; 8 focused skill tests; skill validation; editable dual-host placement; fresh Claude/Codex inspection, named, unnamed, refusal, collision, absent-Git, ambiguous-host, and hostile-name forward tests |
 
-## Phase D decision trace
+## Decision trace
 
 | Decision | Disposition | Evidence |
 |---|---|---|
@@ -116,6 +122,11 @@ open implementation finding.
 | D13 | Implemented + waived | `cleanup` name retained under R2.1 waiver |
 | D14 | Implemented | Native-fork impossibility refuses diagnostically before mutation |
 | D15 | Implemented | Independent base/leaf overrides compose after D5 derivation; exact paths remain parser-exclusive |
+| D16 | Implemented | Adaptive auto/strict/Git-only agent mode; G-DET/T-CLI-21..23 |
+| D17 | Implemented | Bounded Codex app-server name resolution; G-CEX/T-CLI-24 |
+| D18 | Implemented | Agent-neutral session inspection and assertions; G-SES T-SES-01..22 |
+| D19 | Implemented | Explicit bounded Claude parent inference and separate evidence; G-CPI |
+| D20 | Implemented | Direct skill delegation and additive repository-aware session context; G-SES T-SES-22..27 plus focused, host-managed, and fresh-agent skill gates |
 
 ## Blocking conformance evidence
 

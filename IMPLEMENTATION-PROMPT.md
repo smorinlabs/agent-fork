@@ -10,13 +10,14 @@ You are implementing **`agent-fork`**, whose design is complete and locked. Do n
 
 In precedence order (paths as given):
 
-1. `DESIGN-DECISIONS.md` — all 14 decisions (D1–D14), final config schema, consolidated v1 surface, deferred list.
-2. `REQUIREMENTS.md` — REQ-01..43 (amended with A1–A14), the full CLI interface spec pinned to **CLI Design Standard v1.4.14**, exit codes, pipeline, cleanup semantics, test-first plan (§9).
+1. `DESIGN-DECISIONS.md` — D1–D20, final config schema, consolidated v1 surface, and deferred list.
+2. `REQUIREMENTS.md` — REQ-01..49, the full interface and behavior spec pinned to **CLI Design Standard v1.4.14**, exit codes, pipeline, cleanup, session inspection, and companion-skill semantics.
 3. `docs/superpowers/specs/2026-08-08-test-architecture-design.md` — test architecture (§1–§7) and amendments A1–A14 (§8); corpus amended 2026-08-08 to match.
 4. `docs/superpowers/plans/2026-08-08-test-architecture-skeletons.md` — skeleton-phase planning and ordered tasks for steps 0–5 (§10).
 5. `RESEARCH.md` — the agent-deck port source map (exact `file:line` refs into `/Users/stevemorin/c/agent-deck`), the verbatim state-materialization command sequence (§2.2), detection matrix (§2.3), launch recipes (§5.2), remaining live experiments (§7).
 6. `CONFORMANCE.md` — applicability map + the one standing waiver (R2.1 `cleanup`).
 7. `research/reference/agent-session-fork-cli-recipes-2026-07-21.md` — the distilled per-agent fork recipes with version gates and gotchas.
+8. `docs/superpowers/plans/2026-08-11-direct-companion-skill-session.md` — the owner-approved direct-skill and repository-aware session implementation plan.
 
 Key locked facts: Python ≥3.11, `uv`-based packaging; PyPI + TestPyPI names **already reserved** (`0.0.0.dev0` placeholders — PEP 541 makes shipping a real v0.1.0 time-sensitive); v1 agents are Claude Code + Codex only; v1 refuses when native fork is impossible (D14 — no fallback ladder); `[agents.<name>] extra_args` ships in v1 (D11 — individually shell-quoted). Post-Phase-E amendment D15 adds independent `--worktree-base-dir`/`--worktree-name` composition while retaining exclusive exact `--worktree-dir`; Phase E.5 completes and gates this compatibility increment before Phase F.
 
@@ -65,7 +66,7 @@ Execute the plan with subagent-driven development + TDD per task (model matrix a
 
 ## 7. PHASE E — The `agent-fork` skill *(gate: end-to-end demo, then STOP)*
 
-Build the companion skill via the skill-create pipeline (it handles placement for both Claude Code and Codex, docs, and the skill-quality gate): the skill detects the host agent from env (`CLAUDECODE`/`CLAUDE_CODE_SESSION_ID`; `CODEX_THREAD_ID`), invokes `agent-fork fork … --json` with explicit `--agent`/`--parent-session`, and renders the returned paste command prominently (REQ-02..04). It never re-implements git logic; if the CLI is missing it prints the install hint. Final acceptance: from a real Claude Code session, one word produces a verified fork and a paste command that works in a fresh terminal; same demo for Codex. **STOP — v1 complete.**
+Build the companion skill via the skill-creator pipeline for the shared Claude Code/Codex placement. The skill calls `agent-fork session --json` for agent-session inspection and calls `agent-fork fork [NAME] --require-agent --json` for forking. It relies on CLI ambient identity, keeps CLI-owned automatic naming when a topic branch supplies context, validates machine output, and renders the exact returned paste command prominently (REQ-02..05, REQ-49). It never re-implements Git logic or adds another wrapper executable; if the CLI is missing it prints the install hint. Final acceptance covers inspection and named/unnamed fork behavior in real Claude Code and Codex sessions. **STOP — v1 complete.**
 
 ## 8. PHASE F — Ship v0.1.0 *(gate: released + installable, then STOP)*
 
