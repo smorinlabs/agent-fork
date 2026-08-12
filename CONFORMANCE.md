@@ -44,14 +44,14 @@
 | 2026-08-10 | 1.4.14 | issue #16 cleanup-safety reporting | Cleanup enumerates bounded dirty/unpushed risk, preserves full inspection under forced previews, adds compatible JSON `details` and granular overrides, escapes Git-controlled terminal text in human diagnostics, keeps raw JSON values, and preserves separate consent plus the non-overridable cwd guard; T-CLN-16..23 protect R7.1/R7.2/R7.8/R8.1/R8.6/R9.3; no waiver |
 | 2026-08-11 | 1.4.14 | direct companion skill and session context | Skill delegates directly to `session --json` and `fork --require-agent --json`; session output adds directory and repository context; the wrapper is removed; local, host-managed, and fresh Claude/Codex forward gates pass; no new waiver |
 
-## Phase D requirement trace
+## Requirement trace
 
 `Implemented` means product behavior and direct test evidence exist. `Documented`
 means the requirement is a policy or packaging property verified by inspection.
-`Deferred` identifies work outside the approved Phase D boundary rather than an
+`Deferred` identifies work outside the approved implementation boundary rather than an
 open implementation finding.
 
-| Requirement | Disposition | Phase D evidence |
+| Requirement | Disposition | Evidence |
 |---|---|---|
 | REQ-01 | Implemented | CLI owns repository detection through cleanup; G-GRD..G-CLN |
 | REQ-02 | Implemented | Direct skill routes inspection and fork intent to the existing JSON CLI commands; focused skill tests and fresh Claude/Codex forward tests |
@@ -103,7 +103,7 @@ open implementation finding.
 | REQ-48 | Implemented | G-CPI covers bounded structural inference, sharded screening cache, separate persistence, and management actions |
 | REQ-49 | Implemented | G-SES T-SES-22..27; 8 focused skill tests; skill validation; editable dual-host placement; fresh Claude/Codex inspection, named, unnamed, refusal, collision, absent-Git, ambiguous-host, and hostile-name forward tests |
 
-## Phase D decision trace
+## Decision trace
 
 | Decision | Disposition | Evidence |
 |---|---|---|

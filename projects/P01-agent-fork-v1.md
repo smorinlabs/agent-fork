@@ -2,7 +2,7 @@
 
 **References**
 - **Trunk:** [PROJECTS.md](../PROJECTS.md)
-- **Spec:** [REQUIREMENTS.md](../REQUIREMENTS.md) — REQ-01..49 implemented; pinned to CLI Design Standard v1.4.14
+- **Spec:** [REQUIREMENTS.md](../REQUIREMENTS.md) — REQ-01..49 coverage, including documented and deferred dispositions; pinned to CLI Design Standard v1.4.14
 - **Design:** [DESIGN-DECISIONS.md](../DESIGN-DECISIONS.md) — D1–D20 implemented
 - **Plan:** [Phase D implementation plan](../docs/superpowers/plans/2026-08-10-agent-fork-v1-implementation.md) — owner-approved 2026-08-10; [worktree destination controls](../docs/superpowers/plans/2026-08-10-worktree-destination-controls.md) — complete 2026-08-10; [Codex renamed-session resolution](../docs/superpowers/plans/2026-08-10-codex-renamed-session-resolution.md) — complete 2026-08-10; [session inspection and assertion](../docs/superpowers/plans/2026-08-11-session-inspection-validation.md) — implemented through SES-G5; [Claude parent inference design](../docs/superpowers/plans/2026-08-11-claude-parent-inference.md), [implementation plan](../docs/superpowers/plans/2026-08-11-claude-parent-inference-implementation.md), and [implementation-plan adversarial review](../docs/superpowers/plans/2026-08-11-claude-parent-inference-implementation-adversarial-review.md) — complete through CPI-G8; [direct companion skill and repository-aware session context](../docs/superpowers/plans/2026-08-11-direct-companion-skill-session.md) and [adversarial review](../docs/superpowers/plans/2026-08-11-direct-companion-skill-session-adversarial-review.md) — complete 2026-08-11
 - **Tracking:** [CONFORMANCE.md](../CONFORMANCE.md) — applicability map + waivers
