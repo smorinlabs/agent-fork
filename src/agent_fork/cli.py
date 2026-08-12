@@ -170,6 +170,78 @@ def _parser() -> argparse.ArgumentParser:
         help="Select result format",
     )
     fork.add_argument("--json", action="store_true", help="Alias for --output json")
+    session = commands.add_parser(
+        "session",
+        allow_abbrev=False,
+        help="Inspect or validate the current agent session",
+        description="Report agent-neutral current-session and parent evidence.",
+    )
+    session.add_argument(
+        "-o",
+        "--output",
+        choices=("table", "text", "json"),
+        default="table",
+        help="Select result format",
+    )
+    session.add_argument("--json", action="store_true", help="Alias for --output json")
+    session_actions = session.add_subparsers(dest="session_action")
+    session_validate = session_actions.add_parser(
+        "validate", allow_abbrev=False, help="Assert detected session facts"
+    )
+    session_validate.add_argument("--agent", choices=("claude", "codex"))
+    session_validate.add_argument("--session-id", metavar="ID")
+    session_validate.add_argument("--parent-session-id", metavar="ID")
+    parent_assertion = session_validate.add_mutually_exclusive_group()
+    parent_assertion.add_argument("--has-parent", action="store_true")
+    parent_assertion.add_argument("--no-parent", action="store_true")
+    session_validate.add_argument(
+        "-o",
+        "--output",
+        choices=("table", "text", "json"),
+        default="table",
+        help="Select result format",
+    )
+    session_validate.add_argument(
+        "--json", action="store_true", help="Alias for --output json"
+    )
+    claude_parent = session_actions.add_parser(
+        "claude-parent", allow_abbrev=False, help="Manage Claude parent evidence"
+    )
+    parent_actions = claude_parent.add_subparsers(
+        dest="claude_parent_action", required=True
+    )
+
+    def parent_output(action):
+        action.add_argument(
+            "-o", "--output", choices=("table", "text", "json"), default="table"
+        )
+        action.add_argument(
+            "--json", action="store_true", help="Alias for --output json"
+        )
+
+    parent_list = parent_actions.add_parser("list", allow_abbrev=False)
+    parent_list.add_argument(
+        "--source", choices=("planned", "inferred", "all"), default="all"
+    )
+    parent_output(parent_list)
+    parent_show = parent_actions.add_parser("show", allow_abbrev=False)
+    parent_show.add_argument("--session-id", required=True, metavar="ID")
+    parent_show.add_argument("--source", choices=("planned", "inferred"))
+    parent_output(parent_show)
+    parent_infer = parent_actions.add_parser("infer", allow_abbrev=False)
+    target = parent_infer.add_mutually_exclusive_group(required=True)
+    target.add_argument("--current", action="store_true")
+    target.add_argument("--session-id", metavar="ID")
+    target.add_argument("--all", action="store_true")
+    parent_infer.add_argument("--record", action="store_true")
+    parent_infer.add_argument("--record-all", action="store_true")
+    parent_output(parent_infer)
+    parent_delete = parent_actions.add_parser("delete", allow_abbrev=False)
+    parent_delete.add_argument("--session-id", required=True, metavar="ID")
+    parent_delete.add_argument("--source", choices=("planned", "inferred"))
+    parent_delete.add_argument("--yes", action="store_true")
+    parent_delete.add_argument("--no-input", action="store_true")
+    parent_output(parent_delete)
     listing = commands.add_parser(
         "list",
         allow_abbrev=False,
@@ -571,6 +643,24 @@ def main(argv: list[str] | None = None) -> int:
         and (args.agent is not None or args.parent_session is not None)
     ):
         parser.error("--no-agent cannot be combined with --agent or --parent-session")
+    if (
+        args.command == "session"
+        and args.session_action == "validate"
+        and args.no_parent
+        and args.parent_session_id is not None
+    ):
+        parser.error("--no-parent cannot be combined with --parent-session-id")
+    if (
+        args.command == "session"
+        and args.session_action == "claude-parent"
+        and args.claude_parent_action == "infer"
+    ):
+        if args.record and args.record_all:
+            parser.error("--record and --record-all are mutually exclusive")
+        if args.all and args.record:
+            parser.error("--all requires --record-all for bulk recording")
+        if not args.all and args.record_all:
+            parser.error("--record-all requires --all")
     environment = dict(os.environ)
     try:
         if args.verbose and not args.quiet:
@@ -635,6 +725,316 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if all(check.ok for check in checks) else 1
         if args.command == "fork":
             return _fork_cli(args, environment)
+        if args.command == "session":
+            from agent_fork.output import json_line, terminal_text
+            from agent_fork.session import (
+                SessionAssertions,
+                inspect_session,
+                validate_session,
+            )
+
+            if args.session_action == "claude-parent":
+                from agent_fork.claude_lineage_inference import (
+                    ClaudeLineageCorpus,
+                    to_record,
+                )
+                from agent_fork.errors import (
+                    ClaudeParentError,
+                    ClaudeParentNotRecordableError,
+                    ClaudeParentPartialRecordError,
+                )
+                from agent_fork.lineage import (
+                    find_lineage,
+                    read_lineage,
+                    remove_lineage,
+                )
+                from agent_fork.lineage_inference_store import (
+                    add_inference,
+                    read_inferences,
+                    remove_inference,
+                )
+
+                action = args.claude_parent_action
+                machine = args.json or args.output == "json"
+
+                def emit(document):
+                    if machine:
+                        print(json_line(document))
+                    else:
+                        if isinstance(document, list):
+                            for item in document:
+                                fields = (
+                                    item["child_session_id"],
+                                    item["parent_session_id"],
+                                    item["source"],
+                                    item["status"],
+                                )
+                                print("  ".join(str(value) for value in fields))
+                        else:
+                            for key, value in document.items():
+                                print(f"{key}: {terminal_text(value)}")
+
+                def records():
+                    values = []
+                    if getattr(args, "source", "all") in ("planned", "all"):
+                        values += [
+                            {**x.__dict__, "source": "planned", "status": "claimed"}
+                            for x in read_lineage(env=environment)
+                            if x.agent == "claude"
+                        ]
+                    if getattr(args, "source", "all") in ("inferred", "all"):
+                        values += [
+                            {**x.document(), "source": "inferred"}
+                            for x in read_inferences(env=environment)
+                        ]
+                    return sorted(
+                        values, key=lambda x: (x["child_session_id"], x["source"])
+                    )
+
+                if action == "list":
+                    emit(records())
+                    return 0
+                if action == "show":
+                    found = [
+                        x for x in records() if x["child_session_id"] == args.session_id
+                    ]
+                    if len(found) != 1:
+                        raise ClaudeParentError(
+                            "Claude parent record not found or source is ambiguous"
+                        )
+                    emit(found[0])
+                    return 0
+                if action == "delete":
+                    found = [
+                        x for x in records() if x["child_session_id"] == args.session_id
+                    ]
+                    if len(found) != 1:
+                        raise ClaudeParentError(
+                            "Claude parent record not found or source is ambiguous"
+                        )
+                    if not args.yes:
+                        if (
+                            machine
+                            or args.no_input
+                            or not sys.stdin.isatty()
+                            or not sys.stderr.isatty()
+                        ):
+                            raise ConfigError(
+                                "Claude parent delete requires --yes when prompting "
+                                "is unavailable"
+                            )
+                        selected = found[0]
+                        print("Delete Claude parent metadata?", file=sys.stderr)
+                        print(
+                            f"child: {terminal_text(selected['child_session_id'])}",
+                            file=sys.stderr,
+                        )
+                        print(
+                            f"parent: {terminal_text(selected['parent_session_id'])}",
+                            file=sys.stderr,
+                        )
+                        print(
+                            f"source: {terminal_text(selected['source'])}",
+                            file=sys.stderr,
+                        )
+                        print(
+                            "This does not delete Claude transcripts or Git resources.",
+                            file=sys.stderr,
+                        )
+                        if selected["source"] == "planned":
+                            print(
+                                "Warning: this removes Agent Fork's strongest local "
+                                "parent evidence.",
+                                file=sys.stderr,
+                            )
+                        print("Continue? [y/N] ", end="", file=sys.stderr, flush=True)
+                        if sys.stdin.readline().strip().lower() not in {"y", "yes"}:
+                            print("Claude parent delete cancelled", file=sys.stderr)
+                            return 2
+                    if found[0]["source"] == "planned":
+                        remove_lineage("claude", args.session_id, env=environment)
+                    else:
+                        remove_inference(args.session_id, env=environment)
+                    emit(
+                        {
+                            "deleted": True,
+                            "session_id": args.session_id,
+                            "source": found[0]["source"],
+                        }
+                    )
+                    return 0
+                corpus = ClaudeLineageCorpus(environment)
+                ids = []
+                if args.current:
+                    if environment.get("CLAUDECODE") != "1" or not environment.get(
+                        "CLAUDE_CODE_SESSION_ID"
+                    ):
+                        raise ClaudeParentError("no current Claude session detected")
+                    ids = [environment["CLAUDE_CODE_SESSION_ID"]]
+                elif args.session_id:
+                    ids = [args.session_id]
+                else:
+                    ids = [
+                        p.stem
+                        for p in corpus.paths
+                        if find_lineage("claude", p.stem, env=environment) is None
+                    ]
+                documents = []
+                failures = 0
+                recorded_count = 0
+                bulk_spool = None
+                if args.all:
+                    from agent_fork.bulk_output import BulkSpool
+
+                    bulk_spool = BulkSpool()
+                for sid in ids:
+                    try:
+                        result = corpus.infer_one(sid)
+                        recorded = False
+                        if args.record or args.record_all:
+                            if not result.recordable:
+                                failures += 1
+                            elif not corpus.evidence_stable(result):
+                                failures += 1
+                            else:
+                                add_inference(to_record(result), env=environment)
+                                recorded = True
+                                recorded_count += 1
+                        document = {**result.document(), "recorded": recorded}
+                        if bulk_spool is None:
+                            documents.append(document)
+                        else:
+                            bulk_spool.append(document)
+                    except Exception as error:
+                        failures += 1
+                        document = {
+                            "agent": "claude",
+                            "session_id": sid,
+                            "relationship": {"status": "unavailable"},
+                            "error": str(error),
+                            "recorded": False,
+                        }
+                        if bulk_spool is None:
+                            documents.append(document)
+                        else:
+                            bulk_spool.append(document)
+                if bulk_spool is not None:
+                    summary = {
+                        "total": bulk_spool.count,
+                        "recorded": recorded_count,
+                        "failed": failures,
+                    }
+                    if failures:
+                        if machine:
+                            bulk_spool.render_json(
+                                sys.stderr,
+                                summary,
+                                error_code=(
+                                    "claude_parent_partial_record"
+                                    if args.record_all
+                                    else "claude_parent_unavailable"
+                                ),
+                                error_message=(
+                                    "one or more Claude parent results were not "
+                                    "recordable"
+                                    if args.record_all
+                                    else "one or more Claude parent analyses were "
+                                    "unavailable"
+                                ),
+                            )
+                        else:
+                            bulk_spool.render_human(sys.stderr, summary)
+                        bulk_spool.close()
+                        return 3
+                    if machine:
+                        bulk_spool.render_json(sys.stdout, summary)
+                    else:
+                        bulk_spool.render_human(sys.stdout, summary)
+                    bulk_spool.close()
+                    return 0
+                analysis = (
+                    documents[0]
+                    if len(documents) == 1
+                    else {
+                        "results": documents,
+                        "summary": {"total": len(documents), "failed": failures},
+                    }
+                )
+                if failures and (args.record or args.record_all):
+                    record_error = (
+                        ClaudeParentNotRecordableError
+                        if len(documents) == 1
+                        else ClaudeParentPartialRecordError
+                    )
+                    raise record_error(
+                        "one or more Claude parent results were not recordable",
+                        details={"analysis": analysis},
+                        human_message=(
+                            "Claude parent analysis completed, but the result is not "
+                            "recordable"
+                        ),
+                    )
+                if failures:
+                    raise ClaudeParentError(
+                        "one or more Claude parent analyses were unavailable",
+                        details={"analysis": analysis},
+                    )
+                emit(analysis)
+                return 0
+            inspection = inspect_session(environment, cwd=Path.cwd())
+            machine = args.json or args.output == "json"
+            if args.session_action == "validate":
+                has_parent = (
+                    True
+                    if args.has_parent or args.parent_session_id is not None
+                    else False
+                    if args.no_parent
+                    else None
+                )
+                document = validate_session(
+                    inspection,
+                    SessionAssertions(
+                        agent=args.agent,
+                        session_id=args.session_id,
+                        parent_session_id=args.parent_session_id,
+                        has_parent=has_parent,
+                    ),
+                )
+                if machine:
+                    print(json_line(document))
+                else:
+                    print("session valid")
+                return 0
+            if machine:
+                print(json_line(inspection.document()))
+            elif inspection.current_session is None:
+                print(f"session: {inspection.lineage_status}")
+            else:
+                current = inspection.current_session
+                print(f"agent: {terminal_text(inspection.agent)}")
+                print(f"current session: {terminal_text(current.id)}")
+                print(
+                    "current name: "
+                    + (terminal_text(current.name) if current.name is not None else "-")
+                )
+                if inspection.parent_session is None:
+                    print("parent session: -")
+                else:
+                    print(
+                        "parent session: " + terminal_text(inspection.parent_session.id)
+                    )
+                    print(
+                        "parent name: "
+                        + (
+                            terminal_text(inspection.parent_session.name)
+                            if inspection.parent_session.name is not None
+                            else "-"
+                        )
+                    )
+                print(f"lineage: {terminal_text(inspection.lineage_status)}")
+                for notice in inspection.notices:
+                    print(f"notice: {terminal_text(notice)}")
+            return 0
         if args.command == "cleanup":
             from agent_fork.cleanup import cleanup, resolve_cleanup_target
 

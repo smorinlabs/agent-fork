@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-COMMANDS = ("fork", "cleanup", "list", "doctor", "config", "completion", "help")
+COMMANDS = (
+    "fork",
+    "session",
+    "cleanup",
+    "list",
+    "doctor",
+    "config",
+    "completion",
+    "help",
+)
 GLOBAL_OPTIONS = (
     "-h",
     "--help",
@@ -55,6 +64,28 @@ CLEANUP_OPTIONS = (
     "--output",
     "--json",
 )
+SESSION_OPTIONS = (
+    "validate",
+    "claude-parent",
+    "list",
+    "show",
+    "infer",
+    "delete",
+    "--agent",
+    "--session-id",
+    "--parent-session-id",
+    "--has-parent",
+    "--no-parent",
+    "--current",
+    "--all",
+    "--source",
+    "--record",
+    "--record-all",
+    "--yes",
+    "--no-input",
+    "--output",
+    "--json",
+)
 
 
 def _words(values: tuple[str, ...]) -> str:
@@ -71,6 +102,8 @@ def _bash() -> str:
     else
         case "$command" in
             fork) words="{_words(FORK_OPTIONS)} {_words(AGENTS)} {_words(OUTPUTS)}" ;;
+            session) words="{_words(SESSION_OPTIONS)} {_words(AGENTS)} \
+{_words(OUTPUTS)}" ;;
             cleanup) words="{_words(CLEANUP_OPTIONS)} {_words(OUTPUTS)}" ;;
             list|doctor) words="--output --json {_words(OUTPUTS)}" ;;
             config) words="{_words(CONFIG_ACTIONS)} --output --json \
@@ -97,6 +130,7 @@ _agent_fork() {{
   fi
   case $words[2] in
     fork) choices=({_words(FORK_OPTIONS)} {_words(AGENTS)} {_words(OUTPUTS)}) ;;
+    session) choices=({_words(SESSION_OPTIONS)} {_words(AGENTS)} {_words(OUTPUTS)}) ;;
     cleanup) choices=({_words(CLEANUP_OPTIONS)} {_words(OUTPUTS)}) ;;
     list|doctor) choices=(--output --json {_words(OUTPUTS)}) ;;
     config) choices=({_words(CONFIG_ACTIONS)} --output --json {_words(OUTPUTS)}) ;;
@@ -130,6 +164,12 @@ def _fish() -> str:
             "complete -c agent-fork -n '__fish_seen_subcommand_from fork' "
             f"-l '{option.removeprefix('--')}'"
         )
+    for option in SESSION_OPTIONS:
+        if option.startswith("--"):
+            lines.append(
+                "complete -c agent-fork -n '__fish_seen_subcommand_from session' "
+                f"-l '{option.removeprefix('--')}'"
+            )
     for option in CLEANUP_OPTIONS:
         lines.append(
             "complete -c agent-fork -n '__fish_seen_subcommand_from cleanup' "

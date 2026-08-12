@@ -243,6 +243,31 @@ def test_adapter_bounds_notification_flood(repo_scenario, tmp_path, monkeypatch)
         codex_app_server.list_named_threads(str(server), "hello", {})
 
 
+@pytest.mark.matrix("T-SES-14")
+def test_thread_read_returns_name_and_parent(repo_scenario, tmp_path):
+    from agent_fork.codex_app_server import read_thread
+
+    repo_scenario()
+    server = _server(
+        tmp_path,
+        [
+            {"result": {}},
+            {
+                "result": {
+                    "thread": {
+                        "id": UUID,
+                        "name": "hello",
+                        "forkedFromId": "parent",
+                    }
+                }
+            },
+        ],
+    )
+    result = read_thread(str(server), UUID, {})
+    assert result is not None
+    assert result.name == "hello" and result.forked_from_id == "parent"
+
+
 @pytest.mark.matrix("T-EMT-07")
 def test_resolved_name_emits_canonical_uuid(repo_scenario):
     from agent_fork.agents import AgentContext, build_launch_command

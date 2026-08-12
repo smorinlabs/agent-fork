@@ -83,3 +83,55 @@ startup. `--no-codex-session-name-resolution` and
 `[agents.codex] session_name_resolution = false` retain a deterministic
 UUID-only escape hatch. T-EXP-07 rechecks the real local path and performs no
 repository mutation.
+
+## E8–E10 — Session inspection and lineage — 2026-08-11
+
+The session command was exercised through real authenticated agent tool calls,
+not only through injected environment fixtures.
+
+### E8 — Claude `-p` current identity
+
+A fresh persisted Claude Code 2.1.220 `-p --output-format json` session was
+restricted to Bash and instructed to run `agent-fork session -o json`. The
+outer result `session_id` exactly matched the inner
+`current_session.id`; Agent Fork reported `agent=claude`. Because the live
+harness itself runs under Codex, it explicitly removed the unrelated inherited
+`CODEX_THREAD_ID` when spawning Claude.
+
+Result: **pass**.
+
+### E9 — Codex `exec --json` current identity
+
+A fresh persisted Codex CLI 0.147.0 `exec --json` session ran the same command.
+The outer `thread.started.thread_id` exactly matched the inner
+`current_session.id`; Agent Fork reported `agent=codex`. The local app-server
+lookup completed without notices.
+
+Result: **pass**.
+
+### E10 — resumed Claude child parent claim
+
+A real Claude child created with a pinned UUID and native `--fork-session` was
+given the corresponding prompt-free Agent Fork lineage claim, resumed, and
+instructed to inspect itself. It observed its own child UUID from
+`CLAUDE_CODE_SESSION_ID` and reported the known source UUID as parent evidence
+with `id_status=claimed`. The temporary lineage claim was removed after the
+test; transcript content was neither read into the result nor stored by Agent
+Fork.
+
+Result: **pass**. This validates the evidence distinction: current identity is
+observed from the live environment, while Claude parent identity is a durable
+Agent Fork provenance claim.
+## E11 — Claude structural parent inference and performance (2026-08-11)
+
+Claude Code 2.1.220/2.1.228 known parent/child transcripts were analyzed without
+reading message content into output. The child
+`2e12da68-6e37-40dd-9ff1-d804ae23f283` inferred parent
+`6e572c9b-73e2-40a9-a6e1-1cb88a57b21c` at shared boundary
+`902366e5-3515-4209-a8e1-cba4cd4eae2e`: five shared structural records, one
+substantive record, one agreeing durable history clock, status `inferred`.
+
+Cold corpus: 138 transcripts enumerated, 137 superficial cache misses,
+1,976,023 superficial bytes, and only two deep parses (93,728 bytes). Warm
+corpus: 137 cache hits, zero superficial bytes reread, and the same two deep
+parses. The result and boundary matched the pair's known construction history.

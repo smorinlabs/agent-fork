@@ -25,6 +25,8 @@
 | D15 | Partial worktree destination overrides | **Independent base and leaf flags; exact path remains exclusive** | ★ owner-approved 2026-08-10 |
 | D16 | Agent integration mode | **Adaptive `auto`; explicit `strict` and `git-only` controls** | ★ owner-approved 2026-08-10 |
 | D17 | Codex renamed sessions | **Feature-detected app-server resolution; default on with UUID-only escape hatch** | ★ owner-approved 2026-08-10 |
+| D18 | Session inspection | **Agent-neutral evidence report plus composable assertions; parent means evidence, not transcript existence** | ★ owner-approved 2026-08-11 |
+| D19 | Claude parent inference | **Explicit opt-in structural inference; sharded screening cache; inferred evidence remains separate from planned claims** | ★ owner-approved 2026-08-11 |
 
 ## Decisions in detail
 
@@ -110,6 +112,34 @@ protocol and always emits the canonical UUID. Resolution is enabled by default;
 Canonical UUIDs bypass app-server. Protocol failures refuse with UUID guidance;
 there is never a direct SQLite fallback. The Codex-specific flag is retained if
 a future generic session-name-resolution control is introduced.
+
+### D18 — Session inspection and assertions (owner-approved 2026-08-11)
+
+### D19 — Claude parent inference and lineage management (owner-approved 2026-08-11)
+Claude historical parent discovery is explicit under `session claude-parent` and
+never runs during ordinary inspection. Inference requires `--current`,
+`--session-id`, or `--all`; preview is read-only, single recording uses
+`--record`, and bulk recording requires `--record-all`. Exact shared message
+UUID/edge ancestry establishes relatedness; timestamps only infer direction and
+never break a same-boundary sibling tie. Planned claims outrank separately
+stored inferred evidence. Discovery uses a bounded manifest, superficial
+streaming UUID screens, exact candidate parsing, and polynomial graph analysis;
+unchanged unrelated files are not reread on warm lookup. Agent Fork never
+stores transcript content or mutates Claude-owned files. Recorded inference is
+described as `current_at_last_analysis`, never globally current: ordinary
+session inspection does not rescan Claude's corpus. The record binds source
+fingerprints, algorithm version, analysis index generation, and a
+target-specific candidate-universe digest. Stale inference is visible but does
+not satisfy validation.
+
+`agent-fork session` reports ambient Claude/Codex identity, optional local name,
+and optional parent evidence without requiring Git or mutating agent state.
+`session validate` asserts detection by default and composes `--agent`,
+`--session-id`, `--parent-session-id`, and `--has-parent`/`--no-parent` with AND
+semantics. Codex evidence comes from its local app-server. Agent Fork-created
+Claude children use a versioned XDG provenance claim because Claude transcripts
+do not retain the source session UUID. Missing parent evidence is not proof that
+a session was never forked.
 
 ## Resulting v1 surface (consolidated)
 

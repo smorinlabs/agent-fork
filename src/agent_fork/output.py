@@ -18,6 +18,11 @@ def json_line(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def terminal_text(value: object) -> str:
+    """Render one untrusted scalar without terminal control characters."""
+    return json.dumps(str(value), ensure_ascii=True)[1:-1]
+
+
 @dataclass(frozen=True)
 class ForkOutput:
     agent: str | None

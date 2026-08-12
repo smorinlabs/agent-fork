@@ -85,6 +85,7 @@ The version command must print `agent-fork 1.0.0`. The placement list must show
 ```bash
 agent-fork doctor              # confirm Git, agent CLIs, config, and XDG paths
 agent-fork fork try-redis      # create the fork, print the paste command
+agent-fork session -o json     # inspect current session and parent evidence
 agent-fork list                # see the forks you have created
 agent-fork cleanup try-redis --yes   # remove one when you are done
 ```
@@ -131,6 +132,7 @@ than starting a new one.
 | Command | Purpose |
 |---|---|
 | `agent-fork fork [NAME]` | Create a verified branch and worktree; print the paste command |
+| `agent-fork session [validate]` | Inspect session evidence or assert expected identity and lineage |
 | `agent-fork list` | List forks created by `agent-fork` |
 | `agent-fork cleanup <name\|branch\|worktree> --yes` | Remove a registered fork |
 | `agent-fork doctor` | Diagnose Git, agent, config, and XDG readiness |
@@ -140,7 +142,7 @@ than starting a new one.
 
 Global options: `-V/--version`, `-v/--verbose`, `-q/--quiet`, `--debug`, and
 `--config PATH`. Commands that emit formatted results (`fork`, `list`,
-`cleanup`, `doctor`, and `config view`) accept
+`session`, `cleanup`, `doctor`, and `config view`) accept
 `-o/--output {table,text,json}`; `--json` is an alias for `-o json`.
 
 `cleanup` is registry-scoped unless `--force` is used. It always inspects the
@@ -154,6 +156,76 @@ and overrides both Git safety guards. `--allow-dirty` and `--allow-unpushed`
 override only their named guard. None of these flags replaces consent via
 `--yes`, and none overrides the refusal to remove the invoking working
 directory. Agent-owned session files are never removed.
+
+## Session inspection and validation
+
+Use the same interface inside Claude Code or Codex:
+
+```bash
+agent-fork session
+agent-fork session -o json
+agent-fork session validate --agent codex --has-parent
+agent-fork session validate \
+  --session-id "$EXPECTED_CHILD" \
+  --parent-session-id "$EXPECTED_PARENT" -o json
+```
+
+Inspection reports sourced evidence and succeeds with `not_detected` in an
+ordinary terminal. Validation without constraints requires any unambiguous
+supported current session. Optional `--agent`, `--session-id`,
+`--parent-session-id`, and `--has-parent`/`--no-parent` assertions compose with
+AND semantics.
+
+Parent means parent evidence, not proof that a transcript still exists. Codex
+name and parent evidence comes from its bounded local app-server. Agent
+Fork-created Claude children retain a prompt-free XDG provenance claim because
+Claude transcripts do not preserve the source session UUID. Missing evidence
+is not proof that a session was never forked. Inspection makes no network calls
+and does not modify agent state.
+
+### Claude parent inference
+
+Claude does not expose an authoritative historical parent ID for ordinary
+forks. An explicit, potentially expensive structural analysis can infer likely
+relationships from copied message UUID/`parentUuid` ancestry:
+
+```bash
+agent-fork session claude-parent infer --current
+agent-fork session claude-parent infer --session-id UUID -o json
+agent-fork session claude-parent infer --session-id UUID --record
+agent-fork session claude-parent infer --all
+agent-fork session claude-parent infer --all --record-all
+agent-fork session claude-parent list
+agent-fork session claude-parent show --session-id UUID
+agent-fork session claude-parent delete --session-id UUID --source inferred --yes
+```
+
+Exactly one of `--current`, `--session-id`, or `--all` is required. Preview is
+read-only. `--record` is single-target only; bulk persistence requires the
+deliberate `--record-all` spelling. Delete removes only Agent Fork metadata,
+never Claude transcripts, history, sessions, Git branches, or worktrees. It
+prompts only in interactive human mode; use `--yes` for automation, while
+`--no-input` makes missing consent fail immediately. Bulk JSON remains one
+document and uses bounded per-target candidate projections.
+
+Analysis uses a bounded manifest, superficial streaming UUID screens, exact
+candidate parsing, and bounded graph comparison. Cache shards live under
+`$XDG_CACHE_HOME/agent-fork/claude-lineage-index-v2/`; unchanged unrelated
+transcripts are not reread on warm lookup. Inferred records live separately at
+`$XDG_STATE_HOME/agent-fork/session-lineage-inferences.json`. Neither cache nor
+state stores prompt/response content, although session IDs and UUID correlation
+remain sensitive local metadata.
+
+`inferred` and `strongly_inferred` are evidence labels, not proof of immediate
+parentage. Same-boundary siblings remain ambiguous regardless of timestamps.
+Recorded freshness means `current_at_last_analysis`: the analyzed source files,
+algorithm version, index generation, and target-specific candidate-universe
+digest are retained, but ordinary `session`, `list`, and `show` never rescan the
+Claude corpus and therefore do not claim global currentness. A later explicit
+inference refresh can detect relevant candidate-universe changes. Stale records
+remain manageable with `list`/`show` but are not used as parent evidence. This
+heuristic relies on observed Claude transcript structure, not a documented
+Anthropic lineage API.
 
 ## `cleanup` options
 
@@ -386,7 +458,7 @@ cleanup guard refusals use the cleanup schema shown above.
 | 0 | Success | — |
 | 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy` |
 | 2 | Usage error or required prompt disabled | `config_error` |
-| 3 | Agent, session, or target not found | `agent_not_detected`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `cleanup_target_unknown` |
+| 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown` |
 | 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits` |
 | 130 / 143 | Interrupted by SIGINT / SIGTERM | — |
 

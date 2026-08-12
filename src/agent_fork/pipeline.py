@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,9 +18,10 @@ from agent_fork.agents import (
 )
 from agent_fork.git import run_git
 from agent_fork.include import copy_worktree_includes, run_setup_hook
+from agent_fork.lineage import LineageClaim, add_lineage
 from agent_fork.materialize import materialize
 from agent_fork.models import RegistryEntry
-from agent_fork.registry import add_entry
+from agent_fork.registry import add_entry, remove_entry
 from agent_fork.repository import (
     WorktreeCreation,
     create_worktree_at_anchor,
@@ -90,6 +92,11 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         notices.extend(agent_check.notices)
     resolved_agent = agent_check.context if agent_check is not None else request.agent
     validate_fork_guards(request.parent, request.branch, request.destination, env=env)
+    planned_child_id = (
+        request.child_session_id or str(uuid.uuid4())
+        if resolved_agent is not None and resolved_agent.agent == "claude"
+        else None
+    )
     parent_status = run_git(
         request.parent, ["status", "--porcelain=v1", "-z"], env=env
     ).stdout
@@ -128,6 +135,26 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             ),
             env=env,
         )
+        if (
+            resolved_agent is not None
+            and resolved_agent.agent == "claude"
+            and planned_child_id is not None
+        ):
+            try:
+                add_lineage(
+                    LineageClaim.create(
+                        agent="claude",
+                        child_session_id=planned_child_id,
+                        parent_session_id=resolved_agent.parent_session_id,
+                        name=request.name,
+                        branch=request.branch,
+                        worktree=creation.path,
+                    ),
+                    env=env,
+                )
+            except Exception:
+                remove_entry(request.name, env=env)
+                raise
         return included.copied, hook_notices
 
     included, _ = run_with_rollback(creation, finish, env=env)
@@ -137,7 +164,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             worktree=creation.path,
             name=request.name,
             extra_args=request.extra_args,
-            child_session_id=request.child_session_id,
+            child_session_id=planned_child_id,
         )
         if resolved_agent is not None
         else LaunchCommand(f"cd {shlex.quote(str(creation.path))}", None, ())

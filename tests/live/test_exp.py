@@ -12,6 +12,7 @@ import shlex
 import shutil
 import struct
 import subprocess
+import sys
 import termios
 import time
 import uuid
@@ -25,6 +26,143 @@ CLAUDE = shutil.which("claude")
 CODEX = shutil.which("codex")
 ANSI = re.compile(rb"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 REAL_AGENT_TIMEOUT_SECONDS = 180
+
+
+@pytest.mark.matrix("T-SES-17")
+@pytest.mark.requires_real_cli
+@pytest.mark.skipif(
+    CLAUDE is None, reason="requires_real_cli: claude executable not found"
+)
+def test_session_identity_inside_claude_print(tmp_path: Path):
+    assert CLAUDE is not None
+    output = tmp_path / "claude-session.json"
+    command = shlex.join(
+        [sys.executable, "-m", "agent_fork.cli", "session", "-o", "json"]
+    )
+    prompt = f"Execute `{command}` exactly once with Bash. Return only its raw stdout."
+    _run(
+        [
+            "env",
+            "-u",
+            "CODEX_THREAD_ID",
+            CLAUDE,
+            "-p",
+            prompt,
+            "--output-format",
+            "json",
+            "--allowedTools",
+            "Bash",
+            "--permission-mode",
+            "bypassPermissions",
+            "--max-turns",
+            "2",
+        ],
+        Path.cwd(),
+        stdout=output,
+    )
+    outer = _claude_result_record(json.loads(output.read_text()))
+    rendered = str(outer["result"]).strip()
+    if rendered.startswith("```") and rendered.endswith("```"):
+        rendered = rendered[3:-3].strip()
+        if rendered.startswith("json"):
+            rendered = rendered[4:].lstrip()
+    inner = json.loads(rendered)
+    assert inner["agent"] == "claude"
+    assert inner["current_session"]["id"] == outer["session_id"]
+
+
+@pytest.mark.matrix("T-SES-18")
+@pytest.mark.requires_real_cli
+@pytest.mark.skipif(
+    CODEX is None, reason="requires_real_cli: codex executable not found"
+)
+def test_session_identity_inside_codex_exec(tmp_path: Path):
+    assert CODEX is not None
+    output = tmp_path / "codex-session.jsonl"
+    command = shlex.join(
+        [sys.executable, "-m", "agent_fork.cli", "session", "-o", "json"]
+    )
+    _run(
+        [
+            CODEX,
+            "exec",
+            "--json",
+            "--sandbox",
+            "danger-full-access",
+            f"Execute `{command}` exactly once. Return only its stdout.",
+        ],
+        Path.cwd(),
+        stdout=output,
+    )
+    events = [json.loads(line) for line in output.read_text().splitlines()]
+    thread_id = next(
+        item["thread_id"] for item in events if item.get("type") == "thread.started"
+    )
+    execution = next(
+        item["item"]
+        for item in events
+        if item.get("type") == "item.completed"
+        and item.get("item", {}).get("type") == "command_execution"
+    )
+    inner = json.loads(execution["aggregated_output"])
+    assert execution["exit_code"] == 0
+    assert inner["agent"] == "codex"
+    assert inner["current_session"]["id"] == thread_id
+
+
+@pytest.mark.matrix("T-SES-20")
+@pytest.mark.requires_real_cli
+@pytest.mark.skipif(
+    CLAUDE is None, reason="requires_real_cli: claude executable not found"
+)
+def test_claude_resume_observes_recorded_parent(
+    claude_fork: ClaudeForkResult, tmp_path: Path
+):
+    from agent_fork.lineage import LineageClaim, add_lineage, remove_lineage
+
+    assert CLAUDE is not None
+    claim = LineageClaim.create(
+        agent="claude",
+        child_session_id=claude_fork.child_id,
+        parent_session_id=claude_fork.parent_id,
+        name=claude_fork.name,
+    )
+    add_lineage(claim, env=os.environ)
+    output = tmp_path / "claude-lineage.json"
+    command = shlex.join(
+        [sys.executable, "-m", "agent_fork.cli", "session", "-o", "json"]
+    )
+    try:
+        _run(
+            [
+                "env",
+                "-u",
+                "CODEX_THREAD_ID",
+                CLAUDE,
+                "--resume",
+                claude_fork.child_id,
+                "-p",
+                f"Execute `{command}` exactly once with Bash. Return only raw stdout.",
+                "--output-format",
+                "json",
+                "--allowedTools",
+                "Bash",
+                "--permission-mode",
+                "bypassPermissions",
+                "--max-turns",
+                "2",
+            ],
+            claude_fork.child,
+            stdout=output,
+        )
+        outer = _claude_result_record(json.loads(output.read_text()))
+        rendered = str(outer["result"]).strip()
+        inner = json.loads(rendered.removeprefix("```json").removesuffix("```").strip())
+        assert inner["current_session"]["id"] == claude_fork.child_id
+        assert inner["parent_session"]["id"] == claude_fork.parent_id
+        assert inner["parent_session"]["id_status"] == "claimed"
+    finally:
+        remove_lineage("claude", claude_fork.child_id, env=os.environ)
 
 
 def _text(value: str | bytes | None) -> str:
