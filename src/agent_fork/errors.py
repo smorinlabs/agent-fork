@@ -23,6 +23,13 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
         3, "session-name resolver is unavailable"
     ),
     "session_validation_failed": ErrorSpec(3, "session assertions did not match"),
+    "claude_parent_unavailable": ErrorSpec(3, "Claude parent inference is unavailable"),
+    "claude_parent_not_recordable": ErrorSpec(
+        3, "Claude parent inference result is not recordable"
+    ),
+    "claude_parent_partial_record": ErrorSpec(
+        3, "one or more Claude parent results were not recordable"
+    ),
     "cleanup_target_unknown": ErrorSpec(3, "cleanup target is not registered or found"),
     "conflict_branch_exists": ErrorSpec(5, "fork branch already exists"),
     "conflict_branch_worktree": ErrorSpec(5, "branch is attached to a worktree"),
@@ -117,3 +124,37 @@ class SessionResolutionUnavailableError(AgentForkError):
 class SessionValidationError(AgentForkError):
     code = "session_validation_failed"
     exit_code = 3
+
+
+class ClaudeParentError(AgentForkError):
+    code = "claude_parent_unavailable"
+    exit_code = 3
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "claude_parent_unavailable",
+        details: dict[str, object] | None = None,
+        human_message: str | None = None,
+    ):
+        if code not in ERROR_CATALOG:
+            raise ValueError(f"uncataloged Claude parent error code: {code}")
+        super().__init__(message)
+        self.code = code
+        self.details = details
+        self.human_message = human_message
+
+
+class ClaudeParentNotRecordableError(ClaudeParentError):
+    code = "claude_parent_not_recordable"
+
+    def __init__(self, message: str, **kwargs):
+        super().__init__(message, code=self.code, **kwargs)
+
+
+class ClaudeParentPartialRecordError(ClaudeParentError):
+    code = "claude_parent_partial_record"
+
+    def __init__(self, message: str, **kwargs):
+        super().__init__(message, code=self.code, **kwargs)

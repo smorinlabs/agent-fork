@@ -474,6 +474,53 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 
 ---
 
+## G-CPI — Claude parent inference and lineage management
+Status: done
+
+Purpose: opt-in, performance-bounded structural inference and safe management of Claude parent evidence.
+
+Varying axes: relationship (parent/child/sibling/unrelated), cache (cold/warm), persistence (preview/record/delete), and output.
+
+| ID | Scenario | Axes | Tier | row_status | Source |
+|---|---|---|---|---|---|
+| T-CPI-01 | exact shared substantive UUID/edge ancestry plus older history infers the known parent and boundary | agent=claude | U | live | REQ-48; D19 |
+| T-CPI-02 | cold screening builds shards while warm lookup rereads zero unrelated transcript bytes and deeply parses only matches | cache=cold/warm | U | live | REQ-48; D19 |
+| T-CPI-03 | cache shards exclude transcript content canaries | privacy | U | live | REQ-48; D19 |
+| T-CPI-04 | system-only overlap cannot establish Claude lineage | relationship=unrelated | U | live | REQ-48; D19 |
+| T-CPI-05 | same-boundary older candidates remain ambiguous rather than timestamp-selected | relationship=siblings | U | live | REQ-48; D19 |
+| T-CPI-06 | inferred store atomically round-trips, replaces by child, removes exactly, and uses restrictive mode | persistence | U | live | REQ-48; D19 |
+| T-CPI-07 | infer requires exactly one explicit current/session/all target | CLI | C | live | REQ-48; D19 |
+| T-CPI-08 | installed infer-record-list-show-delete lifecycle is source-aware and metadata-only | CLI+persistence | C | live | REQ-48; D19 |
+| T-CPI-09 | installed preview succeeds without writing inferred state | CLI+preview | C | live | REQ-48; D19 |
+| T-CPI-10 | bulk analysis shares one discovery/history pass, transcript parse, and unordered-pair comparison | performance | U | live | REQ-48; D19 |
+| T-CPI-11 | a reverse-ordered 10,000-node shared chain is processed iteratively with linear work | performance+graph | U | live | REQ-48; D19 |
+| T-CPI-12 | self and multi-node ancestry cycles are rejected in every graph component | graph=cycle | U | live | REQ-48; D19 |
+| T-CPI-13 | escaped top-level UUID keys and values cannot create superficial-screen false negatives | cache+correctness | U | live | REQ-48; D19 |
+| T-CPI-14 | malformed or uncertain superficial input becomes an always-candidate shard | cache+conservative | U | live | REQ-48; D19 |
+| T-CPI-15 | a complete final transcript record without newline is decoded | JSONL=EOF | U | live | REQ-48; D19 |
+| T-CPI-16 | a truncated final transcript record is ignored without losing prior records | JSONL=truncated | U | live | REQ-48; D19 |
+| T-CPI-17 | newline-terminated transcript records obey the same byte bound | JSONL=bounded | U | live | REQ-48; D19 |
+| T-CPI-18 | concurrent cold cache writers publish one valid private shard atomically | cache=concurrent | U | live | REQ-48; D19 |
+| T-CPI-19 | cache publication failure degrades to correct uncached analysis | cache=unwritable | U | live | REQ-48; D19 |
+| T-CPI-20 | invalid or wrong-source cache schemas are misses and rebuilds | cache=invalid | U | live | REQ-48; D19 |
+| T-CPI-21 | a valid always-candidate cache shard forces conservative deep parsing | cache=conservative | U | live | REQ-48; D19 |
+| T-CPI-22 | transcript discovery never follows an outside-root symlink | filesystem=symlink | U | live | REQ-48; D19 |
+| T-CPI-23 | discovery bounds all encountered entries, including invalid names | performance+filesystem | U | live | REQ-48; D19 |
+| T-CPI-24 | a candidate read race makes the corpus incomplete and nonrecordable | filesystem=race | U | live | REQ-48; D19 |
+| T-CPI-25 | pre-record revalidation rejects a changed candidate universe | persistence+races | U | live | REQ-48; D19 |
+| T-CPI-26 | oversized history rows drain boundedly while later relevant clocks remain usable | history=oversized | U | live | REQ-48; D19 |
+| T-CPI-27 | history retains only discovered IDs and the earliest timestamp in one pass | history=privacy | U | live | REQ-48; D19 |
+| T-CPI-28 | an explicit relevant-universe refresh marks prior inference stale without ordinary corpus scanning | freshness | U | live | REQ-48; D19 |
+| T-CPI-29 | unrecordable machine inference emits one typed stderr error and zero stdout | CLI+errors | C | live | REQ-48; D19 |
+| T-CPI-30 | noninteractive delete without consent exits 2 and preserves metadata | CLI+consent | C | live | REQ-48; D19 |
+| T-CPI-31 | delete help exposes `--yes` and `--no-input` consent controls | CLI+help | C | live | REQ-48; D19 |
+| T-CPI-32 | bulk preview emits one bounded JSON document with deterministic summary | CLI+bulk | C | live | REQ-48; D19 |
+| T-CPI-33 | partial bulk recording commits successes but emits one stderr error document | CLI+bulk+persistence | C | live | REQ-48; D19 |
+| T-CPI-34 | bulk projection caps candidate detail, notices, and scalar lengths explicitly | output+memory | U | live | REQ-48; D19 |
+| T-CPI-35 | deferred bulk spool uses restrictive private permissions | output+privacy | U | live | REQ-48; D19 |
+
+---
+
 ## G-EXP — Live experiments
 Status: done
 

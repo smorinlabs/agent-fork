@@ -122,3 +122,16 @@ Fork.
 Result: **pass**. This validates the evidence distinction: current identity is
 observed from the live environment, while Claude parent identity is a durable
 Agent Fork provenance claim.
+## E11 — Claude structural parent inference and performance (2026-08-11)
+
+Claude Code 2.1.220/2.1.228 known parent/child transcripts were analyzed without
+reading message content into output. The child
+`2e12da68-6e37-40dd-9ff1-d804ae23f283` inferred parent
+`6e572c9b-73e2-40a9-a6e1-1cb88a57b21c` at shared boundary
+`902366e5-3515-4209-a8e1-cba4cd4eae2e`: five shared structural records, one
+substantive record, one agreeing durable history clock, status `inferred`.
+
+Cold corpus: 138 transcripts enumerated, 137 superficial cache misses,
+1,976,023 superficial bytes, and only two deep parses (93,728 bytes). Warm
+corpus: 137 cache hits, zero superficial bytes reread, and the same two deep
+parses. The result and boundary matched the pair's known construction history.

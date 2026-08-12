@@ -141,6 +141,30 @@ def inspect_session(
         except ValueError as error:
             claim = None
             notices.append(str(error))
+        inference = None
+        if claim is None:
+            try:
+                from agent_fork.lineage_inference_store import (
+                    find_inference,
+                    inference_freshness,
+                )
+
+                inference = find_inference(claude_id, env=env)
+                freshness = (
+                    inference_freshness(inference, env=env)
+                    if inference is not None
+                    else None
+                )
+                if inference is not None and freshness != "current_at_last_analysis":
+                    notices.append("recorded Claude parent inference is stale")
+                    inference = None
+                elif inference is not None:
+                    notices.append(
+                        "recorded Claude parent inference is current only at its last "
+                        "explicit analysis"
+                    )
+            except ValueError as error:
+                notices.append(str(error))
         if claim is not None and name is None and claim.name is not None:
             name = claim.name
             name_status = "claimed"
@@ -162,10 +186,23 @@ def inspect_session(
                 id_status="claimed",
             )
             if claim is not None
+            else SessionEvidence(
+                inference.parent_session_id,
+                "agent-fork-lineage-inference",
+                id_status="inferred",
+            )
+            if inference is not None
             else None
         )
         return SessionInspection(
-            "claude", current, parent, "claimed" if parent else "not_found"
+            "claude",
+            current,
+            parent,
+            "claimed"
+            if claim is not None
+            else inference.status
+            if inference
+            else "not_found",
         )
 
     assert codex_id is not None

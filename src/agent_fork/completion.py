@@ -66,11 +66,23 @@ CLEANUP_OPTIONS = (
 )
 SESSION_OPTIONS = (
     "validate",
+    "claude-parent",
+    "list",
+    "show",
+    "infer",
+    "delete",
     "--agent",
     "--session-id",
     "--parent-session-id",
     "--has-parent",
     "--no-parent",
+    "--current",
+    "--all",
+    "--source",
+    "--record",
+    "--record-all",
+    "--yes",
+    "--no-input",
     "--output",
     "--json",
 )

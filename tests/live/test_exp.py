@@ -61,9 +61,12 @@ def test_session_identity_inside_claude_print(tmp_path: Path):
         stdout=output,
     )
     outer = _claude_result_record(json.loads(output.read_text()))
-    inner = json.loads(
-        str(outer["result"]).strip().removeprefix("```json").removesuffix("```").strip()
-    )
+    rendered = str(outer["result"]).strip()
+    if rendered.startswith("```") and rendered.endswith("```"):
+        rendered = rendered[3:-3].strip()
+        if rendered.startswith("json"):
+            rendered = rendered[4:].lstrip()
+    inner = json.loads(rendered)
     assert inner["agent"] == "claude"
     assert inner["current_session"]["id"] == outer["session_id"]
 
