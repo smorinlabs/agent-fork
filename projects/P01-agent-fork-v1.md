@@ -126,6 +126,11 @@ Read-only native session-fork command follow-up (gate: reconciled dual-agent rev
 - [x] [P01-T44] Close README, corpus, conformance, and full local gates; stop before release or publish work — 364 passed/1 existing skip/9 live-signal deselections, strict collection and clean install green
 - [ ] [P01-T45] Run fresh authenticated Claude Code and Codex post-implementation skill acceptance without executing the returned command — requires separate approval because the host sessions export current private repository context; the approved pre-implementation adversarial reviews do not cover this later export
 
+Skill install-resilience follow-up (gate: owner-approved Option B, TDD, local gates)
+- [x] [P01-TS28] Add RED coverage for frontmatter hints, missing-CLI preflight, the stale `fork_command` contract, and the consent-gated source-checkout fallback — 6 intended failures observed before each implementation step
+- [x] [P01-T46] Replace the PyPI placeholder install hint with the git+ source form, move missing-CLI detection into a preflight ahead of every route, add `agent-fork doctor` guidance and a stale-contract upgrade message, and declare `argument-hint` plus least-privilege `allowed-tools` — 367 passed/1 skipped
+- [x] [P01-T47] Add the consent-gated `uv run --directory` source-checkout fallback with pyproject-verified discovery, and amend REQ-49 so "never falls back" means never substituting hand-written Git — 369 passed/1 skipped
+
 - [x] Regression Test Status — Phase D final suite 218 passed with only retired T-EXP-04 skipped; conformance fixtures and clean-install checks green in PR #8
 
 ### Deliverable
