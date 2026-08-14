@@ -152,10 +152,42 @@ first case that matches:
 Case 3 is a proposal, not a decision: it reaches the user through the
 confirmation below, or through `--now` when they have chosen to skip that.
 
+### Confirm before creating a fork
+
+Every fork is confirmed before it exists, unless the argument gate found an
+exact `--now`.
+
+1. Resolve the candidate name above. If this route has not already run
+   `agent-fork session --json`, run it now — the dry run reports the fork it
+   would create, not where you are, so the summary takes the current branch
+   from `repository.branch` and the root from `repository.root`.
+2. Compute the real plan without mutating anything:
+
+   ```bash
+   agent-fork fork '<candidate-name>' --dry-run --require-agent --json
+   ```
+
+   Omit the positional name only for the branch-derived case, which lets the
+   CLI name it. Check that `dry_run` is `true` and
+   `mutation_performed` is `false` before showing anything.
+3. State the plan in visible text immediately before the question: the
+   current branch, the target branch from `plan.branch.name`, the destination
+   from `plan.worktree.path`, and the counts under `plan.files_to_carry`.
+   Report those values verbatim. Do not predict, reformat, or shorten a path.
+4. Ask one question with three options: create the fork as shown, use a
+   different name, or do not fork. Do not ask three separate questions.
+5. A different name re-enters at step 1 as an explicit hint. Declining stops
+   without mutation and without a second question.
+6. On approval, run the fork exactly as the route below specifies.
+
+A dry run is not a fork. Never report one as a created fork, and never treat
+an approved confirmation as finished until the real run returns.
+
 ### Fork with an explicit name hint
 
-Treat all non-option text after the skill name as one name hint. Normalize it as
-specified below, then run exactly this command shape:
+Treat all non-option text after the skill name as one name hint. Normalize it
+as specified below, confirm it as specified above, then run exactly this
+command shape:
 
 ```bash
 agent-fork fork '<normalized-name>' --require-agent --json
@@ -172,8 +204,8 @@ For `/agent-fork`, `$agent-fork`, or “Fork this session” without a name:
    Naming cannot make strict agent detection succeed.
 3. If `repository` is null, report the invocation `directory` and stop. Asking
    for a name cannot make the directory forkable.
-4. If `repository.detached` is `false`, `repository.branch` is present, and
-   `repository.on_default_branch` is `false`, run exactly:
+4. Resolve the candidate name and confirm it as specified above.
+5. On approval of a branch-derived name, run exactly:
 
    ```bash
    agent-fork fork --require-agent --json
@@ -181,10 +213,7 @@ For `/agent-fork`, `$agent-fork`, or “Fork this session” without a name:
 
    Do not pass a positional name. The CLI owns branch-derived normalization and
    date and collision suffixes.
-5. For a default, detached, or unclassified branch, recommend one concise name
-   from the active conversation and ask what name to use.
-6. If the user already delegated naming, use the recommendation without asking.
-7. Normalize the selected name and use the explicit-name route.
+6. On approval of any other name, use the explicit-name route with it.
 
 Use the same working directory for inspection and fork. Do not run `cd` or
 change branches between the two calls.
