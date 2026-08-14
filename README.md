@@ -105,7 +105,10 @@ $agent-fork try-redis       # Codex: explicit fork name
 /agent-fork                 # fork with context-aware naming
 ```
 
-The skill calls the installed CLI directly. Both inspection forms use
+The skill calls the installed CLI directly. When that CLI is missing, it prints
+the source install command and, if it can confirm a local checkout of this
+repository, offers to run the same route from it under `uv run --directory`
+after asking first. Both inspection forms use
 `agent-fork session --json`; `--session` includes the returned native fork
 command with the inspection, while `--session-only` prints only that exact
 command. Forking uses

@@ -2,7 +2,7 @@
 name: agent-fork
 description: Inspect or fork the current Claude Code or Codex agent session. Use for "fork this session", `/agent-fork` or `$agent-fork` with an optional name hint, exact `--session` for inspection plus its native fork command, exact `--session-only` to print only that command, or questions asking for the current agent session ID or repository context. Mixed or other option-like text refuses before any CLI call. Do not use for ordinary Git branch, worktree, directory, or status requests that do not mention the active agent session or Agent Fork.
 argument-hint: "[name-hint|--session|--session-only]"
-allowed-tools: Bash(agent-fork:*), Bash(command -v:*), Bash(uv run:*), Read, AskUserQuestion
+allowed-tools: Bash(agent-fork:*), Bash(command -v:*), Bash(readlink:*), Bash(uv run:*), Read, AskUserQuestion
 ---
 
 # Agent Fork
@@ -60,12 +60,13 @@ user decide.
 A missing CLI does not always mean the code is absent. Look for an Agent Fork
 checkout in exactly two places, in order:
 
-1. The active repository itself, when its root `pyproject.toml` declares
-   `name = "agent-fork"`.
-2. The directory this skill was loaded from, when it resolves through
-   `.agents/skills/agent-fork` into a checkout root holding that same
-   `pyproject.toml`. A development symlink resolves; a copied installation
-   does not.
+1. The active repository itself: read `pyproject.toml` at the directory the
+   routes already run from, and confirm it declares `name = "agent-fork"`.
+   Do not shell out to Git to locate a root.
+2. The directory this skill was loaded from: resolve it with `readlink -f`,
+   strip the trailing `.agents/skills/agent-fork`, and confirm the same
+   `pyproject.toml` at what remains. A development symlink resolves to a
+   checkout; a copied installation does not.
 
 Read the candidate `pyproject.toml` and confirm the declared name before
 proposing anything. Do not search the filesystem more widely, and do not guess
