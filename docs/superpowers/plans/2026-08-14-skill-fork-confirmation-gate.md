@@ -325,6 +325,7 @@ def test_forks_are_confirmed_from_a_dry_run_before_mutation() -> None:
     assert "--dry-run --require-agent --json" in text
     assert "`mutation_performed` is `false`" in text
     assert "plan.files_to_carry" in text
+    assert "`repository.branch`" in text
     assert "Ask one question with three options" in text
     assert "Do not ask three separate questions." in text
     assert "A dry run is not a fork." in text
@@ -351,7 +352,10 @@ which matches `### Confirm…` as a substring, so both assertions hold.
 Every fork is confirmed before it exists, unless the argument gate found an
 exact `--now`.
 
-1. Resolve the candidate name above.
+1. Resolve the candidate name above. If this route has not already run
+   `agent-fork session --json`, run it now — the dry run reports the fork it
+   would create, not where you are, so the summary takes the current branch
+   from `repository.branch` and the root from `repository.root`.
 2. Compute the real plan without mutating anything:
 
    ```bash
