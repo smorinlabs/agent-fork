@@ -68,9 +68,37 @@ def test_option_like_input_refuses_without_mutation() -> None:
     assert "/agent-fork --session-only" in text
 
 
+def test_frontmatter_declares_argument_and_tool_hints() -> None:
+    text = _text()
+    assert 'argument-hint: "[name-hint|--session|--session-only]"' in text
+    assert "allowed-tools: Bash(agent-fork:*)" in text
+    assert "AskUserQuestion" in text
+    assert text.count("\n---\n") == 1
+
+
+def test_missing_cli_preflight_precedes_every_route() -> None:
+    text = _text()
+    assert "exit `127`" in text
+    assert "command not found" in text
+    assert "uvx --from git+https://github.com/smorinlabs/agent-fork" in text
+    assert "Never run a network-fetched command" in text
+    assert "agent-fork doctor" in text
+    assert text.index("exit `127`") < text.index("## Classify the request")
+
+
+def test_stale_cli_contract_reports_a_specific_upgrade_path() -> None:
+    text = _text()
+    assert "predates" in text
+    assert (
+        "uv tool install --force git+https://github.com/smorinlabs/agent-fork" in text
+    )
+    assert "contract changed without a version bump" in text
+
+
 def test_failure_and_success_json_contracts_remain_explicit() -> None:
     text = _text()
-    assert "uv tool install agent-fork" in text
+    assert "uv tool install git+https://github.com/smorinlabs/agent-fork" in text
+    assert "uv tool install agent-fork" not in text
     assert "Invalid agent-fork JSON output" in text
     assert "`fork.name`, `fork.branch`, and `fork.worktree`" in text
     assert "exact returned `command` string" in text

@@ -1,6 +1,8 @@
 ---
 name: agent-fork
 description: Inspect or fork the current Claude Code or Codex agent session. Use for "fork this session", `/agent-fork` or `$agent-fork` with an optional name hint, exact `--session` for inspection plus its native fork command, exact `--session-only` to print only that command, or questions asking for the current agent session ID or repository context. Mixed or other option-like text refuses before any CLI call. Do not use for ordinary Git branch, worktree, directory, or status requests that do not mention the active agent session or Agent Fork.
+argument-hint: "[name-hint|--session|--session-only]"
+allowed-tools: Bash(agent-fork:*), Bash(command -v:*), Bash(uv run:*), Read, AskUserQuestion
 ---
 
 # Agent Fork
@@ -28,6 +30,34 @@ any token. This gate precedes every CLI call:
 - Only input containing no option-like token may become an explicit name hint.
 
 Never remove `--session` and then treat the remaining text as a fork name.
+
+## Confirm the CLI before any route
+
+Every route below calls `agent-fork`. An absent CLI is not a CLI refusal:
+shell exit `127` or a `command not found` message means Agent Fork never ran.
+Never present that as CLI output, and never substitute hand-written Git for it.
+
+When the CLI is missing, show the install command and stop:
+
+```bash
+uv tool install git+https://github.com/smorinlabs/agent-fork
+```
+
+Install from the source repository. The bare package name is not installable:
+the PyPI entry is a placeholder until the first published release.
+
+You may also offer the no-install form as text for the user to run:
+
+```bash
+uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
+```
+
+Never run a network-fetched command on the user's behalf. Print it and let the
+user decide.
+
+A CLI that runs and then reports an environment problem is a different case.
+Preserve its exact output and suggest `agent-fork doctor`, which checks Git,
+the agent CLIs, configuration validity, and XDG paths.
 
 ## Classify the request
 
@@ -149,8 +179,20 @@ an explicit-name collision error; do not silently suffix a user-selected name.
 
 ## Validate and present CLI results
 
-If `agent-fork` is missing from `PATH`, show
-`uv tool install agent-fork` and stop.
+A missing CLI is handled by the preflight above, not here.
+
+If session JSON is otherwise valid but contains no `fork_command` key at all,
+the installed CLI predates that contract. Report
+`Installed agent-fork predates the fork_command contract`, show the upgrade
+command, and stop:
+
+```bash
+uv tool install --force git+https://github.com/smorinlabs/agent-fork
+```
+
+Do not report this as `Invalid agent-fork JSON output` and do not reconstruct
+the command. `agent-fork --version` cannot separate these builds because the
+contract changed without a version bump.
 
 Treat exit 0 as success only when stdout is one JSON object with the expected
 route fields:
