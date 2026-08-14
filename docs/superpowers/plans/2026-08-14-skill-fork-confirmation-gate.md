@@ -34,6 +34,13 @@
 | `--now` + `--session`/`--session-only` | Refused |
 | Naming under `--now` | Unchanged from the confirmed path — never random |
 | `--session` / `--session-only` | Ungated, unchanged, read-only |
+| Natural-language naming delegation ("fork this, you pick the name") | **Still confirms.** An exact `--now` is the only skip |
+
+That last row retires the current `SKILL.md` rule "If the user already
+delegated naming, use the recommendation without asking." Delegating the
+*name* is not the same as waiving the *confirmation*, and keeping the skip
+token-exact means the gate cannot be crossed by phrasing. Task 3 deletes that
+rule deliberately, not incidentally.
 
 ### Why the summary comes from a dry run
 
@@ -89,7 +96,9 @@ def test_now_is_a_third_exact_option_token() -> None:
     assert "/agent-fork [name hint] [--now]" in text
 ```
 
-- [ ] **Step 2: Update the existing assertion that pins "two exact forms"**
+- [ ] **Step 2: Update the two existing assertions this task invalidates**
+
+Both pin strings that Steps 4-6 replace. Missing either one makes Step 7 fail.
 
 In `test_option_like_input_refuses_without_mutation`, replace this line:
 
@@ -101,6 +110,18 @@ with:
 
 ```python
     assert "Every token beginning with `-` other than those three exact forms" in text
+```
+
+In `test_frontmatter_declares_argument_and_tool_hints`, replace this line:
+
+```python
+    assert 'argument-hint: "[name-hint|--session|--session-only]"' in text
+```
+
+with:
+
+```python
+    assert 'argument-hint: "[name-hint] [--now] | --session | --session-only"' in text
 ```
 
 - [ ] **Step 3: Run tests to verify they fail**
@@ -319,10 +340,13 @@ Expected: FAIL — `assert '## Confirm before creating a fork' in text`.
 
 - [ ] **Step 3: Add the confirmation section**
 
-Insert immediately after the `### Choose the candidate name` section:
+Insert immediately after the `### Choose the candidate name` section. Note the
+heading is `###`, a sibling of the routes — an `##` here would nest every
+remaining route under it. The test asserts `"## Confirm before creating a fork"`,
+which matches `### Confirm…` as a substring, so both assertions hold.
 
 ```markdown
-## Confirm before creating a fork
+### Confirm before creating a fork
 
 Every fork is confirmed before it exists, unless the argument gate found an
 exact `--now`.
@@ -450,7 +474,8 @@ Expected: FAIL — `assert '### Skip the confirmation with `--now`' in text`.
 
 - [ ] **Step 3: Add the subsection**
 
-Append to the end of the `## Confirm before creating a fork` section:
+Insert immediately before `### Fork with an explicit name hint`, so it sits
+between the confirmation section and the routes:
 
 ```markdown
 ### Skip the confirmation with `--now`
