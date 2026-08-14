@@ -370,7 +370,7 @@ Varying axes: agent (claude/codex, must vary per §4 — templates differ by age
 | T-EMT-07 | a resolved Codex name emits the canonical UUID-based `codex fork` command | agent=codex | U | live | REQ-46; D17 |
 | T-EMT-08 | Claude session inspection emits the distinct byte-exact command with one fresh injectable child UUID and no name or extra args | agent=claude | U | live | REQ-50; D21 |
 | T-EMT-09 | Codex session inspection emits the distinct byte-exact `fork -C` command from the current thread and resolved directory | agent=codex | U | live | REQ-50; D21 |
-| T-EMT-10 | shared native rendering preserves REQ-28 templates, quotes hostile shell values, and rejects terminal-unsafe IDs or directories | baseline | U | live | REQ-42; REQ-50; D21 |
+| T-EMT-10 | shared native rendering preserves REQ-28 templates, quotes hostile shell values, and rejects terminal-unsafe IDs, directories, or configured arguments before mutation | baseline | U | live | REQ-42; REQ-50; D21 |
 
 ---
 

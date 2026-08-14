@@ -97,6 +97,18 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         if resolved_agent is not None and resolved_agent.agent == "claude"
         else None
     )
+    launch_directory = request.destination.resolve()
+    launch = (
+        build_launch_command(
+            resolved_agent,
+            worktree=launch_directory,
+            name=request.name,
+            extra_args=request.extra_args,
+            child_session_id=planned_child_id,
+        )
+        if resolved_agent is not None
+        else LaunchCommand(f"cd {shlex.quote(str(launch_directory))}", None, ())
+    )
     parent_status = run_git(
         request.parent, ["status", "--porcelain=v1", "-z"], env=env
     ).stdout
@@ -158,17 +170,6 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         return included.copied, hook_notices
 
     included, _ = run_with_rollback(creation, finish, env=env)
-    launch = (
-        build_launch_command(
-            resolved_agent,
-            worktree=creation.path,
-            name=request.name,
-            extra_args=request.extra_args,
-            child_session_id=planned_child_id,
-        )
-        if resolved_agent is not None
-        else LaunchCommand(f"cd {shlex.quote(str(creation.path))}", None, ())
-    )
     return ForkResult(
         creation,
         launch,

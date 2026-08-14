@@ -255,3 +255,38 @@ def test_session_renderer_quotes_shell_values_and_rejects_terminal_controls(
                 directory=world.parent_path / unsafe,
                 child_session_id=child,
             )
+
+    from agent_fork.pipeline import ForkRequest, fork
+
+    destination = world.parent_path.parent / "unsafe-command-child"
+    branch = "fork/unsafe-command-child"
+    request = ForkRequest(
+        parent=world.parent_path,
+        destination=destination,
+        name="unsafe-command-child",
+        branch=branch,
+        agent=_context("claude"),
+        extra_args=("unsafe\x1b]52;c;Zm9v\x07",),
+        agent_executable="/fake/claude",
+        agent_version_output="Claude Code 2.1.220",
+        git_version_output="git version 2.43.0",
+        child_session_id=child,
+    )
+
+    with pytest.raises(UnsafeCommandInputError):
+        fork(request, env=world.env)
+
+    branch_probe = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(world.parent_path),
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/heads/{branch}",
+        ],
+        env=world.env,
+    )
+    assert branch_probe.returncode != 0
+    assert not destination.exists()
