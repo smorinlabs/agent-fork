@@ -132,6 +132,26 @@ execution, or clipboard action. For `not_detected`, `ambiguous`, or
 `unsafe_input`, report the exact unavailable status and stop without inventing a
 command.
 
+### Choose the candidate name
+
+Fork routes resolve exactly one candidate name before any mutation. Pick the
+first case that matches:
+
+1. **An explicit name hint was given.** Normalize it per the rules below.
+   The user chose it; do not substitute your own.
+2. **No hint, and the branch names the work.** `repository.detached` is
+   `false`, `repository.branch` is present, and `repository.on_default_branch`
+   is `false`. Pass no positional name and let the CLI derive it, together
+   with its date and collision suffixes. The dry run below reports the derived
+   branch, so the confirmation still shows a real name.
+3. **No hint, and the branch names nothing.** A default, detached, or
+   unclassified branch carries no topic, so
+   derive the candidate from the active conversation: a short name for
+   the branch this work would become. Normalize it per the rules below.
+
+Case 3 is a proposal, not a decision: it reaches the user through the
+confirmation below, or through `--now` when they have chosen to skip that.
+
 ### Fork with an explicit name hint
 
 Treat all non-option text after the skill name as one name hint. Normalize it as

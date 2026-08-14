@@ -140,6 +140,16 @@ def test_failure_and_success_json_contracts_remain_explicit() -> None:
     assert "Do not run hand-written Git commands" in text
 
 
+def test_candidate_name_resolves_from_hint_branch_or_context() -> None:
+    text = _text()
+    assert "### Choose the candidate name" in text
+    assert "resolve exactly one candidate name before any mutation" in text
+    assert "The user chose it; do not substitute your own." in text
+    assert "let the CLI derive it" in text
+    assert "derive the candidate from the active conversation" in text
+    assert "the branch this work would become" in text
+
+
 def test_wrapper_is_removed_without_a_replacement_executable() -> None:
     text = _text()
     assert not WRAPPER.exists()
