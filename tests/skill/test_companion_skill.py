@@ -145,6 +145,8 @@ def test_candidate_name_resolves_from_hint_branch_or_context() -> None:
     assert "### Choose the candidate name" in text
     assert "resolve exactly one candidate name before any mutation" in text
     assert "The user chose it; do not substitute your own." in text
+    assert "`repository.detached` is" in text
+    assert "`repository.branch` is present, and `repository.on_default_branch`" in text
     assert "let the CLI derive it" in text
     assert "derive the candidate from the active conversation" in text
     assert "the branch this work would become" in text
