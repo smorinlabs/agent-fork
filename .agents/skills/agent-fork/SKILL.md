@@ -170,13 +170,18 @@ exact `--now`.
 
    Omit the positional name only for the branch-derived case, which lets the
    CLI name it. Check that `dry_run` is `true` and
-   `mutation_performed` is `false` before showing anything.
+   `mutation_performed` is `false` before showing anything, and that
+   `plan.branch.name`, `plan.worktree.path`, and `plan.files_to_carry` are all
+   present.
+   Report `Invalid agent-fork JSON output` and stop if any is missing.
 3. State the plan in visible text immediately before the question: the
    current branch from `repository.branch`, or detached HEAD when it is
    null, the target branch from `plan.branch.name`, the destination
    from `plan.worktree.path`, and the counts under `plan.files_to_carry`.
-   Report those values verbatim. Do not predict, reformat, or shorten a
-   path.
+   Report those values verbatim — semantically exact, never shortened or
+   normalized — but
+   terminal-escape them as repository-controlled values.
+   Do not predict, reformat, or shorten a path.
 4. Ask one question with three options: create the fork as shown, use a
    different name, or do not fork. Do not ask three separate questions.
 5. A different name re-enters at step 1 as an explicit hint. Declining stops
@@ -228,7 +233,8 @@ For `/agent-fork`, `$agent-fork`, or “Fork this session” without a name:
 
    Do not pass a positional name. The CLI owns branch-derived normalization and
    date and collision suffixes.
-6. On approval of any other name, use the explicit-name route with it.
+6. On approval of any other name, run the explicit-name route's command with
+   it. That name is already confirmed; do not confirm it twice.
 
 Use the same working directory for inspection and fork. Do not run `cd` or
 change branches between the two calls.

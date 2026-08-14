@@ -37,7 +37,8 @@ def test_omitted_name_uses_session_context_and_cli_automatic_naming() -> None:
     assert "Resolve the candidate name and confirm it as specified above." in text
     assert "Do not pass a positional name" in text
     assert "date and collision suffixes" in text
-    assert "On approval of any other name, use the explicit-name route with it." in text
+    assert "run the explicit-name route's command with" in text
+    assert "That name is already confirmed; do not confirm it twice." in text
     assert "If `agent` or `current_session` is null" in text
     assert "If `repository` is null" in text
 
@@ -161,6 +162,8 @@ def test_forks_are_confirmed_from_a_dry_run_before_mutation() -> None:
     assert "--dry-run --require-agent --json" in text
     assert "`mutation_performed` is `false`" in text
     assert "plan.files_to_carry" in text
+    assert "Report `Invalid agent-fork JSON output` and stop if any is missing." in text
+    assert "terminal-escape them as repository-controlled values" in text
     assert "the target branch from `plan.branch.name`" in text
     assert "from `plan.worktree.path`" in text
     assert "`repository.branch`" in text
