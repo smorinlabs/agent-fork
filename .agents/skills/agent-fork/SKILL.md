@@ -37,7 +37,7 @@ Every route below calls `agent-fork`. An absent CLI is not a CLI refusal:
 shell exit `127` or a `command not found` message means Agent Fork never ran.
 Never present that as CLI output, and never substitute hand-written Git for it.
 
-When the CLI is missing, show the install command and stop:
+When the CLI is missing, always show the durable fix:
 
 ```bash
 uv tool install git+https://github.com/smorinlabs/agent-fork
@@ -54,6 +54,40 @@ uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
 
 Never run a network-fetched command on the user's behalf. Print it and let the
 user decide.
+
+### Offer a discovered source checkout before giving up
+
+A missing CLI does not always mean the code is absent. Look for an Agent Fork
+checkout in exactly two places, in order:
+
+1. The active repository itself, when its root `pyproject.toml` declares
+   `name = "agent-fork"`.
+2. The directory this skill was loaded from, when it resolves through
+   `.agents/skills/agent-fork` into a checkout root holding that same
+   `pyproject.toml`. A development symlink resolves; a copied installation
+   does not.
+
+Read the candidate `pyproject.toml` and confirm the declared name before
+proposing anything. Do not search the filesystem more widely, and do not guess
+a path.
+
+With a confirmed checkout, name it, say plainly that the run uses that working
+tree rather than a released build, and ask before running the fallback. A dirty
+or mid-refactor tree is a different program from a release, so this is the
+user's call. On approval, run the classified route unchanged except for the
+prefix:
+
+```bash
+uv run --directory '<checkout>' agent-fork session --json
+```
+
+Shell-quote the checkout path as one argument. Keep every route's arguments,
+validation, and presentation rules exactly as specified below.
+Then still print the install command so the user can make the fix permanent.
+
+If no checkout is discoverable, or the user declines, stop with the install
+command. Never install, fetch, or execute network-fetched code automatically,
+and never substitute hand-written Git for the CLI.
 
 A CLI that runs and then reports an environment problem is a different case.
 Preserve its exact output and suggest `agent-fork doctor`, which checks Git,
