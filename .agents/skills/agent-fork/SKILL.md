@@ -1,6 +1,6 @@
 ---
 name: agent-fork
-description: Inspect or fork the current Claude Code or Codex agent session. Use for "fork this session", `/agent-fork` or `$agent-fork` with an optional name hint, exact `--session` for inspection plus its native fork command, exact `--session-only` to print only that command, or questions asking for the current agent session ID or repository context. Mixed or other option-like text refuses before any CLI call. Do not use for ordinary Git branch, worktree, directory, or status requests that do not mention the active agent session or Agent Fork.
+description: Inspect or fork the current Claude Code or Codex agent session. Use for "fork this session", `/agent-fork` or `$agent-fork` with an optional name hint and an optional exact `--now` to skip the confirmation, exact `--session` for inspection plus its native fork command, exact `--session-only` to print only that command, or questions asking for the current agent session ID or repository context. Other unsupported option-like text refuses before any CLI call. Do not use for ordinary Git branch, worktree, directory, or status requests that do not mention the active agent session or Agent Fork.
 argument-hint: "[name-hint] [--now] | --session | --session-only"
 allowed-tools: Bash(agent-fork:*), Bash(command -v:*), Bash(readlink:*), Bash(uv run:*), Read, AskUserQuestion
 ---
@@ -139,11 +139,10 @@ first case that matches:
 
 1. **An explicit name hint was given.** Normalize it per the rules below.
    The user chose it; do not substitute your own.
-2. **No hint, and the branch names the work.** `repository.detached` is
-   `false`, `repository.branch` is present, and `repository.on_default_branch`
-   is `false`. Pass no positional name and let the CLI derive it, together
-   with its date and collision suffixes. The dry run below reports the derived
-   branch, so the confirmation still shows a real name.
+2. **No hint, and the branch names the work.** `repository.detached` is `false`,
+   `repository.branch` is present, and `repository.on_default_branch` is `false`.
+   Pass no positional name and let the CLI derive it, together with its
+   date and collision suffixes.
 3. **No hint, and the branch names nothing.** A default, detached, or
    unclassified branch carries no topic, so
    derive the candidate from the active conversation: a short name for
@@ -160,7 +159,7 @@ exact `--now`.
 1. Resolve the candidate name above. If this route has not already run
    `agent-fork session --json`, run it now — the dry run reports the fork it
    would create, not where you are, so the summary takes the current branch
-   from `repository.branch` and the root from `repository.root`.
+   from `repository.branch`.
 2. Compute the real plan without mutating anything:
 
    ```bash
@@ -171,9 +170,11 @@ exact `--now`.
    CLI name it. Check that `dry_run` is `true` and
    `mutation_performed` is `false` before showing anything.
 3. State the plan in visible text immediately before the question: the
-   current branch, the target branch from `plan.branch.name`, the destination
+   current branch from `repository.branch`, or detached HEAD when it is
+   null, the target branch from `plan.branch.name`, the destination
    from `plan.worktree.path`, and the counts under `plan.files_to_carry`.
-   Report those values verbatim. Do not predict, reformat, or shorten a path.
+   Report those values verbatim. Do not predict, reformat, or shorten a
+   path.
 4. Ask one question with three options: create the fork as shown, use a
    different name, or do not fork. Do not ask three separate questions.
 5. A different name re-enters at step 1 as an explicit hint. Declining stops
@@ -186,7 +187,8 @@ an approved confirmation as finished until the real run returns.
 ### Skip the confirmation with `--now`
 
 An exact `--now` forks immediately: resolve the candidate name, then
-skip the dry run and the question, and run the fork.
+skip the dry run and the question, and run the fork exactly as the route
+below specifies, treating each route's approval step as already satisfied.
 
 `--now` skips the confirmation, never the naming rules, so it
 never invents a random name. A name hint still wins, a topic branch still
@@ -250,7 +252,9 @@ is unsupported and must refuse before normalization and before any CLI call.
   ```
 
 Advanced destination, state-copy, verification, identity, output, clipboard,
-dry-run, and force controls are direct-CLI use cases, not skill arguments.
+dry-run, and force controls are direct-CLI use cases, not skill arguments
+(this restricts what the user may pass to the skill, not the confirmation's
+own dry-run call above).
 
 ## Normalize an explicit or recommended name
 

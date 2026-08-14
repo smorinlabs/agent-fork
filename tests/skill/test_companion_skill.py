@@ -76,6 +76,7 @@ def test_now_is_a_third_exact_option_token() -> None:
     assert "other than those three exact forms" in text
     assert "all remaining text is one name hint" in text
     assert "/agent-fork [name hint] [--now]" in text
+    assert "Refuse `--now` mixed with `--session` or `--session-only`." in text
 
 
 def test_frontmatter_declares_argument_and_tool_hints() -> None:
@@ -145,8 +146,8 @@ def test_candidate_name_resolves_from_hint_branch_or_context() -> None:
     assert "### Choose the candidate name" in text
     assert "resolve exactly one candidate name before any mutation" in text
     assert "The user chose it; do not substitute your own." in text
-    assert "`repository.detached` is" in text
-    assert "`repository.branch` is present, and `repository.on_default_branch`" in text
+    assert "`repository.detached` is `false`" in text
+    assert "`repository.on_default_branch` is `false`" in text
     assert "let the CLI derive it" in text
     assert "derive the candidate from the active conversation" in text
     assert "the branch this work would become" in text
@@ -158,6 +159,8 @@ def test_forks_are_confirmed_from_a_dry_run_before_mutation() -> None:
     assert "--dry-run --require-agent --json" in text
     assert "`mutation_performed` is `false`" in text
     assert "plan.files_to_carry" in text
+    assert "the target branch from `plan.branch.name`" in text
+    assert "from `plan.worktree.path`" in text
     assert "`repository.branch`" in text
     assert "Ask one question with three options" in text
     assert "Do not ask three separate questions." in text
