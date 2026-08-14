@@ -85,7 +85,7 @@ The version command must print `agent-fork 1.0.0`. The placement list must show
 ```bash
 agent-fork doctor              # confirm Git, agent CLIs, config, and XDG paths
 agent-fork fork try-redis      # create the fork, print the paste command
-agent-fork session --json      # inspect session, directory, and Git context
+agent-fork session             # inspect context and print a native fork command
 agent-fork list                # see the forks you have created
 agent-fork cleanup try-redis --yes   # remove one when you are done
 ```
@@ -98,19 +98,24 @@ skill — just type:
 ```text
 /agent-fork --session       # Claude: inspect this agent session
 $agent-fork --session       # Codex: inspect this agent session
+/agent-fork --session-only  # Claude: print only the native session-fork command
+$agent-fork --session-only  # Codex: print only the native session-fork command
 /agent-fork try-redis       # Claude: explicit fork name
 $agent-fork try-redis       # Codex: explicit fork name
 /agent-fork                 # fork with context-aware naming
 ```
 
-The skill calls the installed CLI directly. Inspection uses
-`agent-fork session --json`; forking uses
+The skill calls the installed CLI directly. Both inspection forms use
+`agent-fork session --json`; `--session` includes the returned native fork
+command with the inspection, while `--session-only` prints only that exact
+command. Forking uses
 `agent-fork fork ... --require-agent --json`. An explicit name hint is
 normalized to lowercase kebab case. With no
 name, a topic branch uses the CLI's date-bearing automatic name and collision
 suffixes. A default, detached, or unclassified branch gets one recommended name
 and asks before mutation. Advanced CLI flags are intentionally direct-CLI use
-cases rather than skill arguments.
+cases rather than skill arguments. The two inspection forms infer the base
+directory from the active agent session; they do not accept a directory option.
 
 The skill lives at one canonical Agent Skills artifact,
 `.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`; Claude
@@ -140,7 +145,7 @@ than starting a new one.
 | Command | Purpose |
 |---|---|
 | `agent-fork fork [NAME]` | Create a verified branch and worktree; print the paste command |
-| `agent-fork session [validate]` | Inspect session evidence or assert expected identity and lineage |
+| `agent-fork session [validate]` | Inspect session evidence, construct its native fork command, or assert expected identity and lineage |
 | `agent-fork list` | List forks created by `agent-fork` |
 | `agent-fork cleanup <name\|branch\|worktree> --yes` | Remove a registered fork |
 | `agent-fork doctor` | Diagnose Git, agent, config, and XDG readiness |
@@ -184,7 +189,28 @@ branch or detached state, remote/default-branch candidates, default membership,
 linked/bare topology, and clean/staged/unstaged/untracked/unmerged/operation
 status. A bare repository has null working-tree status. Outside Git—or when Git
 context is unavailable—the session evidence remains usable and `repository` is
-null. Inspection succeeds with `not_detected` in an ordinary terminal.
+null. Inspection also reports `fork_command`: one detected Claude Code or Codex
+identity produces a shell-quoted native command using the resolved invocation
+directory. Claude receives a fresh, single-use child UUID. No identity,
+ambiguous identity, or terminal-unsafe identity/path data produces an explicit
+unavailable status and a null command. Inspection succeeds with `not_detected`
+in an ordinary terminal.
+
+The native session commands have these shapes:
+
+```text
+cd '<resolved-directory>' && claude --session-id '<fresh-child-uuid>' --resume '<current-session-id>' --fork-session
+codex fork '<current-thread-id>' -C '<resolved-directory>'
+```
+
+`available` means the command was constructible from ambient identity; it does
+not run native CLI preflight. Use `agent-fork fork` when you need the supported
+version and Codex-rollout checks before repository mutation. The ordinary
+session command and both skill inspection forms never execute the returned
+command, create a branch or worktree, copy files, write registry or lineage
+state, or touch the clipboard. There is no direct CLI `--session-only` flag;
+that spelling is a companion-skill presentation shortcut over the JSON field.
+
 Validation without constraints requires any unambiguous supported current
 session. Optional `--agent`, `--session-id`, `--parent-session-id`, and
 `--has-parent`/`--no-parent` assertions compose with AND semantics.

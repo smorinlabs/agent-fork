@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 192 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 200 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -368,6 +368,9 @@ Varying axes: agent (claude/codex, must vary per §4 — templates differ by age
 | T-EMT-05 | `extra_args` values are visible in `--dry-run` output | agent=claude | U | live | REQ-13 D11; REQ-18 |
 | T-EMT-06 | `extra_args` values are visible in the `-o json` `command` field | agent=codex | U | live | REQ-13 D11; REQ-17 |
 | T-EMT-07 | a resolved Codex name emits the canonical UUID-based `codex fork` command | agent=codex | U | live | REQ-46; D17 |
+| T-EMT-08 | Claude session inspection emits the distinct byte-exact command with one fresh injectable child UUID and no name or extra args | agent=claude | U | live | REQ-50; D21 |
+| T-EMT-09 | Codex session inspection emits the distinct byte-exact `fork -C` command from the current thread and resolved directory | agent=codex | U | live | REQ-50; D21 |
+| T-EMT-10 | shared native rendering preserves REQ-28 templates, quotes hostile shell values, and rejects terminal-unsafe IDs, directories, or configured arguments before mutation | baseline | U | live | REQ-42; REQ-50; D21 |
 
 ---
 
@@ -476,6 +479,11 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 | T-SES-25 | clean, staged, unstaged, untracked, unmerged, and operation status is exact | baseline | U | live | REQ-49; D20 |
 | T-SES-26 | repository-context failure preserves identity, returns null context, and adds a bounded notice | baseline | U | live | REQ-49; D20 |
 | T-SES-27 | human output labels and escapes repository-controlled context for every identity outcome | baseline | C | live | REQ-49; D20 |
+| T-SES-28 | fork-command status depends only on the zero/one/two ambient identity truth table and terminal safety, never lineage availability | baseline | U | live | REQ-50; D21 |
+| T-SES-29 | one inspection serializes one stable Claude UUID, separate inspections get distinct UUIDv4 values, and injected UUIDs are deterministic | agent=claude | U | live | REQ-50; D21 |
+| T-SES-30 | JSON reports the additive status/command object and human output prints an exact safe command or explicit unavailable status | baseline | C | live | REQ-50; D21; CLI R7.2 |
+| T-SES-31 | session command construction performs no Git mutation, write, registry/lineage change, clipboard access, preflight, or command execution | baseline | C | live | REQ-50; D21 |
+| T-SES-32 | session help makes human and JSON command inspection discoverable and labels availability as constructible, not preflighted | baseline | C | live | REQ-50; D21; CLI R7.5 |
 
 ---
 

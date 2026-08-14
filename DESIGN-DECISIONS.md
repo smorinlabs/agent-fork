@@ -28,6 +28,7 @@
 | D18 | Session inspection | **Agent-neutral evidence report plus composable assertions; parent means evidence, not transcript existence** | ★ owner-approved 2026-08-11 |
 | D19 | Claude parent inference | **Explicit opt-in structural inference; sharded screening cache; inferred evidence remains separate from planned claims** | ★ owner-approved 2026-08-11 |
 | D20 | Direct companion skill | **Delegate to existing session/fork commands; CLI owns automatic topic-branch naming** | ★ owner-approved 2026-08-11 |
+| D21 | Read-only session fork command | **Ordinary inspection constructs the native command; exact skill shortcut prints only it** | ★ owner-approved 2026-08-14 |
 
 ## Decisions in detail
 
@@ -156,12 +157,34 @@ user-selected explicit name. Unsupported option-like input refuses. The skill
 preserves missing-install, malformed-JSON, nonzero-error, and exact continuation
 command behavior but contains no executable wrapper and no Git implementation.
 
+### D21 — Read-only native session-fork command (owner-approved 2026-08-14)
+
+Ordinary `session` inspection constructs, but never executes, the native command
+that forks the detected Claude Code or Codex session in the resolved invocation
+directory. Exact companion-skill argument `--session` includes that command in
+the inspection result; exact `--session-only` prints only the command. Both
+forms call `agent-fork session --json` and infer the directory from the active
+session rather than accepting a skill-side directory option.
+
+This is a second template, distinct from the mutating REQ-28 launch template.
+It omits Claude `-n` and configured agent extra arguments because inspection has
+no fork name and does not resolve configuration. `available` means constructible
+from one ambient identity, not preflighted. A fresh Claude child UUID is created
+once per inspection and is single-use. No identity, dual identity, or
+terminal-unsafe identity/directory input yields a null command with an explicit
+status. Safe commands are shell-quoted and emitted byte-exact; unsafe controls
+are never printed. Inspection remains free of Git mutation, filesystem writes,
+registry/lineage changes, clipboard access, network access, and command
+execution.
+
 ## Resulting v1 surface (consolidated)
 
-- **Commands:** `fork [NAME] [--branch B] [--worktree-dir P | --worktree-base-dir B [--worktree-name N] | --worktree-name N]` · `session [validate|claude-parent ...]` · `cleanup <TARGET>` · `list` · `doctor` · `config view|get|set|validate` · `completion <shell>` · `help` — bare `agent-fork` prints help (D1).
+- **Commands:** `fork [NAME] [--branch B] [--worktree-dir P | --worktree-base-dir B [--worktree-name N] | --worktree-name N]` · `session [validate|claude-parent ...]` (ordinary inspection includes a constructible native session-fork command) · `cleanup <TARGET>` · `list` · `doctor` · `config view|get|set|validate` · `completion <shell>` · `help` — bare `agent-fork` prints help (D1).
 - **Emitted commands** (quoted uniformly; `<extra>` = D11 args):
-  - Claude: `cd '<worktree>' && claude --session-id "<uuid>" --resume <parent-id> --fork-session -n '<fork-name>'<extra>` (`-n` pending experiment E1)
-  - Codex: `cd '<worktree>' && codex fork <parent-thread-id><extra>` (`-C` variant + cwd-prompt handling pending E2)
+  - Mutating Claude fork: `cd '<worktree>' && claude --session-id '<uuid>' --resume '<parent-id>' --fork-session -n '<fork-name>'<extra>`.
+  - Mutating Codex fork: `codex fork '<parent-thread-id>' -C '<worktree>'<extra>`.
+  - Read-only Claude session command: `cd '<resolved-directory>' && claude --session-id '<fresh-child-uuid>' --resume '<current-session-id>' --fork-session`.
+  - Read-only Codex session command: `codex fork '<current-thread-id>' -C '<resolved-directory>'`.
 - **Pipeline:** guards → parent-HEAD anchor → `worktree add -b` → materialize (staged→unstaged→untracked[+ignored]) → verify ladder → registry write → emit (+ optional copy). Any failure after creation ⇒ rollback; preflight failure ⇒ refuse with diagnosis, nothing created (D14).
 
 ## Deferred (v1.1+ roadmap)

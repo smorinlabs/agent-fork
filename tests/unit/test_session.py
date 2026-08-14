@@ -128,6 +128,7 @@ def test_validation_constraints_compose(repo_scenario):
     from agent_fork.session import (
         SessionAssertions,
         SessionEvidence,
+        SessionForkCommand,
         SessionInspection,
         validate_session,
     )
@@ -140,6 +141,9 @@ def test_validation_constraints_compose(repo_scenario):
         lineage_status="resolved",
         directory=world.parent_path,
         repository=None,
+        fork_command=SessionForkCommand(
+            status="available", command="codex fork child -C /tmp"
+        ),
     )
     result = validate_session(
         inspection,
@@ -163,6 +167,7 @@ def test_validation_mismatch_is_typed(repo_scenario):
     from agent_fork.errors import SessionValidationError
     from agent_fork.session import (
         SessionAssertions,
+        SessionForkCommand,
         SessionInspection,
         validate_session,
     )
@@ -177,6 +182,7 @@ def test_validation_mismatch_is_typed(repo_scenario):
                 lineage_status="not_detected",
                 directory=world.parent_path,
                 repository=None,
+                fork_command=SessionForkCommand(status="not_detected", command=None),
             ),
             SessionAssertions(),
         )
@@ -406,3 +412,98 @@ def test_repository_context_failure_preserves_identity_and_adds_notice(
     )
     assert notice.endswith("...")
     assert len(notice) == len("repository context unavailable: ") + 500
+
+
+@pytest.mark.matrix("T-SES-28")
+def test_fork_command_status_uses_identity_and_safety_not_lineage(
+    repo_scenario, monkeypatch
+):
+    import agent_fork.session as session_module
+
+    world = repo_scenario()
+    no_identity = session_module.inspect_session(world.env, cwd=world.parent_path)
+    assert no_identity.fork_command.status == "not_detected"
+    assert no_identity.fork_command.command is None
+
+    claude_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    claude = session_module.inspect_session(claude_env, cwd=world.parent_path)
+    assert claude.fork_command.status == "available"
+    assert claude.fork_command.command is not None
+
+    ambiguous = session_module.inspect_session(
+        {**claude_env, "CODEX_THREAD_ID": "codex-thread"}, cwd=world.parent_path
+    )
+    assert ambiguous.fork_command.status == "ambiguous"
+    assert ambiguous.fork_command.command is None
+
+    original_which = session_module.shutil.which
+    monkeypatch.setattr(
+        session_module.shutil,
+        "which",
+        lambda name, path=None: (
+            None if name == "codex" else original_which(name, path=path)
+        ),
+    )
+    codex = session_module.inspect_session(
+        {**world.env, "CODEX_THREAD_ID": "codex-thread"}, cwd=world.parent_path
+    )
+    assert codex.lineage_status == "unavailable"
+    assert codex.fork_command.status == "available"
+    assert codex.fork_command.command is not None
+
+    unsafe = session_module.inspect_session(
+        {
+            **world.env,
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_SESSION_ID": "unsafe\x1b]52;c;Zm9v\x07",
+        },
+        cwd=world.parent_path,
+    )
+    assert unsafe.fork_command.status == "unsafe_input"
+    assert unsafe.fork_command.command is None
+
+    with pytest.raises(ValueError, match="unknown session fork command status"):
+        session_module.SessionForkCommand(
+            cast(session_module.SessionForkStatus, "future"), None
+        )
+    with pytest.raises(ValueError, match="must be non-empty"):
+        session_module.SessionForkCommand("available", None)
+    with pytest.raises(ValueError, match="must be null"):
+        session_module.SessionForkCommand("ambiguous", "unexpected")
+
+
+@pytest.mark.matrix("T-SES-29")
+def test_claude_child_uuid_lives_once_per_inspection(repo_scenario):
+    import uuid
+
+    from agent_fork.session import SessionAssertions, inspect_session, validate_session
+
+    world = repo_scenario()
+    env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    fixed = "33333333-3333-4333-8333-333333333333"
+    deterministic = inspect_session(env, cwd=world.parent_path, child_session_id=fixed)
+    assert deterministic.document() == deterministic.document()
+    assert deterministic.fork_command.child_session_id == fixed
+    assert fixed in str(deterministic.document()["fork_command"])
+    validated = validate_session(
+        deterministic,
+        SessionAssertions(agent="claude", session_id="claude-child"),
+    )
+    assert fixed in str(cast(dict[str, object], validated["session"])["fork_command"])
+
+    first = inspect_session(env, cwd=world.parent_path)
+    second = inspect_session(env, cwd=world.parent_path)
+    first_child = first.fork_command.child_session_id
+    second_child = second.fork_command.child_session_id
+    assert first_child is not None and second_child is not None
+    assert first_child != second_child
+    assert uuid.UUID(first_child).version == 4
+    assert uuid.UUID(second_child).version == 4

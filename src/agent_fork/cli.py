@@ -174,7 +174,17 @@ def _parser() -> argparse.ArgumentParser:
         "session",
         allow_abbrev=False,
         help="Inspect or validate the current agent session",
-        description="Report agent-neutral current-session and parent evidence.",
+        description=(
+            "Report agent-neutral current-session evidence and construct its native "
+            "fork command without executing it."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  agent-fork session          # human inspection and fork command\n"
+            "  agent-fork session --json   # exact command in fork_command.command\n\n"
+            "Command availability means constructible, not preflighted."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     session.add_argument(
         "-o",
@@ -1064,6 +1074,12 @@ def main(argv: list[str] | None = None) -> int:
                         f"untracked={status.untracked} unmerged={status.unmerged} "
                         f"operation={operation}"
                     )
+            fork_command = inspection.fork_command
+            if fork_command.status == "available":
+                assert fork_command.command is not None
+                print(f"fork command: {fork_command.command}")
+            else:
+                print(f"fork command: unavailable ({fork_command.status})")
             return 0
         if args.command == "cleanup":
             from agent_fork.cleanup import cleanup, resolve_cleanup_target

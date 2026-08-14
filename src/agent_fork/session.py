@@ -8,7 +8,13 @@ import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
+from agent_fork.agents import (
+    AgentContext,
+    UnsafeCommandInputError,
+    build_session_fork_command,
+)
 from agent_fork.errors import PreconditionError, SessionValidationError
 from agent_fork.lineage import find_lineage
 from agent_fork.repository import (
@@ -21,6 +27,7 @@ from agent_fork.repository import (
 
 CLAUDE_TRANSCRIPT_LIMIT = 1_048_576
 CLAUDE_RECORD_LIMIT = 10_000
+SessionForkStatus = Literal["available", "not_detected", "ambiguous", "unsafe_input"]
 
 
 @dataclass(frozen=True)
@@ -78,6 +85,32 @@ class SessionRepository:
 
 
 @dataclass(frozen=True)
+class SessionForkCommand:
+    status: SessionForkStatus
+    command: str | None
+    child_session_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            "available",
+            "not_detected",
+            "ambiguous",
+            "unsafe_input",
+        }:
+            raise ValueError(f"unknown session fork command status: {self.status}")
+        if self.status == "available":
+            if not self.command:
+                raise ValueError("available session fork command must be non-empty")
+        elif self.command is not None:
+            raise ValueError("unavailable session fork command must be null")
+        if self.child_session_id is not None and self.status != "available":
+            raise ValueError("only an available command may retain a child session ID")
+
+    def document(self) -> dict[str, object]:
+        return {"status": self.status, "command": self.command}
+
+
+@dataclass(frozen=True)
 class SessionInspection:
     agent: str | None
     current_session: SessionEvidence | None
@@ -85,6 +118,7 @@ class SessionInspection:
     lineage_status: str
     directory: Path
     repository: SessionRepository | None
+    fork_command: SessionForkCommand
     notices: tuple[str, ...] = ()
 
     def document(self) -> dict[str, object]:
@@ -105,6 +139,7 @@ class SessionInspection:
             "repository": (
                 self.repository.document() if self.repository is not None else None
             ),
+            "fork_command": self.fork_command.document(),
         }
 
 
@@ -197,7 +232,10 @@ def _session_repository(
 
 
 def inspect_session(
-    env: Mapping[str, str], *, cwd: Path | None = None
+    env: Mapping[str, str],
+    *,
+    cwd: Path | None = None,
+    child_session_id: str | None = None,
 ) -> SessionInspection:
     """Inspect ambient identity and bounded local evidence without mutation."""
     directory = (Path.cwd() if cwd is None else cwd).resolve()
@@ -216,6 +254,7 @@ def inspect_session(
             lineage_status="ambiguous",
             directory=directory,
             repository=repository,
+            fork_command=SessionForkCommand("ambiguous", None),
             notices=tuple(notices),
         )
     if not claude and not codex:
@@ -226,8 +265,25 @@ def inspect_session(
             lineage_status="not_detected",
             directory=directory,
             repository=repository,
+            fork_command=SessionForkCommand("not_detected", None),
             notices=tuple(notices),
         )
+
+    agent = "claude" if claude else "codex"
+    current_id = claude_id if claude else codex_id
+    assert current_id is not None
+    try:
+        built = build_session_fork_command(
+            AgentContext(agent, current_id),
+            directory=directory,
+            child_session_id=child_session_id,
+        )
+        fork_command = SessionForkCommand(
+            "available", built.command, built.child_session_id
+        )
+    except UnsafeCommandInputError:
+        fork_command = SessionForkCommand("unsafe_input", None)
+
     if claude:
         assert claude_id is not None
         name, name_status = _claude_name(env, directory, claude_id)
@@ -300,6 +356,7 @@ def inspect_session(
             else "not_found",
             directory=directory,
             repository=repository,
+            fork_command=fork_command,
             notices=tuple(notices),
         )
 
@@ -317,6 +374,7 @@ def inspect_session(
             lineage_status="unavailable",
             directory=directory,
             repository=repository,
+            fork_command=fork_command,
             notices=tuple(notices),
         )
     try:
@@ -335,6 +393,7 @@ def inspect_session(
             lineage_status="unavailable",
             directory=directory,
             repository=repository,
+            fork_command=fork_command,
             notices=tuple(notices),
         )
     if thread is None:
@@ -346,6 +405,7 @@ def inspect_session(
             lineage_status="not_found",
             directory=directory,
             repository=repository,
+            fork_command=fork_command,
             notices=tuple(notices),
         )
     current = SessionEvidence(
@@ -382,6 +442,7 @@ def inspect_session(
         lineage_status="resolved" if parent else "not_found",
         directory=directory,
         repository=repository,
+        fork_command=fork_command,
         notices=tuple(notices),
     )
 
