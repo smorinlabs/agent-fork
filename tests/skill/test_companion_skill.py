@@ -56,7 +56,7 @@ def test_option_like_input_refuses_without_mutation() -> None:
     text = _text()
     assert "Apply the argument gate first" in text
     assert "Never remove `--session`" in text
-    assert "Every token beginning with `-` other than those two exact forms" in text
+    assert "Every token beginning with `-` other than those three exact forms" in text
     assert "`--session` combined with any other text" in text
     assert "`--session-only` is one exact token" in text
     assert "`--session-only` combined with any other text" in text
@@ -68,9 +68,19 @@ def test_option_like_input_refuses_without_mutation() -> None:
     assert "/agent-fork --session-only" in text
 
 
+def test_now_is_a_third_exact_option_token() -> None:
+    text = _text()
+    assert 'argument-hint: "[name-hint] [--now] | --session | --session-only"' in text
+    assert "Exact `--now` skips the fork confirmation." in text
+    assert "never accompany `--session` or `--session-only`" in text
+    assert "other than those three exact forms" in text
+    assert "all remaining text is one name hint" in text
+    assert "/agent-fork [name hint] [--now]" in text
+
+
 def test_frontmatter_declares_argument_and_tool_hints() -> None:
     text = _text()
-    assert 'argument-hint: "[name-hint|--session|--session-only]"' in text
+    assert 'argument-hint: "[name-hint] [--now] | --session | --session-only"' in text
     assert "allowed-tools: Bash(agent-fork:*)" in text
     assert "AskUserQuestion" in text
     assert text.count("\n---\n") == 1

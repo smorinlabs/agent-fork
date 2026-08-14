@@ -1,7 +1,7 @@
 ---
 name: agent-fork
 description: Inspect or fork the current Claude Code or Codex agent session. Use for "fork this session", `/agent-fork` or `$agent-fork` with an optional name hint, exact `--session` for inspection plus its native fork command, exact `--session-only` to print only that command, or questions asking for the current agent session ID or repository context. Mixed or other option-like text refuses before any CLI call. Do not use for ordinary Git branch, worktree, directory, or status requests that do not mention the active agent session or Agent Fork.
-argument-hint: "[name-hint|--session|--session-only]"
+argument-hint: "[name-hint] [--now] | --session | --session-only"
 allowed-tools: Bash(agent-fork:*), Bash(command -v:*), Bash(readlink:*), Bash(uv run:*), Read, AskUserQuestion
 ---
 
@@ -21,13 +21,15 @@ any token. This gate precedes every CLI call:
   command.
 - Exact `--session-only` selects command-only output. `--session-only` is one exact token,
   not `--session` followed by text.
+- Exact `--now` skips the fork confirmation. It may accompany a name hint in
+  either order, and may never accompany `--session` or `--session-only`.
 - `--session` combined with any other text is invalid. `--session-only` combined with any other text
   is also invalid. Refuse without calling the CLI.
   In particular, `/agent-fork --session review-auth` and
   `/agent-fork --session-only review-auth` are not named forks.
-- Every token beginning with `-` other than those two exact forms is
+- Every token beginning with `-` other than those three exact forms is
   unsupported. Refuse without calling the CLI.
-- Only input containing no option-like token may become an explicit name hint.
+- After removing an exact `--now`, all remaining text is one name hint.
 
 Never remove `--session` and then treat the remaining text as a fork name.
 
@@ -169,18 +171,20 @@ change branches between the two calls.
 
 ### Refuse option-like input
 
-The only skill options are the exact single-token forms `--session` and
-`--session-only`. Every token beginning with `-` other than those two exact forms
+The only skill options are the exact single-token forms `--session`,
+`--session-only`, and `--now`.
+Every token beginning with `-` other than those three exact forms
 is unsupported and must refuse before normalization and before any CLI call.
 
 - For `--status`, say: Use `--session` to inspect the current agent session.
 - Do not turn `--sesion` into a fork name.
 - Refuse `--session` mixed with a name or another token.
 - Refuse `--session-only` mixed with a name, `--session`, or another token.
+- Refuse `--now` mixed with `--session` or `--session-only`.
 - Show the three supported forms:
 
   ```text
-  /agent-fork [name hint]
+  /agent-fork [name hint] [--now]
   /agent-fork --session
   /agent-fork --session-only
   ```
