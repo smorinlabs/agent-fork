@@ -21,15 +21,17 @@ any token. This gate precedes every CLI call:
   command.
 - Exact `--session-only` selects command-only output. `--session-only` is one exact token,
   not `--session` followed by text.
-- Exact `--now` skips the fork confirmation. It may accompany a name hint in
-  either order, and may never accompany `--session` or `--session-only`.
+- Exact `--now` skips the fork confirmation. It may appear at most once and
+  may accompany a name hint in either order.
+  It may never accompany `--session` or `--session-only`.
 - `--session` combined with any other text is invalid. `--session-only` combined with any other text
   is also invalid. Refuse without calling the CLI.
   In particular, `/agent-fork --session review-auth` and
   `/agent-fork --session-only review-auth` are not named forks.
 - Every token beginning with `-` other than those three exact forms is
   unsupported. Refuse without calling the CLI.
-- After removing an exact `--now`, all remaining text is one name hint.
+- After removing the single exact `--now`, all remaining text is one name hint.
+  That remaining text may contain no option-like token.
 
 Never remove `--session` and then treat the remaining text as a fork name.
 
@@ -242,7 +244,7 @@ is unsupported and must refuse before normalization and before any CLI call.
 - Do not turn `--sesion` into a fork name.
 - Refuse `--session` mixed with a name or another token.
 - Refuse `--session-only` mixed with a name, `--session`, or another token.
-- Refuse `--now` mixed with `--session` or `--session-only`.
+- Refuse `--now` mixed with `--session`, `--session-only`, or another `--now`.
 - Show the three supported forms:
 
   ```text

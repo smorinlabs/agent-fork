@@ -75,8 +75,10 @@ def test_now_is_a_third_exact_option_token() -> None:
     assert "never accompany `--session` or `--session-only`" in text
     assert "other than those three exact forms" in text
     assert "all remaining text is one name hint" in text
+    assert "It may appear at most once and" in text
+    assert "That remaining text may contain no option-like token." in text
     assert "/agent-fork [name hint] [--now]" in text
-    assert "Refuse `--now` mixed with `--session` or `--session-only`." in text
+    assert "mixed with `--session`, `--session-only`, or another `--now`." in text
 
 
 def test_frontmatter_declares_argument_and_tool_hints() -> None:
