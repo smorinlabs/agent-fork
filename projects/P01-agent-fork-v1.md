@@ -131,6 +131,13 @@ Skill install-resilience follow-up (gate: owner-approved Option B, TDD, local ga
 - [x] [P01-T46] Replace the PyPI placeholder install hint with the git+ source form, move missing-CLI detection into a preflight ahead of every route, add `agent-fork doctor` guidance and a stale-contract upgrade message, and declare `argument-hint` plus least-privilege `allowed-tools` — 367 passed/1 skipped
 - [x] [P01-T47] Add the consent-gated `uv run --directory` source-checkout fallback with pyproject-verified discovery, and amend REQ-49 so "never falls back" means never substituting hand-written Git — 369 passed/1 skipped
 
+Fork confirmation follow-up (gate: owner-approved design, TDD, local gates)
+- [x] [P01-TS29] Add RED coverage for the `--now` token, candidate-name resolution, the dry-run confirmation, and the `--now` fast path — RED observed before each of four implementation steps (369 → 373); 373 passed/1 skipped/9 deselected
+- [x] [P01-T48] Accept `--now` in the argument gate and resolve one candidate name per branch state — 371 passed/1 skipped/9 deselected
+- [x] [P01-T49] Confirm every fork from a dry run, and skip that confirmation under `--now` — 373 passed/1 skipped/9 deselected
+- [x] [P01-T50] Reconcile REQ-49, the P01 acceptance criterion, and README with the confirmed-fork behavior — REQ-49 amended with fork confirmation details, acceptance criterion updated, and README sections reconciled with confirmed-fork behavior
+- [ ] [P01-T51] Pin the branch-derived candidate between the confirmation dry run and the real run — `_fork_cli` recomputes `derive_auto_name`/`unique_auto_name` whenever the positional name is omitted, so a branch or destination collision appearing between the two calls can give the real fork a different suffix than the user approved; the robust fix is a stable plan token in the CLI's dry-run output, which is a CLI change rather than a skill change (deferred from the PR #23 review)
+
 - [x] Regression Test Status — Phase D final suite 218 passed with only retired T-EXP-04 skipped; conformance fixtures and clean-install checks green in PR #8
 
 ### Deliverable
@@ -145,5 +152,5 @@ agent-fork 1.0.0
 - `uv tool install agent-fork` and `pipx install agent-fork` yield a working `agent-fork --version`
 
 ### Manual Verification
-- From a real Claude Code session: one word produces a verified fork and a paste command that works in a fresh terminal
+- From a real Claude Code session: one word plus a confirmation produces a verified fork and a paste command that works in a fresh terminal; `--now` produces the same result in one step
 - Same demo for Codex, incl. documented cwd-prompt behavior per E2 findings

@@ -34,10 +34,11 @@ def test_skill_locks_session_and_fork_command_routes() -> None:
 
 def test_omitted_name_uses_session_context_and_cli_automatic_naming() -> None:
     text = _text()
-    assert "`repository.on_default_branch` is `false`" in text
+    assert "Resolve the candidate name and confirm it as specified above." in text
     assert "Do not pass a positional name" in text
     assert "date and collision suffixes" in text
-    assert "recommend one concise name" in text
+    assert "run the explicit-name route's command with" in text
+    assert "That name is already confirmed; do not confirm it twice." in text
     assert "If `agent` or `current_session` is null" in text
     assert "If `repository` is null" in text
 
@@ -56,7 +57,7 @@ def test_option_like_input_refuses_without_mutation() -> None:
     text = _text()
     assert "Apply the argument gate first" in text
     assert "Never remove `--session`" in text
-    assert "Every token beginning with `-` other than those two exact forms" in text
+    assert "Every token beginning with `-` other than those three exact forms" in text
     assert "`--session` combined with any other text" in text
     assert "`--session-only` is one exact token" in text
     assert "`--session-only` combined with any other text" in text
@@ -68,9 +69,22 @@ def test_option_like_input_refuses_without_mutation() -> None:
     assert "/agent-fork --session-only" in text
 
 
+def test_now_is_a_third_exact_option_token() -> None:
+    text = _text()
+    assert 'argument-hint: "[name-hint] [--now] | --session | --session-only"' in text
+    assert "Exact `--now` skips the fork confirmation." in text
+    assert "never accompany `--session` or `--session-only`" in text
+    assert "other than those three exact forms" in text
+    assert "all remaining text is one name hint" in text
+    assert "It may appear at most once and" in text
+    assert "That remaining text may contain no option-like token." in text
+    assert "/agent-fork [name hint] [--now]" in text
+    assert "mixed with `--session`, `--session-only`, or another `--now`." in text
+
+
 def test_frontmatter_declares_argument_and_tool_hints() -> None:
     text = _text()
-    assert 'argument-hint: "[name-hint|--session|--session-only]"' in text
+    assert 'argument-hint: "[name-hint] [--now] | --session | --session-only"' in text
     assert "allowed-tools: Bash(agent-fork:*)" in text
     assert "AskUserQuestion" in text
     assert text.count("\n---\n") == 1
@@ -130,6 +144,37 @@ def test_failure_and_success_json_contracts_remain_explicit() -> None:
     assert "Do not run hand-written Git commands" in text
 
 
+def test_candidate_name_resolves_from_hint_branch_or_context() -> None:
+    text = _text()
+    assert "### Choose the candidate name" in text
+    assert "resolve exactly one candidate name before any mutation" in text
+    assert "The user chose it; do not substitute your own." in text
+    assert "`repository.detached` is `false`" in text
+    assert "`repository.on_default_branch` is `false`" in text
+    assert "let the CLI derive it" in text
+    assert "derive the candidate from the active conversation" in text
+    assert "the branch this work would become" in text
+
+
+def test_forks_are_confirmed_from_a_dry_run_before_mutation() -> None:
+    text = _text()
+    assert "## Confirm before creating a fork" in text
+    assert "--dry-run --require-agent --json" in text
+    assert "`mutation_performed` is `false`" in text
+    assert "plan.files_to_carry" in text
+    assert "Report `Invalid agent-fork JSON output` and stop if any is missing." in text
+    assert "terminal-escape them as repository-controlled values" in text
+    assert "the target branch from `plan.branch.name`" in text
+    assert "from `plan.worktree.path`" in text
+    assert "`repository.branch`" in text
+    assert "Ask one question with three options" in text
+    assert "Do not ask three separate questions." in text
+    assert "A dry run is not a fork." in text
+    assert text.index("## Confirm before creating a fork") < text.index(
+        "### Fork with an explicit name hint"
+    )
+
+
 def test_wrapper_is_removed_without_a_replacement_executable() -> None:
     text = _text()
     assert not WRAPPER.exists()
@@ -144,3 +189,11 @@ def test_generated_metadata_exposes_inspection_command_and_fork_routes() -> None
     assert 'short_description: "Inspect, print a session command, or fork"' in metadata
     assert "$agent-fork" in metadata
     assert "session-only" in metadata.lower()
+
+
+def test_now_skips_the_confirmation_but_never_the_naming_rules() -> None:
+    text = _text()
+    assert "### Skip the confirmation with `--now`" in text
+    assert "skips the confirmation, never the naming rules" in text
+    assert "never invents a random name" in text
+    assert "skip the dry run and the question" in text

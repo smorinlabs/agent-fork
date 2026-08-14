@@ -1,7 +1,7 @@
 ---
 name: agent-fork
-description: Inspect or fork the current Claude Code or Codex agent session. Use for "fork this session", `/agent-fork` or `$agent-fork` with an optional name hint, exact `--session` for inspection plus its native fork command, exact `--session-only` to print only that command, or questions asking for the current agent session ID or repository context. Mixed or other option-like text refuses before any CLI call. Do not use for ordinary Git branch, worktree, directory, or status requests that do not mention the active agent session or Agent Fork.
-argument-hint: "[name-hint|--session|--session-only]"
+description: Inspect or fork the current Claude Code or Codex agent session. Use for "fork this session", `/agent-fork` or `$agent-fork` with an optional name hint and an optional exact `--now` to skip the confirmation, exact `--session` for inspection plus its native fork command, exact `--session-only` to print only that command, or questions asking for the current agent session ID or repository context. Other unsupported option-like text refuses before any CLI call. Do not use for ordinary Git branch, worktree, directory, or status requests that do not mention the active agent session or Agent Fork.
+argument-hint: "[name-hint] [--now] | --session | --session-only"
 allowed-tools: Bash(agent-fork:*), Bash(command -v:*), Bash(readlink:*), Bash(uv run:*), Read, AskUserQuestion
 ---
 
@@ -21,13 +21,17 @@ any token. This gate precedes every CLI call:
   command.
 - Exact `--session-only` selects command-only output. `--session-only` is one exact token,
   not `--session` followed by text.
+- Exact `--now` skips the fork confirmation. It may appear at most once and
+  may accompany a name hint in either order.
+  It may never accompany `--session` or `--session-only`.
 - `--session` combined with any other text is invalid. `--session-only` combined with any other text
   is also invalid. Refuse without calling the CLI.
   In particular, `/agent-fork --session review-auth` and
   `/agent-fork --session-only review-auth` are not named forks.
-- Every token beginning with `-` other than those two exact forms is
+- Every token beginning with `-` other than those three exact forms is
   unsupported. Refuse without calling the CLI.
-- Only input containing no option-like token may become an explicit name hint.
+- After removing the single exact `--now`, all remaining text is one name hint.
+  That remaining text may contain no option-like token.
 
 Never remove `--session` and then treat the remaining text as a fork name.
 
@@ -130,10 +134,80 @@ execution, or clipboard action. For `not_detected`, `ambiguous`, or
 `unsafe_input`, report the exact unavailable status and stop without inventing a
 command.
 
+### Choose the candidate name
+
+Fork routes resolve exactly one candidate name before any mutation. Pick the
+first case that matches:
+
+1. **An explicit name hint was given.** Normalize it per the rules below.
+   The user chose it; do not substitute your own.
+2. **No hint, and the branch names the work.** `repository.detached` is `false`,
+   `repository.branch` is present, and `repository.on_default_branch` is `false`.
+   Pass no positional name and let the CLI derive it, together with its
+   date and collision suffixes.
+3. **No hint, and the branch names nothing.** A default, detached, or
+   unclassified branch carries no topic, so
+   derive the candidate from the active conversation: a short name for
+   the branch this work would become. Normalize it per the rules below.
+
+Case 3 is a proposal, not a decision: it reaches the user through the
+confirmation below, or through `--now` when they have chosen to skip that.
+
+### Confirm before creating a fork
+
+Every fork is confirmed before it exists, unless the argument gate found an
+exact `--now`.
+
+1. Resolve the candidate name above. If this route has not already run
+   `agent-fork session --json`, run it now — the dry run reports the fork it
+   would create, not where you are, so the summary takes the current branch
+   from `repository.branch`.
+2. Compute the real plan without mutating anything:
+
+   ```bash
+   agent-fork fork '<candidate-name>' --dry-run --require-agent --json
+   ```
+
+   Omit the positional name only for the branch-derived case, which lets the
+   CLI name it. Check that `dry_run` is `true` and
+   `mutation_performed` is `false` before showing anything, and that
+   `plan.branch.name`, `plan.worktree.path`, and `plan.files_to_carry` are all
+   present.
+   Report `Invalid agent-fork JSON output` and stop if any is missing.
+3. State the plan in visible text immediately before the question: the
+   current branch from `repository.branch`, or detached HEAD when it is
+   null, the target branch from `plan.branch.name`, the destination
+   from `plan.worktree.path`, and the counts under `plan.files_to_carry`.
+   Report those values verbatim — semantically exact, never shortened or
+   normalized — but
+   terminal-escape them as repository-controlled values.
+   Do not predict, reformat, or shorten a path.
+4. Ask one question with three options: create the fork as shown, use a
+   different name, or do not fork. Do not ask three separate questions.
+5. A different name re-enters at step 1 as an explicit hint. Declining stops
+   without mutation and without a second question.
+6. On approval, run the fork exactly as the route below specifies.
+
+A dry run is not a fork. Never report one as a created fork, and never treat
+an approved confirmation as finished until the real run returns.
+
+### Skip the confirmation with `--now`
+
+An exact `--now` forks immediately: resolve the candidate name, then
+skip the dry run and the question, and run the fork exactly as the route
+below specifies, treating each route's approval step as already satisfied.
+
+`--now` skips the confirmation, never the naming rules, so it
+never invents a random name. A name hint still wins, a topic branch still
+yields the CLI's derived name, and a default or detached branch still gets the
+name proposed from the conversation. Report the effective name, branch, and
+worktree afterward exactly as any other fork.
+
 ### Fork with an explicit name hint
 
-Treat all non-option text after the skill name as one name hint. Normalize it as
-specified below, then run exactly this command shape:
+Treat all non-option text after the skill name as one name hint. Normalize it
+as specified below, confirm it as specified above, then run exactly this
+command shape:
 
 ```bash
 agent-fork fork '<normalized-name>' --require-agent --json
@@ -150,8 +224,8 @@ For `/agent-fork`, `$agent-fork`, or “Fork this session” without a name:
    Naming cannot make strict agent detection succeed.
 3. If `repository` is null, report the invocation `directory` and stop. Asking
    for a name cannot make the directory forkable.
-4. If `repository.detached` is `false`, `repository.branch` is present, and
-   `repository.on_default_branch` is `false`, run exactly:
+4. Resolve the candidate name and confirm it as specified above.
+5. On approval of a branch-derived name, run exactly:
 
    ```bash
    agent-fork fork --require-agent --json
@@ -159,34 +233,36 @@ For `/agent-fork`, `$agent-fork`, or “Fork this session” without a name:
 
    Do not pass a positional name. The CLI owns branch-derived normalization and
    date and collision suffixes.
-5. For a default, detached, or unclassified branch, recommend one concise name
-   from the active conversation and ask what name to use.
-6. If the user already delegated naming, use the recommendation without asking.
-7. Normalize the selected name and use the explicit-name route.
+6. On approval of any other name, run the explicit-name route's command with
+   it. That name is already confirmed; do not confirm it twice.
 
 Use the same working directory for inspection and fork. Do not run `cd` or
 change branches between the two calls.
 
 ### Refuse option-like input
 
-The only skill options are the exact single-token forms `--session` and
-`--session-only`. Every token beginning with `-` other than those two exact forms
+The only skill options are the exact single-token forms `--session`,
+`--session-only`, and `--now`.
+Every token beginning with `-` other than those three exact forms
 is unsupported and must refuse before normalization and before any CLI call.
 
 - For `--status`, say: Use `--session` to inspect the current agent session.
 - Do not turn `--sesion` into a fork name.
 - Refuse `--session` mixed with a name or another token.
 - Refuse `--session-only` mixed with a name, `--session`, or another token.
+- Refuse `--now` mixed with `--session`, `--session-only`, or another `--now`.
 - Show the three supported forms:
 
   ```text
-  /agent-fork [name hint]
+  /agent-fork [name hint] [--now]
   /agent-fork --session
   /agent-fork --session-only
   ```
 
 Advanced destination, state-copy, verification, identity, output, clipboard,
-dry-run, and force controls are direct-CLI use cases, not skill arguments.
+dry-run, and force controls are direct-CLI use cases, not skill arguments
+(this restricts what the user may pass to the skill, not the confirmation's
+own dry-run call above).
 
 ## Normalize an explicit or recommended name
 
