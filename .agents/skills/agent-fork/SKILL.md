@@ -183,6 +183,17 @@ exact `--now`.
 A dry run is not a fork. Never report one as a created fork, and never treat
 an approved confirmation as finished until the real run returns.
 
+### Skip the confirmation with `--now`
+
+An exact `--now` forks immediately: resolve the candidate name, then
+skip the dry run and the question, and run the fork.
+
+`--now` skips the confirmation, never the naming rules, so it
+never invents a random name. A name hint still wins, a topic branch still
+yields the CLI's derived name, and a default or detached branch still gets the
+name proposed from the conversation. Report the effective name, branch, and
+worktree afterward exactly as any other fork.
+
 ### Fork with an explicit name hint
 
 Treat all non-option text after the skill name as one name hint. Normalize it

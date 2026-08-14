@@ -181,3 +181,11 @@ def test_generated_metadata_exposes_inspection_command_and_fork_routes() -> None
     assert 'short_description: "Inspect, print a session command, or fork"' in metadata
     assert "$agent-fork" in metadata
     assert "session-only" in metadata.lower()
+
+
+def test_now_skips_the_confirmation_but_never_the_naming_rules() -> None:
+    text = _text()
+    assert "### Skip the confirmation with `--now`" in text
+    assert "skips the confirmation, never the naming rules" in text
+    assert "never invents a random name" in text
+    assert "skip the dry run and the question" in text
