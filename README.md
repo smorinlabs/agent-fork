@@ -100,6 +100,8 @@ skill — just type:
 $agent-fork --session       # Codex: inspect this agent session
 /agent-fork --session-only  # Claude: print only the native session-fork command
 $agent-fork --session-only  # Codex: print only the native session-fork command
+/agent-fork try-redis --now  # Claude: fork immediately, no confirmation
+$agent-fork try-redis --now  # Codex: fork immediately, no confirmation
 /agent-fork try-redis       # Claude: explicit fork name
 $agent-fork try-redis       # Codex: explicit fork name
 /agent-fork                 # fork with context-aware naming
@@ -115,8 +117,11 @@ command. Forking uses
 `agent-fork fork ... --require-agent --json`. An explicit name hint is
 normalized to lowercase kebab case. With no
 name, a topic branch uses the CLI's date-bearing automatic name and collision
-suffixes. A default, detached, or unclassified branch gets one recommended name
-and asks before mutation. Advanced CLI flags are intentionally direct-CLI use
+suffixes, and a default, detached, or unclassified branch gets a name proposed
+from the conversation. Every fork is then confirmed against a dry run — showing
+the target branch, the destination worktree, and the files it would carry —
+before anything is created. `--now` skips that confirmation without changing
+how the name is chosen. Advanced CLI flags are intentionally direct-CLI use
 cases rather than skill arguments. The two inspection forms infer the base
 directory from the active agent session; they do not accept a directory option.
 
