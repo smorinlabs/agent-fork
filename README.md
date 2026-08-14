@@ -123,7 +123,9 @@ directory from the active agent session; they do not accept a directory option.
 The skill lives at one canonical Agent Skills artifact,
 `.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`; Claude
 Code discovers the same artifact through `.claude/skills/agent-fork` as
-`/agent-fork`. It requires `agent-fork` on `PATH`.
+`/agent-fork`. It calls `agent-fork` on `PATH`; when that is missing it prints
+the source install command and, if it can confirm a local checkout, offers to
+run from it instead.
 
 ## How it works
 
