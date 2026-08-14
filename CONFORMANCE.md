@@ -14,7 +14,7 @@
 | Config (§5) | yes | — |
 | Networked (§10) | no | fully local tool; zero runtime network calls (REQ-40) |
 | Destructive ops (§8) | yes | `cleanup` removes worktrees/branches |
-| Scripted consumers (R7.2/R7.8) | yes | the agent-fork *skill* consumes `--json` (REQ-04/REQ-49) |
+| Scripted consumers (R7.2/R7.8) | yes | the agent-fork *skill* consumes `--json` (REQ-04/REQ-49/REQ-50) |
 | Async / long-running | no | synchronous local operations; no operation IDs |
 | Streaming / watch | no | no streaming output |
 | Plugins (R9.11) | no | no extension model planned |
@@ -43,6 +43,7 @@
 | 2026-08-10 | 1.4.14 | macOS signal and live-agent gate repair | Git cleanup preserves active signal exceptions after macOS `EPERM`; real-agent failures expose captured output; preflight reports host executable identity/version; Flox retains the four-system development toolchain without pinning agent CLIs; no public CLI change or waiver |
 | 2026-08-10 | 1.4.14 | issue #16 cleanup-safety reporting | Cleanup enumerates bounded dirty/unpushed risk, preserves full inspection under forced previews, adds compatible JSON `details` and granular overrides, escapes Git-controlled terminal text in human diagnostics, keeps raw JSON values, and preserves separate consent plus the non-overridable cwd guard; T-CLN-16..23 protect R7.1/R7.2/R7.8/R8.1/R8.6/R9.3; no waiver |
 | 2026-08-11 | 1.4.14 | direct companion skill and session context | Skill delegates directly to `session --json` and `fork --require-agent --json`; session output adds directory and repository context; the wrapper is removed; local, host-managed, and fresh Claude/Codex forward gates pass; no new waiver |
+| 2026-08-14 | 1.4.14 | read-only native session command | Codex OBJECT and Claude Code CONCUR WITH AMENDMENTS were reconciled before implementation. Session inspection additively reports a constructible, non-preflighted native command; terminal-unsafe inputs return a null command; help examples, exact skill routes, open JSON schema, and no-write behavior pass T-EMT-08..10/T-SES-28..32. Full local and clean-install gates pass; no new waiver. Fresh authenticated host acceptance is tracked separately because its additional private-context export was not authorized. |
 
 ## Requirement trace
 
@@ -54,7 +55,7 @@ open implementation finding.
 | Requirement | Disposition | Evidence |
 |---|---|---|
 | REQ-01 | Implemented | CLI owns repository detection through cleanup; G-GRD..G-CLN |
-| REQ-02 | Implemented | Direct skill routes inspection and fork intent to the existing JSON CLI commands; focused skill tests and fresh Claude/Codex forward tests |
+| REQ-02 | Implemented | Direct skill routes exact `--session`, exact `--session-only`, and fork intent to the existing JSON CLI commands; focused skill tests validate the route contract |
 | REQ-03 | Implemented | G-DET explicit precedence and ambient Claude/Codex detection; the direct skill uses ambient detection as its primary path |
 | REQ-04 | Implemented | Skill consumes and validates G-OUT JSON, then renders the returned command; malformed output fails diagnostically |
 | REQ-05 | Implemented | Canonical `.agents/skills/agent-fork` artifact is shared through `.claude/skills/agent-fork`; missing CLI emits install hint |
@@ -102,6 +103,7 @@ open implementation finding.
 | REQ-47 | Implemented | G-SES T-SES-01..22 cover agent-neutral inspection, validation, local evidence, and real-agent acceptance |
 | REQ-48 | Implemented | G-CPI covers bounded structural inference, sharded screening cache, separate persistence, and management actions |
 | REQ-49 | Implemented | G-SES T-SES-22..27; 8 focused skill tests; skill validation; editable dual-host placement; fresh Claude/Codex inspection, named, unnamed, refusal, collision, absent-Git, ambiguous-host, and hostile-name forward tests |
+| REQ-50 | Implemented | G-EMT T-EMT-08..10 and G-SES T-SES-28..32 cover exact templates, terminal safety, identity/lineage independence, UUID lifetime, open JSON, human output, no mutation, and help; focused skill tests and skill validation cover both exact forms |
 
 ## Decision trace
 
@@ -127,6 +129,7 @@ open implementation finding.
 | D18 | Implemented | Agent-neutral session inspection and assertions; G-SES T-SES-01..22 |
 | D19 | Implemented | Explicit bounded Claude parent inference and separate evidence; G-CPI |
 | D20 | Implemented | Direct skill delegation and additive repository-aware session context; G-SES T-SES-22..27 plus focused, host-managed, and fresh-agent skill gates |
+| D21 | Implemented | Shared native renderer and read-only session command; G-EMT T-EMT-08..10, G-SES T-SES-28..32, focused skill tests, and clean-install verification |
 
 ## Blocking conformance evidence
 

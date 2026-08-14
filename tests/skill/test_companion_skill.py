@@ -27,6 +27,9 @@ def test_skill_locks_session_and_fork_command_routes() -> None:
     assert "agent-fork fork '<normalized-name>' --require-agent --json" in text
     assert "agent-fork fork --require-agent --json" in text
     assert "Do not add `--agent` or `--parent-session`" in text
+    assert "Exact `--session-only`" in text
+    assert "`fork_command`" in text
+    assert "character-for-character" in text
 
 
 def test_omitted_name_uses_session_context_and_cli_automatic_naming() -> None:
@@ -53,13 +56,16 @@ def test_option_like_input_refuses_without_mutation() -> None:
     text = _text()
     assert "Apply the argument gate first" in text
     assert "Never remove `--session`" in text
-    assert "Every other token beginning with `-`" in text
+    assert "Every token beginning with `-` other than those two exact forms" in text
     assert "`--session` combined with any other text" in text
+    assert "`--session-only` is one exact token" in text
+    assert "`--session-only` combined with any other text" in text
     assert "`--sesion`" in text
     assert "`--status`" in text
     assert "Use `--session`" in text
     assert "/agent-fork [name hint]" in text
     assert "/agent-fork --session" in text
+    assert "/agent-fork --session-only" in text
 
 
 def test_failure_and_success_json_contracts_remain_explicit() -> None:
@@ -82,9 +88,9 @@ def test_wrapper_is_removed_without_a_replacement_executable() -> None:
     assert not (SKILL / "scripts").exists()
 
 
-def test_generated_metadata_exposes_both_routes() -> None:
+def test_generated_metadata_exposes_inspection_command_and_fork_routes() -> None:
     metadata = (SKILL / "agents/openai.yaml").read_text()
     assert 'display_name: "Agent Fork"' in metadata
-    assert 'short_description: "Inspect or fork the current agent session"' in metadata
+    assert 'short_description: "Inspect, print a session command, or fork"' in metadata
     assert "$agent-fork" in metadata
-    assert "inspect or fork" in metadata.lower()
+    assert "session-only" in metadata.lower()

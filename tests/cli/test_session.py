@@ -1,6 +1,7 @@
 """G-SES — installed CLI inspection and assertion contract."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -141,3 +142,101 @@ def test_human_session_always_labels_and_escapes_repository_context(repo_scenari
         assert b"\x1b" not in result.stdout
         assert b"\\u001b[31m" in result.stdout
         assert b"\\u202e" in result.stdout
+
+
+@pytest.mark.matrix("T-SES-30")
+def test_session_outputs_fork_command_object_or_explicit_status(repo_scenario):
+    import re
+
+    from conftest import run_cli
+
+    world = repo_scenario()
+    env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    machine = run_cli(["session", "--json"], env, world.parent_path)
+    document = json.loads(machine.stdout)
+    command = document["fork_command"]
+    assert command["status"] == "available"
+    assert re.fullmatch(
+        rf"cd {re.escape(str(world.parent_path))} && claude --session-id "
+        r"[0-9a-f-]{36} --resume claude-child --fork-session",
+        command["command"],
+    )
+
+    human = run_cli(["session"], env, world.parent_path)
+    assert re.search(
+        rb"^fork command: cd .* && claude --session-id [0-9a-f-]{36} "
+        rb"--resume claude-child --fork-session$",
+        human.stdout,
+        flags=re.MULTILINE,
+    )
+
+    absent = run_cli(["session"], world.env, world.parent_path)
+    assert b"fork command: unavailable (not_detected)" in absent.stdout
+
+    unsafe_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "unsafe\x1b]52;c;Zm9v\x07\nnext\u202e",
+    }
+    unsafe = run_cli(["session"], unsafe_env, world.parent_path)
+    assert b"\x1b" not in unsafe.stdout and b"\x07" not in unsafe.stdout
+    assert b"fork command: unavailable (unsafe_input)" in unsafe.stdout
+
+
+@pytest.mark.matrix("T-SES-31")
+def test_session_command_construction_has_no_mutating_side_effects(repo_scenario):
+    from agent_fork.git import run_git
+    from agent_fork.lineage import lineage_path
+    from conftest import run_cli
+
+    world = repo_scenario()
+    spy_dir = world.parent_path.parent / "session-spies"
+    spy_dir.mkdir()
+    called = spy_dir / "called"
+    for executable in ("claude", "codex", "pbcopy", "xclip"):
+        script = spy_dir / executable
+        script.write_text(f"#!/bin/sh\ntouch '{called}'\nexit 99\n")
+        script.chmod(0o755)
+    config = Path(world.env["XDG_CONFIG_HOME"]) / "agent-fork" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text("this is not valid toml = [")
+    env = {
+        **world.env,
+        "PATH": f"{spy_dir}:{world.env['PATH']}",
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    before = run_git(
+        world.parent_path, ["status", "--porcelain=v1", "-z"], env=world.env
+    ).stdout
+    lineage = lineage_path(env)
+    assert not lineage.exists()
+
+    result = run_cli(["session", "--json"], env, world.parent_path)
+
+    after = run_git(
+        world.parent_path, ["status", "--porcelain=v1", "-z"], env=world.env
+    ).stdout
+    assert result.returncode == 0 and result.stderr == b""
+    assert json.loads(result.stdout)["fork_command"]["status"] == "available"
+    assert before == after
+    assert not called.exists()
+    assert not lineage.exists()
+
+
+@pytest.mark.matrix("T-SES-32")
+def test_session_help_discovers_constructible_fork_commands(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    result = run_cli(["session", "--help"], world.env, world.parent_path)
+
+    assert result.returncode == 0 and result.stderr == b""
+    assert b"Examples:" in result.stdout
+    assert b"agent-fork session" in result.stdout
+    assert b"agent-fork session --json" in result.stdout
+    assert b"constructible, not preflighted" in result.stdout

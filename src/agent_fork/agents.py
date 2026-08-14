@@ -58,11 +58,31 @@ class LaunchCommand:
         return {"command": self.command, "extra_args": list(self.extra_args)}
 
 
+class UnsafeCommandInputError(ValueError):
+    """A command input contains bytes that are unsafe to print to a terminal."""
+
+
 CLAUDE_FORK_MIN = (2, 0, 73)
 CLAUDE_RELIABLE_MIN = (2, 1, 100)
 CODEX_FORK_MIN = (0, 81, 0)
 CODEX_ENV_MIN = (0, 95, 0)
 _VERSION = re.compile(r"(?<!\d)(\d+)\.(\d+)(?:\.(\d+))?")
+_BIDI_CONTROLS = frozenset(
+    {
+        "\u061c",
+        "\u200e",
+        "\u200f",
+        "\u202a",
+        "\u202b",
+        "\u202c",
+        "\u202d",
+        "\u202e",
+        "\u2066",
+        "\u2067",
+        "\u2068",
+        "\u2069",
+    }
+)
 
 
 def parse_version(output: str) -> tuple[int, int, int]:
@@ -234,6 +254,53 @@ def preflight_git(
     return (f"warning: --force overrides Git floor only: {message}",)
 
 
+def _terminal_safe(value: str) -> bool:
+    return all(
+        not (ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F)
+        and character not in _BIDI_CONTROLS
+        for character in value
+    )
+
+
+def _render_native_command(
+    context: AgentContext,
+    *,
+    directory: Path,
+    child_session_id: str | None,
+    name: str | None,
+    extra_args: tuple[str, ...],
+) -> str:
+    """Render the shared native-command grammar with one quoting boundary."""
+    values = [str(directory), context.parent_session_id, *extra_args]
+    if child_session_id is not None:
+        values.append(child_session_id)
+    if name is not None:
+        values.append(name)
+    if not all(_terminal_safe(value) for value in values):
+        raise UnsafeCommandInputError(
+            "session identity or directory contains terminal-unsafe controls"
+        )
+
+    quote = shlex.quote
+    suffix = "".join(f" {quote(value)}" for value in extra_args)
+    if context.agent == "claude":
+        if child_session_id is None:
+            raise ValueError("Claude native command requires a child session ID")
+        command = (
+            f"cd {quote(str(directory))} && claude --session-id "
+            f"{quote(child_session_id)} "
+            f"--resume {quote(context.parent_session_id)} --fork-session "
+        )
+        if name is not None:
+            command += f"-n {quote(name)}"
+        command += suffix
+        return command.rstrip()
+    return (
+        f"codex fork {quote(context.parent_session_id)} "
+        f"-C {quote(str(directory))}{suffix}"
+    )
+
+
 def build_launch_command(
     context: AgentContext,
     *,
@@ -243,21 +310,37 @@ def build_launch_command(
     child_session_id: str | None = None,
 ) -> LaunchCommand:
     """Build the locked REQ-28 template without splitting configured arguments."""
-    quote = shlex.quote
-    suffix = "".join(f" {quote(value)}" for value in extra_args)
+    child = None
     if context.agent == "claude":
         child = child_session_id or str(uuid.uuid4())
-        command = (
-            f"cd {quote(str(worktree))} && claude --session-id {quote(child)} "
-            f"--resume {quote(context.parent_session_id)} --fork-session "
-            f"-n {quote(name)}{suffix}"
-        )
-        return LaunchCommand(command, child, extra_args)
-    command = (
-        f"codex fork {quote(context.parent_session_id)} "
-        f"-C {quote(str(worktree))}{suffix}"
+    command = _render_native_command(
+        context,
+        directory=worktree,
+        child_session_id=child,
+        name=name,
+        extra_args=extra_args,
     )
-    return LaunchCommand(command, None, extra_args)
+    return LaunchCommand(command, child, extra_args)
+
+
+def build_session_fork_command(
+    context: AgentContext,
+    *,
+    directory: Path,
+    child_session_id: str | None = None,
+) -> LaunchCommand:
+    """Construct the read-only D21 command without preflight or configuration."""
+    child = None
+    if context.agent == "claude":
+        child = child_session_id or str(uuid.uuid4())
+    command = _render_native_command(
+        context,
+        directory=directory,
+        child_session_id=child,
+        name=None,
+        extra_args=(),
+    )
+    return LaunchCommand(command, child, ())
 
 
 def detect_agent(

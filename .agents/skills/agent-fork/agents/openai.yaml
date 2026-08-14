@@ -1,4 +1,4 @@
 interface:
   display_name: "Agent Fork"
-  short_description: "Inspect or fork the current agent session"
-  default_prompt: "Use $agent-fork to inspect or fork the current agent session."
+  short_description: "Inspect, print a session command, or fork"
+  default_prompt: "Use $agent-fork --session to inspect with a fork command, $agent-fork --session-only to print only that command, or $agent-fork to create a verified fork."

@@ -155,3 +155,103 @@ def test_extra_args_visible_in_json_command_field(repo_scenario):
     command = fields["command"]
     assert isinstance(command, str)
     assert "--model 'claude future'" in command
+
+
+@pytest.mark.matrix("T-EMT-08")
+def test_claude_session_fork_command_is_byte_exact(repo_scenario):
+    from agent_fork.agents import build_session_fork_command
+
+    world = repo_scenario()
+    built = build_session_fork_command(
+        _context("claude"),
+        directory=world.parent_path,
+        child_session_id="33333333-3333-4333-8333-333333333333",
+    )
+
+    assert built.command == (
+        f"cd {world.parent_path} && claude --session-id "
+        "33333333-3333-4333-8333-333333333333 --resume "
+        "11111111-1111-1111-1111-111111111111 --fork-session"
+    )
+    assert built.child_session_id == "33333333-3333-4333-8333-333333333333"
+    assert built.extra_args == ()
+
+
+@pytest.mark.matrix("T-EMT-09")
+def test_codex_session_fork_command_is_byte_exact(repo_scenario):
+    from agent_fork.agents import build_session_fork_command
+
+    world = repo_scenario()
+    built = build_session_fork_command(_context("codex"), directory=world.parent_path)
+
+    assert built.command == (
+        f"codex fork 22222222-2222-2222-2222-222222222222 -C {world.parent_path}"
+    )
+    assert built.child_session_id is None
+    assert built.extra_args == ()
+
+
+@pytest.mark.matrix("T-EMT-10")
+def test_session_renderer_quotes_shell_values_and_rejects_terminal_controls(
+    repo_scenario,
+):
+    from agent_fork.agents import (
+        AgentContext,
+        UnsafeCommandInputError,
+        build_session_fork_command,
+    )
+
+    world = repo_scenario()
+    hostile_directory = world.parent_path.parent / "space ' quote $HOME; safe"
+    hostile_directory.mkdir()
+    binary = world.parent_path.parent / "session-bin"
+    binary.mkdir()
+    log = _fake_binary(binary, "claude")
+    parent = "parent ' $HOME; touch INJECTED"
+    child = "33333333-3333-4333-8333-333333333333"
+    built = build_session_fork_command(
+        AgentContext("claude", parent),
+        directory=hostile_directory,
+        child_session_id=child,
+    )
+
+    completed = subprocess.run(
+        ["/bin/sh", "-c", built.command],
+        cwd=world.parent_path,
+        env={
+            **world.env,
+            "PATH": f"{binary}{os.pathsep}{world.env['PATH']}",
+            "ARGV_LOG": str(log),
+        },
+        capture_output=True,
+    )
+    assert completed.returncode == 0
+    assert json.loads(log.read_text()) == [
+        "--session-id",
+        child,
+        "--resume",
+        parent,
+        "--fork-session",
+    ]
+    assert not (world.parent_path / "INJECTED").exists()
+
+    unsafe_values = (
+        "line\nfeed",
+        "escape\x1b]52;c;Zm9v\x07",
+        "delete\x7f",
+        "c1\x9b",
+        "bidi\u202e",
+    )
+    for unsafe in unsafe_values:
+        with pytest.raises(UnsafeCommandInputError):
+            build_session_fork_command(
+                AgentContext("claude", unsafe),
+                directory=world.parent_path,
+                child_session_id=child,
+            )
+        with pytest.raises(UnsafeCommandInputError):
+            build_session_fork_command(
+                _context("claude"),
+                directory=world.parent_path / unsafe,
+                child_session_id=child,
+            )
