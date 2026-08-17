@@ -64,10 +64,12 @@ The full set of skill invocations:
 Codex invokes the same skill as `$agent-fork`; every form above is otherwise
 identical.
 
-The skill calls the installed CLI directly. When that CLI is missing, it prints
-the source install command and, if it can confirm a local checkout of this
-repository, offers to run the same route from it under `uv run --directory`
-after asking first. Both inspection forms use
+The skill calls the installed CLI directly. When that CLI is missing, it
+discloses the fix progressively: it probes for `uv`, offers the no-install
+`uvx` run or the durable install when `uv` is present, points at the `uv`
+installer or a direct `pip` install when it is not, and — if it can confirm a
+local checkout of this repository — offers to run the same route from it under
+`uv run --directory` after asking first. Both inspection forms use
 `agent-fork session --json`; `--session` includes the returned native fork
 command with the inspection, while `--session-only` prints only that exact
 command. Forking uses
@@ -85,32 +87,46 @@ directory from the active agent session; they do not accept a directory option.
 The skill lives at one canonical Agent Skills artifact,
 `.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`; Claude
 Code discovers the same artifact through `.claude/skills/agent-fork` as
-`/agent-fork`.
+`/agent-fork`. The repository is also a standalone plugin — the Claude Code
+manifest (`.claude-plugin/`), the Codex manifest (`.codex-plugin/`), and the
+`skills/` directory all point at that same artifact.
 
 ## Install
 
-Install the CLI:
+The easy install is two commands — one for the skill (Claude Code and Codex
+both), one for the CLI it drives:
 
 ```bash
+npx skills@latest add smorinlabs/agent-fork
 uv tool install git+https://github.com/smorinlabs/agent-fork
 ```
 
-Or run it without installing:
+Claude Code can also install the skill as a plugin — this repository is its
+own marketplace:
+
+```text
+/plugin marketplace add smorinlabs/agent-fork
+/plugin install agent-fork@agent-fork
+```
+
+Or try the CLI without installing anything:
 
 ```bash
 uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
 ```
 
-> PyPI and Homebrew releases land with v1.0.0.
+> PyPI and Homebrew releases land with v1.0.0; PyPI publication shortens the
+> no-install form to plain `uvx agent-fork`.
 
 **Requirements:** Python 3.11+ and Git 2.19+. Forking an agent session
 additionally needs Claude Code 2.0.73+ or Codex 0.95+ (Codex's native `fork`
 itself requires 0.81+). Run `agent-fork doctor` to check all of this at once.
 
-### Install the skill
+### Alternative: local skill install
 
-The skill ships in this repository. Clone it, then symlink the canonical
-artifact into the user-level skill directories for both agents:
+If you would rather not use the npx installer or the plugin, clone the
+repository and symlink the canonical artifact into the user-level skill
+directories for both agents:
 
 ```bash
 git clone https://github.com/smorinlabs/agent-fork
@@ -122,11 +138,11 @@ ln -sfn "$PWD/.agents/skills/agent-fork" ~/.agents/skills/agent-fork
 
 Claude Code then discovers it as `/agent-fork` and Codex as `$agent-fork`.
 
-### Local development installation
+### Dev mode
 
-Run these commands from the repository root before registry publication. The
-editable `uv` tool install keeps the command connected to this checkout; skill
-placement uses the same two symlinks shown above.
+Run these commands from the repository root. The editable `uv` tool install
+keeps the command connected to this checkout; skill placement uses the same
+two symlinks shown above.
 
 ```bash
 uv tool install --editable --force .
@@ -149,8 +165,12 @@ to this repository's `.agents/skills/agent-fork` directory.
 
 ```bash
 uv tool uninstall agent-fork
-rm ~/.claude/skills/agent-fork ~/.agents/skills/agent-fork
+npx skills@latest remove agent-fork
 ```
+
+A symlink install is removed with
+`rm ~/.claude/skills/agent-fork ~/.agents/skills/agent-fork`; a plugin install
+with `/plugin uninstall agent-fork`.
 
 ## Quickstart
 
@@ -533,6 +553,23 @@ operations against already configured local repository metadata remain local;
 package managers own installation and updates. The explicit `just test-live`
 development gate is separate from the product runtime and calls the installed
 Claude and Codex CLIs after its network/authentication preflight.
+
+## Contributing
+
+Contributions are welcome — the loop is short:
+
+1. Fork the repository and create a topic branch. A Git worktree keeps your
+   main checkout clean; `agent-fork fork` is happy to create it.
+2. Install [dev mode](#dev-mode) and run the gate before pushing: `make check`,
+   then `flox activate` and `just all` (format, lint, typecheck, tests).
+3. Write [Conventional Commits](https://www.conventionalcommits.org)
+   (`feat:`, `fix:`, `docs:`, …).
+4. Open a pull request; CI runs the same hermetic gate.
+
+The design and evidence corpus — [DESIGN-DECISIONS.md](DESIGN-DECISIONS.md),
+[REQUIREMENTS.md](REQUIREMENTS.md), [EXPERIMENTS.md](EXPERIMENTS.md), and
+[CONFORMANCE.md](CONFORMANCE.md) — explains why things work the way they do;
+check it before proposing behavior changes.
 
 ## License
 
