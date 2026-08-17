@@ -26,15 +26,16 @@ a session-continuation command, so the same tool covers plain Git workflows.
 
 ## Demo
 
-Get the skill (one command covers Claude Code and Codex), then use it from
-inside your session:
-
-```bash
-npx skills@latest add smorinlabs/agent-fork
-```
+From inside your Claude Code or Codex session:
 
 ```text
 /agent-fork try-redis       # fork without leaving the conversation
+```
+
+Don't have the skill yet? One command installs it for both agents:
+
+```bash
+npx skills@latest add smorinlabs/agent-fork
 ```
 
 The skill previews the fork — target branch, destination worktree, the files it
@@ -69,32 +70,46 @@ The full set of skill invocations:
 Codex invokes the same skill as `$agent-fork`; every form above is otherwise
 identical.
 
-The skill calls the installed CLI directly. When the CLI is missing, it walks
-you through the fix step by step: it checks for `uv`, offers either a one-off
-`uvx` run or a permanent install when `uv` is present, points at the `uv`
-installer or a direct `pip` install when it is not, and — if it can confirm a
-local checkout of this repository — offers to run from that checkout under
-`uv run --directory` after asking first. Both inspection forms use
-`agent-fork session --json`; `--session` includes the returned native fork
-command with the inspection, while `--session-only` prints only that exact
-command. Forking uses
-`agent-fork fork ... --require-agent --json`. An explicit name hint is
-normalized to lowercase kebab case. With no
-name, a topic branch uses the CLI's date-bearing automatic name and collision
-suffixes, and a default, detached, or unclassified branch gets a name proposed
-from the conversation. Every fork is then confirmed against a dry run — showing
-the target branch, the destination worktree, and the files it would carry —
-before anything is created. `--now` skips that confirmation without changing
-how the name is chosen. Advanced CLI flags are intentionally direct-CLI use
-cases rather than skill arguments. The two inspection forms infer the base
-directory from the active agent session; they do not accept a directory option.
+The skill is a thin front end over the installed CLI — each form maps to one
+CLI call:
 
-The skill lives at one canonical Agent Skills artifact,
-`.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`; Claude
-Code discovers the same artifact through `.claude/skills/agent-fork` as
-`/agent-fork`. The repository is also a standalone plugin — the Claude Code
-manifest (`.claude-plugin/`), the Codex manifest (`.codex-plugin/`), and the
-`skills/` directory all point at that same artifact.
+| Skill form | CLI call | Result |
+|---|---|---|
+| The fork forms | `agent-fork fork ... --require-agent --json` | The branch, the worktree, and the paste command |
+| `--session` | `agent-fork session --json` | The session inspection plus its native fork command |
+| `--session-only` | `agent-fork session --json` | Only that native fork command |
+
+The fork's name comes from one of three places:
+
+- A name hint you typed is normalized to lowercase kebab-case
+  (`"Review Auth"` becomes `review-auth`).
+- With no hint on a topic branch — an ordinary feature branch — the CLI
+  derives the name automatically (dated, with a suffix if it collides).
+- With no hint on the default branch, a detached HEAD, or an unclassifiable
+  branch, the skill proposes a name from the conversation.
+
+Every fork is confirmed before it exists: the skill runs a dry run, shows you
+the target branch, the destination worktree, and the files it would carry,
+and creates the fork only after you approve. `--now` skips that confirmation;
+the name is still chosen the same way.
+
+When the `agent-fork` CLI is not installed, the skill walks you through the
+fix step by step. It checks for `uv`: if `uv` is present it offers a one-off
+`uvx` run or a permanent install, and if not it points at the `uv` installer
+or a direct `pip` install. If it can confirm a local checkout of this
+repository, it also offers — after asking — to run from that checkout with
+`uv run --directory`.
+
+Two limits are deliberate: the skill accepts no CLI flags beyond the forms
+above (advanced flags are for direct CLI use), and the two inspection forms
+always use the active session's directory (there is no directory option).
+
+The skill ships as one copy: the Agent Skills artifact at
+`.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`;
+Claude Code discovers the same files through the `.claude/skills/agent-fork`
+symlink as `/agent-fork`. The plugin manifests (`.claude-plugin/` for Claude
+Code, `.codex-plugin/` for Codex) and the repo-root `skills/` directory all
+point at that same artifact.
 
 ## Install
 
