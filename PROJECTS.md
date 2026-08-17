@@ -45,3 +45,5 @@ file plus those.
 
 <!-- One row per project. Scoped / in-progress / done first; ideas last. -->
 - [~] **P01** — [agent-fork v1](projects/P01-agent-fork-v1.md)
+- [ ] **P02** — [agent-fork fault remediation](projects/P02-agent-fork-fault-remediation.md)
+- [ ] **P03** — [agent-fork core enhancements](projects/P03-agent-fork-core-enhancements.md)
