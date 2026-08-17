@@ -84,63 +84,67 @@ repository-controlled text raw).
   "copied and verified" promise. Proposed direction: content-hash rung in
   the ladder for staged/modified files + pin `apply.whitespace` on apply
   calls. Impact: high. Type: correctness fix. Spot-checked 2026-08-16.
-- **A2 — No policy pins the Git settings correctness depends on; the harness
-  hides the class.** *(Rewritten 2026-08-17 after probing; see "Corrected
-  claim" below.)*
-  `cli.py:667` forwards `os.environ` verbatim to all 50 `run_git` call sites
-  across 10 modules, and no call pins configuration — there is no `git -c`
-  anywhere in `src/`. Git takes instructions from arguments, configuration
-  files, and environment variables, and the environment overrides the
-  directory it is pointed at. Meanwhile the sealed harness
-  (`tests/conftest.py:809-863`) pins `GIT_CONFIG_NOSYSTEM`, a controlled
-  `GIT_CONFIG_GLOBAL`, and `defaultBranch`/`quotePath`/`autocrlf`/`symlinks`,
-  so every test runs where this cannot occur.
+- **A2 — [x] RESOLVED: environment claim refuted on the fork and cleanup
+  paths; four configuration defects found and fixed. Unprobed configuration
+  sources are recorded as coverage gaps in issue #38.** *(Second rewrite 2026-08-17, after probing all 13 canonical
+  inputs. Evidence: `docs/superpowers/plans/2026-08-17-p02-a2-environment-hardening.md`.)*
 
-  **Corrected claim.** The original entry rated this *high* and asserted that
-  "probes and mutations target the wrong repository." Two probes on 2026-08-17
-  did **not** reproduce that:
-  - `GIT_DIR` + `GIT_WORK_TREE` aimed at a second repository: Git was
-    redirected (`rev-parse --show-toplevel` reported the other repository),
-    but agent-fork **refused** with `config_error` — "cannot discover project
-    config outside worktree root" — because a config-discovery boundary check
-    caught the mismatch. No mutation.
-  - `GIT_INDEX_FILE` aimed at a genuinely divergent index (verified: different
-    blob for the same path), chosen because it does not move the repository
-    root and so cannot trip that check: the fork succeeded and carried the
-    correct content. Because one environment reaches every Git call, reads,
-    transport, and verification agree with each other — self-consistent, not
-    corrupt.
+  **Original claim, refuted.** The entry asserted that forwarding `os.environ`
+  to all 50 `run_git` call sites meant "probes and mutations target the wrong
+  repository", rated high. Twelve environment inputs were probed against full forks
+  **and against cleanup** with controls (one, `GIT_ATTR_NOSYSTEM`, is untestable
+  on this machine for lack of a system attributes file): **zero wrong-repository
+  mutations, zero wrong-target deletions, zero silent divergences attributable
+  to agent-fork.** Every refusal left both the intended
+  and the unintended repository untouched — checked for branches, worktrees,
+  status, and content. Where a variable did change behavior
+  (`GIT_CONFIG_SYSTEM` flattening a committed symlink), plain
+  `git worktree add` behaves identically, so agent-fork matches the command it
+  wraps rather than misbehaving.
 
-  What survives: (1) **configuration is unpinned** — this is A1's confirmed
-  root cause, where a user's `apply.whitespace = fix` silently rewrote
-  transported content; A1 pinned `--whitespace=nowarn` and
-  `--untracked-files=all` as one-offs, which is the ad-hoc pattern a policy
-  should replace; (2) **the class is untestable** under the sealed harness,
-  which is why A1's fault survived 400 passing tests.
+  **What was actually wrong: configuration reaching Git.** Three defects found,
+  all fixed:
+  1. *Transport used porcelain `git diff`*, whose display drivers produce
+     patches Git documents as unappliable. A repository shipping a textconv
+     driver in committed `.gitattributes` was **unforkable**; a lossy driver
+     emptied the patch instead. Fixed by moving transport to `diff-index` and
+     `diff-files` (T-MAT-21..24).
+  2. *`diff.external`* replaced the diff engine repository-wide. Same fix.
+  3. *Inline configuration injection* (`GIT_CONFIG_COUNT`/`KEY`/`VALUE`) flattened
+     a **committed** symlink in the child while the fork reported success —
+     verification is scoped to carried paths, and committed content arrives via
+     the checkout. Fixed by sanitizing the injection triple at the `run_git`
+     chokepoint (issue #35, T-GRD-17..20).
 
-  Impact: **medium** (was high). Type: robustness + test architecture.
-  Not data loss on current evidence.
+  **The "untestable under the sealed harness" claim is narrowed, not refuted.**
+  T-GRD-17, T-GRD-18, and T-GRD-21 show targeted rows can opt into hostile
+  configuration without a new framework, so no test tier was needed. They do not
+  refute the narrower point that the *baseline* sealed environment masks ambient
+  passthrough, because they call the pipeline directly rather than through the
+  CLI boundary that copies `os.environ`.
 
-  **Unverified surface — the gate must probe before any fix.** Only two
-  environment variables have been tested, on macOS only. The **canonical inventory of
-  untested inputs — 13, with priorities and exclusions — lives in the A2 design
-  doc** (`docs/superpowers/plans/2026-08-17-p02-a2-environment-hardening.md`,
-  "Canonical input inventory"); it is authoritative and is not restated here,
-  because three divergent copies previously disagreed on both membership and
-  count. Each must be probed against each mutating operation — worktree
-  creation, branch creation, materialization, verification, and cleanup —
-  because the boundary check that caught `GIT_DIR` guards discovery, not every
-  operation. **If any probe
-  produces a wrong-repository mutation, restore the high rating.**
+  **The pinning policy is not required by any observed defect**, though not
+  fully disproven: clean/smudge filters, `extensions.worktreeConfig`, and
+  conditional `includeIf` sources remain unprobed, and the setup hook runs after
+  verification with an inherited environment and can write shared repository
+  configuration — so "file-based configuration is user intent" is not a safe
+  categorical rule for a cloned repository.
 
-  Proposed sequencing (reordered 2026-08-17): unsealed-configuration test tier
-  **first** — it is what makes the class visible and would have caught A1 —
-  then environment sanitization at the single `run_git` chokepoint, then the
-  per-subcommand pinning policy, which is the design-heavy part.
-  Rough size: about a week, dominated by deciding what to pin. Pinning too
-  little admits the next `apply.whitespace`; pinning too much overrides
-  settings a repository legitimately needs, such as `core.autocrlf` or a
-  required content filter.
+  Impact: was high → medium → **resolved**. Type: correctness fixes, not the
+  robustness/hardening the entry predicted.
+
+  **Closed with named coverage gaps (issue #38), not with a claim of
+  completeness.** Unprobed: clean/smudge filters under the new plumbing
+  transport (the most plausible of the group, since filters caused real
+  divergence in A1 and the transport layer changed beneath them),
+  `extensions.worktreeConfig`, conditional `includeIf`, and `GIT_ATTR_NOSYSTEM`
+  — the last untestable on this machine for lack of a system attributes file.
+  Observed but not demonstrated: the setup hook runs after verification with an
+  inherited environment and can write shared repository configuration, and the
+  Codex app-server and agent version probes inherit unfiltered environments.
+  None is a suspected defect; each is listed so the gap is visible rather than
+  implied.
+
 - **A3 — Global flat fork registry clobbers across repositories.**
   One machine-wide `forks.json`; `RegistryEntry` (`models.py:53-75`) has no
   repo field. `add_entry` (`registry.py:111`) silently deletes a same-named
@@ -368,9 +372,8 @@ swept with the rest.
 
 - [x] [P02-TS01] A1 adversarial verification (incl. Codex): reproduce status-preserving content divergence end to end — CONFIRMED-WITH-CORRECTIONS 2026-08-16: empirical repro (apply.whitespace=fix diverged child bytes, identical porcelain, `verification.passed: true`) + Codex pass confirming mechanism, repro fairness, in-scope verdict, and sibling vectors; see [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
 - [x] [P02-T01] A1 fix per process: plan + adversarial plan review (APPROVE-WITH-CHANGES), TDD implementation, adversarial post-review (REJECT → findings absorbed or routed to issues #28–#31 per the owner's gate-6 routing) — whitespace pinned at the transport site, carried-state inventory drives both transport and verification, `content-match`/`parent-content` rungs with structured `failed_checks`, escaped repository-controlled text; 22 A1 rows green, 405 passed; see the [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
-- [ ] [P02-TS02] A2 validation-first probe matrix (incl. Codex): every `GIT_*` variable and correctness-relevant config key × every operation (worktree create, branch create, materialize, verify, cleanup); record actual behavior per cell with captured output; rewrite the register entry to match; decide whether a fix is still warranted. Partial evidence already recorded in the A2 entry — `GIT_DIR`+`GIT_WORK_TREE` refuses, `GIT_INDEX_FILE` is self-consistent
-- [ ] [P02-T02] A2 fix per process, scoped to whatever the matrix confirms — sequencing per the entry: test tier, then sanitization, then pinning policy
-- [ ] [P02-TS03] A3 adversarial verification (incl. Codex): two-repo registry clobber and cross-repo cleanup resolution repro
+- [x] [P02-TS02] A2 validation-first probe matrix (incl. Codex) — 12 canonical inputs probed against the fork path and the cleanup path with controls and bystander comparison (1, `GIT_ATTR_NOSYSTEM`, untestable here); environment claim refuted: no wrong-repository mutation, no wrong-target deletion, no silent divergence attributable to agent-fork. Register entry rewritten twice to match the evidence; remaining gaps recorded in issue #38
+- [x] [P02-T02] A2 fix — four configuration defects found and fixed: porcelain transport replaced with plumbing, closing both the unappliable-patch and empty-patch modes (T-MAT-21..24), and both inline injection channels sanitized — the `GIT_CONFIG_COUNT` triple and `GIT_CONFIG_PARAMETERS`, the latter missed by the first fix and caught in review (issue #35, T-GRD-17..21). `config.py`'s direct Git launch now uses the same filter. The pinning policy is **not required by any observed defect**, but is not disproven for the sources in issue #38.
 - [ ] [P02-T03] A3 fix per process (registry schema migration)
 - [x] [P02-TS04] A4 adversarial verification: **inline adversarial review 2026-08-17 — PARTIALLY REFUTED.** Findings: (a) impact inflated relative to A1/A3, downgraded high → medium (loud, non-destructive, recoverable failure); (b) the headline drift scenario is unreproducible by construction — it requires a CLI release that does not exist, so any repro fabricates a stub, making A4 the item's strongest partial-refutation candidate; (c) `--help` grepping is itself a drift surface (detects removal, not semantic change), which forces the remedy to warn rather than refuse; (d) only `parse_version` is a today-testable defect. Remedy re-scoped from three mechanisms to two. **Codex second lens RUN 2026-08-17** against the implemented diff (`aefcda0..HEAD`) — verdicts: claim 1 (semver) PARTIALLY REFUTED, claim 2 (warn-vs-refuse) PARTIALLY REFUTED, claim 3 (implementation) REFUTED, claim 4 (tests) REFUTED, claim 5 (misses) CONFIRMED. Two defects reproduced independently before acting: `UnicodeDecodeError` escaping `read_help` (breaking the never-refuse guarantee) and notices rendering after mutation. Full report: [TS04 Codex review](../docs/reviews/2026-08-17-p02-a4-codex-review.md). Reviewing the diff rather than the design proved the better target — every finding cited a line. **Process deviation recorded:** A4 predates the validation-first gate that landed with A2 (`1f8e038`); it ran review → rewrite → implement → Codex-on-diff rather than probe-matrix-first, and built no exhaustive input matrix. See the [A4 design doc](../docs/superpowers/plans/2026-08-17-p02-a4-recipe-flag-probe.md)
 - [x] [P02-T04] A4 fix per process (revised scope) — TDD, RED first: the ambiguity row demonstrated the real defect (`parse_version` returned the banner's `(10, 2, 3)` instead of the CLI's `2.1.233`). Shipped: `version_tokens` + ambiguity notice, `recipe_flags`/`missing_recipe_flags`/`read_help` with a warn-level probe in `preflight_agent` (detection pre-mutation; notice rendered with the fork result), `.`-guard on `_VERSION`, and T-PRE-21..26. Test-stub fidelity fix in `tests/cli/test_out.py` — the fake CLI answered `--help` with its version string, so the probe correctly reported the *stub's* missing flags; the stub now serves real help (the TS04 review independently confirmed this as fidelity repair, not evidence suppression). Post-review fixes: `UnicodeDecodeError` caught in `read_help`; option-declaration parsing so deprecation prose cannot prove a flag survives; three-state unverified notice; ambiguity counted across stdout and stderr; `doctor` drift scoped to the selected agent so an unused CLI cannot change the exit contract; T-PRE-26 tightened to equality; T-PRE-27/28 and T-CLI-26 added. `just all` green: 419 passed, 1 skipped; `just check-matrix` clean

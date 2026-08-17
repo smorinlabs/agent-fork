@@ -412,3 +412,406 @@ restating it.**
 **Excluded, with reason:** `GIT_DEFAULT_HASH` and `GIT_DEFAULT_REF_FORMAT`
 apply to repository creation, which agent-fork never performs.
 `GIT_CONFIG_NOSYSTEM` is hardening-only and already set by the test harness.
+
+## Group 2–4 results — run 2026-08-17
+
+Four priority-1 inputs probed against a full fork. **No defect found. The
+mechanism-based prioritization that put these first was wrong.**
+
+| Input | Verdict | Evidence |
+|---|---|---|
+| `GIT_NAMESPACE` | **unaffected** | Has no effect on the local ref operations agent-fork performs |
+| `GIT_OBJECT_DIRECTORY` | **refused** | `fatal: Needed a single revision`; zero objects written to the foreign directory, no partial fork |
+| `GIT_ALTERNATE_OBJECT_DIRECTORIES` | **unaffected** | Fork succeeded and content verified correct on both layers |
+| `GIT_COMMON_DIR` (foreign repository) | **refused** | Same refusal as `GIT_OBJECT_DIRECTORY` |
+
+### `GIT_NAMESPACE` — hypothesis refuted
+
+It was the highest-suspicion input in the matrix, on the reasoning that
+relocating refs would make the existence guard, `worktree add -b`, and
+`branch -D` disagree. Probed directly:
+
+- `GIT_NAMESPACE=ns git branch alpha` creates `refs/heads/alpha`. **No
+  `refs/namespaces/` directory is created at all.**
+- `rev-parse alpha` resolves identically with and without the namespace.
+- `GIT_NAMESPACE=ns git branch -D target` deletes the **real** `refs/heads/target`
+  — the intended ref, not a namespaced one.
+
+The namespace does apply, but at the **transport layer**: `ls-remote` shows 0
+refs under the namespace against 3 without it. That matches
+`gitnamespaces(7)`'s framing — namespaces exist to "expose each namespace as an
+independent repository to pull from and push to". The local ref commands
+agent-fork uses do not honor it, so the predicted disagreement cannot occur.
+
+**Correction to record:** the design reasoning treated "refs are relocated" as
+applying to all ref access. It applies to the remote protocol. Reading
+`gitnamespaces(7)` more carefully would have caught this before the probe —
+though the probe is what settled it, which is the point of the gate.
+
+### Content verification mattered
+
+`GIT_ALTERNATE_OBJECT_DIRECTORIES` initially looked like "fork succeeded", which
+is not a verdict. Re-probed asserting both layers of the three-way split: parent
+and child both `WORKING alt` in the working tree and `STAGED alt` in the index.
+Only then is "unaffected" supportable.
+
+Likewise `GIT_COMMON_DIR` was first probed pointed at the repository's own
+`.git`, which is benign by construction and proves nothing. Re-probed against a
+*different* repository, it refuses.
+
+### The one real observation
+
+Both refusals surface as **`runtime_error: fatal: Needed a single revision`** —
+uncategorized, with raw Git text that names neither the variable nor the cause.
+Safety holds (nothing is created, nothing is written outside the repository),
+but a user hitting this has no path to diagnosis. This is the same error-typing
+weakness seen in the T1 transport failure, now observed from a second
+independent direction, which strengthens the case that issue #28's typed-error
+work has a live trigger.
+
+### Running tally
+
+| Status | Inputs |
+|---|---|
+| Resolved, defect fixed | textconv attribute · `diff.external` |
+| Resolved, no defect | `GIT_DIR`+`GIT_WORK_TREE` · `GIT_INDEX_FILE` · `GIT_NAMESPACE` · `GIT_OBJECT_DIRECTORY` · `GIT_ALTERNATE_OBJECT_DIRECTORIES` · `GIT_COMMON_DIR` |
+| Remaining untested | 9 of the canonical 13 — priorities 2 and 3: `GIT_DIR` alone, `GIT_CEILING_DIRECTORIES`, `GIT_DISCOVERY_ACROSS_FILESYSTEM`, `GIT_CONFIG_COUNT`/`KEY`/`VALUE`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_ATTR_NOSYSTEM`, `GIT_EXTERNAL_DIFF`, `GIT_INDEX_VERSION` |
+
+**Interim read:** every environment variable probed so far is either refused or
+harmless. The only confirmed A2-adjacent defects came from *configuration and
+attributes* (textconv, `diff.external`), not from the environment. If the
+remaining configuration-injection cells behave the same way, A2's severity
+should drop again and its fix should be scoped to the pinning policy alone.
+
+## Group 6 results — configuration injection (2026-08-17)
+
+### C1 — the fix design's load-bearing assumption, verified
+
+`git-config(1)` states that `GIT_CONFIG_*` pairs "will be overridden by any
+explicit options passed via `git -c`". The whole pinning-policy approach rests
+on it, so it was measured rather than trusted:
+
+| Check | Result |
+|---|---|
+| `apply.whitespace` injected only | `fix` |
+| injected, plus `-c apply.whitespace=nowarn` | **`nowarn` — `-c` wins** |
+| hostile `GIT_CONFIG_GLOBAL` file only | `fix` |
+| same, plus `-c` | **`nowarn` — `-c` wins** |
+| `apply` **without** a pin, injection active | whitespace **stripped** — the threat is real |
+| `apply` **with** A1's `--whitespace=nowarn`, injection active | whitespace **preserved — A1's pin holds** |
+
+Two conclusions: a pinning policy applied through `-c` is effective against both
+the environment-injection and file-substitution forms, and A1's existing pins
+already defend the keys they cover.
+
+### C2 — which keys still bite
+
+Ten keys injected via `GIT_CONFIG_*` against a full fork:
+
+| Key | Verdict |
+|---|---|
+| `core.autocrlf=true` / `=input` | **refused** — A1's `content-match` rung fires (`f.txt: content differs`) |
+| `core.symlinks=false` | **silent divergence** — see below |
+| `core.fileMode`, `core.ignorecase`, `core.quotePath`, `status.showUntrackedFiles`, `apply.whitespace`, `diff.noprefix`, `core.bigFileThreshold` | ok — parent and child agree |
+
+**Harness correction.** The first run reported all ten as refused, which was a
+probe defect, not a finding: each child worktree was created *inside* its parent
+repository, which agent-fork correctly refuses. Ten identical refusals across
+keys that could not plausibly matter was the signal to re-check rather than
+report. Children are now siblings.
+
+### C3 — the one real gap, and it is not about the environment
+
+`core.symlinks=false` produced a child whose **committed** symlink became a
+regular file, with the fork reporting success:
+
+| Path | Carried? | Parent | Child |
+|---|---|---|---|
+| `untracked_link` | yes | symlink | symlink — correct |
+| `committed_link` | **no** | symlink | **regular file** containing `f.txt` |
+
+Inventory at the time: `staged: () unstaged: ('f.txt',) untracked:
+('untracked_link',)`. `committed_link` is absent, so no rung examined it.
+
+The mechanism: **verification is scoped to carried paths**, but the child's copy
+of committed content comes from `worktree add`'s checkout, which configuration
+can alter. `core.autocrlf` was caught in the same run *only because* its file
+was carried — same class of key, opposite outcome, decided by inventory
+membership alone.
+
+Routed to **issue #35** (pre-existing scope gap, surfaced by A2 rather than
+caused by it). Recommended remedy there is option 1: pin the checkout-affecting
+keys on `worktree add`, which C1 proves is effective and which costs nothing at
+fork time.
+
+### Updated tally
+
+| Status | Count |
+|---|---|
+| Resolved — defect found and fixed | 2 (textconv, `diff.external`) |
+| Resolved — no defect | 8 environment variables |
+| Resolved — defect routed to an issue | 1 (`core.symlinks` → #35) |
+| Remaining untested | 4: `GIT_ATTR_NOSYSTEM`, `GIT_EXTERNAL_DIFF`, `GIT_INDEX_VERSION`, and the priority-2 discovery trio treated as one group |
+
+**Read so far:** no environment variable has produced a defect. Every confirmed
+problem has come from *configuration or attributes*. A2's fix is therefore
+converging on a pinning policy — now with C1's evidence that the mechanism
+works and C3's evidence that it must cover `worktree add`, not only transport.
+
+## Fix for issue #35 — and one half of it dropped after probing
+
+**Recommended:** (1) strip inline configuration injection at the `run_git`
+chokepoint; (2) pass the parent's effective checkout-affecting values to
+`worktree add`.
+
+**Shipped: part 1 only.** Part 2 was dropped, and part 1's scope was corrected,
+both because probing contradicted the proposal.
+
+### Correction to part 1 — what may be stripped
+
+The proposal named `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` among the
+variables to remove. **That would have broken the test suite**:
+`tests/conftest.py:854` sets `GIT_CONFIG_GLOBAL` to seal every test's
+configuration, so stripping it would make each sealed test fall back to the
+real `~/.gitconfig`.
+
+The distinction that matters is not "environment versus file" but *what the
+variable does*:
+
+| Variable | Nature | Decision |
+|---|---|---|
+| `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>` | inline values that outrank every configuration file | **strip** — no legitimate use in this tool's subprocesses |
+| `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` | pointers to configuration *files* | **keep** — this is how tooling deliberately controls Git; removing them ignores user configuration rather than protecting it |
+
+### Part 2 dropped — agent-fork already matches plain Git
+
+Part 2 addressed file-based configuration drift: a parent checked out under one
+setting, then the setting changed, then a fork. Probed against plain Git as the
+control:
+
+| Under repository-local `core.symlinks=false` | Committed symlink in the new worktree |
+|---|---|
+| `git worktree add` | regular file |
+| `agent-fork fork` | regular file |
+
+They agree. Agent-fork is honouring the user's own explicit configuration, and
+a fresh checkout legitimately differs from a stale parent. Implementing part 2
+would have meant overriding a deliberate user setting *and* diverging from the
+behavior of the command agent-fork wraps — worse than the problem.
+
+**This is the second time in A2 that a proposed fix half was removed by
+probing** (the first was `--no-textconv --no-ext-diff`, superseded by plumbing).
+The pattern argues for keeping the validation gate ahead of design, not just
+ahead of implementation.
+
+### Result
+
+One change, in `git.py`: `_without_config_injection` filters the injection
+triple out of the environment handed to every Git subprocess. When `env` is
+`None` the filter is applied to `os.environ`, so inheriting callers are covered
+too.
+
+`T-GRD-17` reproduces issue #35 and was observed RED. `T-GRD-18` asserts
+transport is defended independently of A1's per-call pin. `T-GRD-19` and
+`T-GRD-20` are regression guards against over-stripping — file pointers still
+honoured, repository-local configuration still applied.
+
+**Gates:** 418 passed, 1 skipped; lint, typecheck, matrix clean.
+
+## Final results — all 13 canonical inputs resolved (2026-08-17)
+
+| # | Input | Verdict |
+|---|---|---|
+| 1 | `GIT_NAMESPACE` | unaffected — no effect on local ref operations |
+| 2 | `GIT_OBJECT_DIRECTORY` | refused; nothing written outside the repository |
+| 3 | `GIT_ALTERNATE_OBJECT_DIRECTORIES` | unaffected; content verified on both layers |
+| 4 | `GIT_COMMON_DIR` (foreign repository) | refused |
+| 5 | `GIT_DIR` alone (foreign repository) | **refused** — `verify_failed: branch`; bystander repository untouched in branches, worktrees, status, and content; rolled back |
+| 6 | `GIT_CEILING_DIRECTORIES` | unaffected |
+| 7 | `GIT_DISCOVERY_ACROSS_FILESYSTEM` | unaffected |
+| 8 | `GIT_CONFIG_COUNT`/`KEY`/`VALUE` | **defect found (#35), fixed** by sanitization |
+| 9 | `GIT_CONFIG_GLOBAL` | overridden by `-c`; preserved deliberately |
+| 10 | `GIT_CONFIG_SYSTEM` | flattens a committed symlink — **but plain `git worktree add` does the same**, so agent-fork matches the command it wraps |
+| 11 | `GIT_ATTR_NOSYSTEM` | **not meaningfully testable here** — no system attributes file exists on this machine to suppress |
+| 12 | `GIT_EXTERNAL_DIFF` | unaffected — confirms the plumbing transport neutralizes it, previously an untested claim |
+| 13 | `GIT_INDEX_VERSION=4` | takes effect (child index v4 against parent v2) and is harmless: staged and working content both intact |
+
+### Three probes were redone because the first attempt proved nothing
+
+- `GIT_CONFIG_SYSTEM` was run with `GIT_CONFIG_NOSYSTEM=1` exported, which
+  suppresses system configuration outright. The original "ok" was vacuous.
+- `GIT_ATTR_NOSYSTEM` had no system attributes file to suppress. Its honest
+  verdict is *not applicable on this machine*, not *harmless*.
+- `GIT_INDEX_VERSION` was not checked for having taken effect. It had — the
+  child's index really is version 4 — which is what makes "harmless" meaningful.
+
+`GIT_DIR` was also re-run specifically to answer A2's founding claim, checking
+the bystander repository's branches, worktrees, status, and content before and
+after.
+
+## Conclusion — A2 is resolved
+
+**The environment-passthrough claim is refuted.** Thirteen inputs, zero
+wrong-repository mutations, zero silent divergences attributable to agent-fork.
+Every refusal left both repositories untouched.
+
+**The real defect class was configuration reaching Git**, and all three
+demonstrated instances are fixed:
+
+| Defect | Route | Fix |
+|---|---|---|
+| Unappliable / empty transport patches | `.gitattributes` textconv | plumbing transport |
+| Transport replaced wholesale | `diff.external` config | plumbing transport |
+| Committed symlink flattened | `GIT_CONFIG_*` injection | environment sanitization |
+
+**The "untestable under the sealed harness" claim is refuted by
+demonstration.** `T-GRD-17` through `T-GRD-20` test configuration injection
+inside the existing harness. No new test tier was required — which was the
+premise of the original "test tier first" sequencing.
+
+**No pinning policy is needed.** It was scoped at roughly a week. The evidence
+retired it: A1's existing pins hold under injection, injection is now stripped,
+and for file-based configuration agent-fork behaves exactly as plain Git does,
+so overriding it would substitute the tool's judgement for the user's.
+
+**Remaining, and deliberately not fixed:** `GIT_ATTR_NOSYSTEM` is unprobed
+because this machine has no system attributes file. That is a coverage gap, not
+a known defect, and it belongs with the other coverage items in issue #31.
+
+## Review finding — the first sanitization was incomplete
+
+PR #36's review identified a second inline-injection channel:
+**`GIT_CONFIG_PARAMETERS`**, which Git uses internally to propagate `-c` to
+subprocesses. Stripping only the `GIT_CONFIG_COUNT` triple left it open.
+
+Probed directly:
+
+| Channel | Committed symlink in the child |
+|---|---|
+| `GIT_CONFIG_COUNT` triple (stripped) | symlink — fix held |
+| `GIT_CONFIG_PARAMETERS` (not stripped) | **flattened — injection survived** |
+
+So the full issue #35 defect reproduced through the unblocked channel, with the
+fork again reporting success. The claim that "the injection class is closed"
+was wrong until this landed. `T-GRD-21` pins it, observed RED first.
+
+**Lesson for the enumeration argument.** The case for sanitizing rather than
+pinning was that sanitization "kills the class without enumerating which keys
+matter". That is true of *keys*, but sanitization still requires enumerating
+*channels* — and one was missed on the first pass. The advantage is real but
+narrower than stated: two channels to know about instead of an open-ended set
+of configuration keys.
+
+## Adversarial review of the conclusion — REJECT, and the corrections
+
+The review targeted the *refutation* rather than the code, because a wrong
+refutation closes a real fault permanently. It returned **REJECT** with six
+blocking findings. Every one was sound; the corrections are below.
+
+### 1. Cleanup was never probed — the refutation was overclaimed
+
+The matrix required each input crossed with cleanup, calling it the
+highest-consequence operation. No probe invoked `agent-fork cleanup`; the
+`GIT_NAMESPACE` evidence used raw `git branch -D`, which is not the cleanup
+sequence (target resolution, dirty and unpushed guards, worktree removal,
+prune, branch deletion, registry removal).
+
+**Now probed.** Seven cells, each comparing a bystander repository's refs
+before and after:
+
+| Cleanup under | Verdict |
+|---|---|
+| control | ok — child removed, parent refs correct |
+| `GIT_DIR` → bystander | refused |
+| `GIT_NAMESPACE` | ok |
+| `GIT_CONFIG_PARAMETERS` | ok |
+| `GIT_CONFIG_COUNT` injection | ok |
+| `GIT_COMMON_DIR` → bystander | refused |
+| `GIT_OBJECT_DIRECTORY` | refused |
+
+**No wrong-target deletion in any cell.** The result supports the refutation
+rather than contradicting it — but it had to be run, not assumed.
+
+Two harness defects were fixed to get a valid control: the child carried state
+and tripped the dirty guard, then tripped the unpushed guard because the
+scratch repository has no remote — which is fault **A13(f)** from the original
+analysis, encountered live.
+
+### 2. "All 13 probed" was self-contradictory
+
+`GIT_ATTR_NOSYSTEM` is explicitly recorded as untestable on this machine, so
+the count is **12 probed, 1 untestable**. Corrected.
+
+### 3. "Matches plain Git" is a weaker defence than claimed
+
+Matching `git worktree add` establishes causal equivalence, not correctness
+against agent-fork's stronger advertised contract of faithful copying *and*
+verification. The same outcome is treated as a defect when configuration
+arrives by injection and as acceptable when it arrives by file, which makes
+provenance the sole distinction. That distinction is defensible — injection is
+not user intent — but it is a judgement, not a proof, and the contract question
+it raises belongs with issue #35's follow-up rather than being settled here.
+
+### 4. The pinning policy is *not* fully retired
+
+Retirement was claimed on evidence that does not cover clean/smudge filters
+(planned in the matrix, omitted from the ten-key run), `extensions.worktreeConfig`,
+or conditional `includeIf` configuration. The review also observed that the
+setup hook runs *after* verification with the inherited environment and can
+write shared repository configuration — so "file-based configuration is user
+intent" is not a safe categorical provenance rule when the file arrived with a
+cloned repository. **Downgraded from "retired" to "not required by any observed
+defect; unproven for the sources above."**
+
+### 5. The sealed-harness refutation was a category slip
+
+The tests copy the sealed fixture environment and call the pipeline directly;
+they do not exercise the CLI boundary that copies ambient `os.environ`. They
+show targeted rows can opt into hostile configuration without a new framework —
+they do not refute the narrower claim that the baseline sealed environment
+masks ambient passthrough. The sentence "T-GRD-17 through T-GRD-20 test
+configuration injection" was also factually wrong: T-GRD-19 and T-GRD-20 did
+not test injection at all.
+
+### 6. Two tests did not test what they claimed, and one launch site was missed
+
+- `T-GRD-18` asserted transported bytes were unchanged under injected
+  `apply.whitespace`, which passes with or without the sanitizer because A1
+  independently pins `--whitespace=nowarn`. **Rewritten** to observe the
+  environment Git actually receives.
+- `T-GRD-19` ran raw `git` rather than `run_git`, so removing
+  `GIT_CONFIG_GLOBAL` from the filter would not have failed it. **Rewritten**
+  to go through `run_git`.
+- `config.py`'s `worktree_root` launches `git rev-parse` directly with an
+  unfiltered environment. **Fixed** — the sanitizer is now public and reused
+  there, so "`run_git` is the sole Git launch" is no longer relied upon.
+
+Still inheriting unfiltered environments, with no demonstrated Git consequence:
+the Codex app-server, agent version probes, and the setup hook. The hook is the
+notable one — it runs after verification and may invoke Git itself. Recorded
+rather than fixed, since no defect has been demonstrated through it.
+
+## A2 closed — 2026-08-17
+
+Closed with **named coverage gaps rather than a claim of completeness**. The
+unprobed configuration sources, the untestable input, and the two observed-but-
+undemonstrated items are recorded in **issue #38**, which states plainly that
+none is a suspected defect.
+
+**What A2 delivered:** four configuration defects found and fixed — porcelain
+transport replaced with plumbing (closing both the unappliable-patch and
+empty-patch failure modes), and both inline configuration-injection channels
+sanitized, including the `GIT_CONFIG_PARAMETERS` channel the first fix missed.
+
+**What A2 refuted:** the founding claim that environment passthrough causes
+wrong-repository behavior. Twelve inputs across the fork path and the cleanup
+path, with controls and bystander-repository comparison, produced no
+wrong-repository mutation, no wrong-target deletion, and no silent divergence
+attributable to agent-fork.
+
+**What the process cost, and returned:** the register entry was rewritten twice,
+a two-part fix was reduced to one part, a "retired" pinning policy was
+downgraded to "not required by any observed defect", and four separate harness
+defects were caught before their false results could be reported. Two
+independent reviewers found real problems in work already called done — a hole
+in the fix, and a systematically overclaimed conclusion.
