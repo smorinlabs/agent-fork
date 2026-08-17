@@ -26,7 +26,12 @@ a session-continuation command, so the same tool covers plain Git workflows.
 
 ## Demo
 
-From inside your agent session:
+Get the skill (one command covers Claude Code and Codex), then use it from
+inside your session:
+
+```bash
+npx skills@latest add smorinlabs/agent-fork
+```
 
 ```text
 /agent-fork try-redis       # fork without leaving the conversation
@@ -64,11 +69,11 @@ The full set of skill invocations:
 Codex invokes the same skill as `$agent-fork`; every form above is otherwise
 identical.
 
-The skill calls the installed CLI directly. When that CLI is missing, it
-discloses the fix progressively: it probes for `uv`, offers the no-install
-`uvx` run or the durable install when `uv` is present, points at the `uv`
+The skill calls the installed CLI directly. When the CLI is missing, it walks
+you through the fix step by step: it checks for `uv`, offers either a one-off
+`uvx` run or a permanent install when `uv` is present, points at the `uv`
 installer or a direct `pip` install when it is not, and — if it can confirm a
-local checkout of this repository — offers to run the same route from it under
+local checkout of this repository — offers to run from that checkout under
 `uv run --directory` after asking first. Both inspection forms use
 `agent-fork session --json`; `--session` includes the returned native fork
 command with the inspection, while `--session-only` prints only that exact
@@ -93,30 +98,38 @@ manifest (`.claude-plugin/`), the Codex manifest (`.codex-plugin/`), and the
 
 ## Install
 
-The easy install is two commands — one for the skill (Claude Code and Codex
-both), one for the CLI it drives:
+The skill installs with one command, for Claude Code and Codex at once:
 
 ```bash
 npx skills@latest add smorinlabs/agent-fork
-uv tool install git+https://github.com/smorinlabs/agent-fork
 ```
 
-Claude Code can also install the skill as a plugin — this repository is its
-own marketplace:
+Claude Code can install it as a plugin instead — this repository is its own
+marketplace:
 
 ```text
 /plugin marketplace add smorinlabs/agent-fork
 /plugin install agent-fork@agent-fork
 ```
 
-Or try the CLI without installing anything:
+### Optional: install the CLI
+
+The skill runs the `agent-fork` CLI and helps you set it up on first use, so
+installing the CLI yourself is optional. Doing so makes it available in any
+terminal:
+
+```bash
+uv tool install git+https://github.com/smorinlabs/agent-fork
+```
+
+Or run it once without installing:
 
 ```bash
 uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
 ```
 
-> PyPI and Homebrew releases land with v1.0.0; PyPI publication shortens the
-> no-install form to plain `uvx agent-fork`.
+> PyPI and Homebrew releases land with v1.0.0; after PyPI publication the
+> no-install command becomes simply `uvx agent-fork`.
 
 **Requirements:** Python 3.11+ and Git 2.19+. Forking an agent session
 additionally needs Claude Code 2.0.73+ or Codex 0.95+ (Codex's native `fork`
@@ -559,7 +572,7 @@ Claude and Codex CLIs after its network/authentication preflight.
 Contributions are welcome — the loop is short:
 
 1. Fork the repository and create a topic branch. A Git worktree keeps your
-   main checkout clean; `agent-fork fork` is happy to create it.
+   main checkout clean; `agent-fork fork` can create it for you.
 2. Install [dev mode](#dev-mode) and run the gate before pushing: `make check`,
    then `flox activate` and `just all` (format, lint, typecheck, tests).
 3. Write [Conventional Commits](https://www.conventionalcommits.org)
