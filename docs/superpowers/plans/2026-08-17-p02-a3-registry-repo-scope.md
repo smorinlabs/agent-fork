@@ -150,13 +150,41 @@ entries resolve the path (`models.py:70-75`) while raw v1 rows are accepted
 verbatim (`registry.py:29-38`), so several distinct stored spellings can
 resolve to one live path.
 
-The rule is therefore a **protocol, not a key**. Removal matches on the
-complete persisted record as decoded — every stored field, byte-for-byte, no
-resolution applied — and requires exactly one match. Zero or multiple matches
-is a refusal, and the ambiguity is detected when the cleanup plan is built,
-**before** any git mutation, so a cleanup can never delete a worktree and
-then fail to remove or over-remove rows. Path resolution stays confined to
-lookup, where it belongs.
+Round 3 then rejected "match the complete persisted record byte-for-byte" on
+two counts, both correct. It is **not implementable**: `_decode` constructs
+dataclasses (`registry.py:29-38`) and keeps no JSON bytes, key order, or
+field presence — an omitted `mode` and an explicit `"mode":"agent"` decode to
+the same object because the dataclass supplies the default
+(`models.py:53-62`). And it **answers the wrong question**: `find_owned`
+returns the *first* match (`registry.py:127-136`), so when several rows claim
+one target, exactly one row still equals the selected record and cleanup
+proceeds — full-record cardinality detects duplicate serialization, not
+ownership ambiguity.
+
+The two concerns are therefore separated, because they are different
+problems:
+
+- **Selection ambiguity — a lookup property.** `find_owned` must return
+  exactly one *authorized candidate*, counting every row that matches the
+  target under the scoping rules. Two or more is a refusal
+  (`cleanup_registry_ambiguous`), raised while the plan is built.
+- **Removal identity — a concurrency property.** The selected row carries an
+  opaque token derived from its persisted representation, and removal is a
+  **compare-and-swap under the registry lock**: re-decode, find the row still
+  matching that token, remove exactly it, or fail without removing anything.
+
+**The transaction window must close, not move.** Round 3's second correction:
+moving the ambiguity check earlier only *relocated* the race. Cleanup removes
+the worktree and branch (`cleanup.py:385-392`) before `remove_entry` takes
+the lock (`registry.py:116-124`), and consent sits in between
+(`cli.py:1087-1105`) with no bound. Another writer can replace or remove the
+row, add a competing claim, or hold the lock until `RegistryBusyError` — all
+after the worktree is already gone. The plan therefore re-acquires the lock
+**after consent and before any git mutation**, revalidates identity and
+cardinality inside it, and holds cooperative exclusion through the registry
+commit. Failure outcomes are specified rather than assumed: revalidation
+failure refuses with nothing destroyed; a lock timeout at that point refuses
+with `registry_busy` and nothing destroyed.
 
 **Two serialization contracts, deliberately separated — three callers, not
 two.** `to_dict()` (`models.py:77-85`) currently feeds the on-disk registry
@@ -286,15 +314,25 @@ and requires exact equality with `ERROR_CATALOG`, and `PreconditionError`
 degrades an uncatalogued code to
 `ValueError("uncataloged precondition error code")` (`errors.py:77-86`).
 
-**Moved repositories: an accepted limitation with a named remedy.** Identity
-continuity across a repository move is not supported — path reuse is
+**`cleanup_registry_mismatch` is not overridable by `--force`.** The rejected
+revision made it so, and round 3 was right to call that unsafe and a new
+behavior besides. `--force` today means two specific things — target
+something unregistered (`cleanup.py:158-162`) and override the dirty and
+unpushed guards (`cleanup.py:337-356`, `REQUIREMENTS.md:153`) — and a user
+who passes it for the *unpushed* reason would silently also suppress the
+only proof that the worktree still belongs to the repository its record
+names. The concrete loss: row says repo A at path W, W is now repo B's
+worktree, cleanup from A selects A's row, live identity correctly reports B,
+and `--force` deletes B's worktree. Broadening a flag's meaning is also a new
+feature, which P02 forbids.
+
+**Moved repositories are an accepted limitation without an A3 remedy.**
+Identity continuity across a repository move is not supported — path reuse is
 indistinguishable from legitimate movement, the same reasoning that rules out
-null-row rebinding. The remedy is the existing `--force` flag, whose
-documented meaning is already "extend targeting" beyond registry ownership
-(`cleanup.py:158-162`): `--force` downgrades `cleanup_registry_mismatch` from
-a refusal to a notice, so the user can clean the worktree, and the stale row
-is then A7's to prune. The refusal message names both the stored and the live
-identity so the user can see what moved.
+null-row rebinding and probe-based migration. The refusal names both the
+stored and the live identity so the user can see what moved; repairing or
+pruning the row is A7's registered scope, and this case is routed there
+explicitly.
 
 **The containment check is a guard, not a guarantee.** Target resolution
 happens before CLI consent (`cli.py:1087-1105`) and mutation happens later
@@ -377,7 +415,10 @@ Full inventory, which the rejected revision did not enumerate:
   mutation** — it requires the target's live common directory to equal its
   stored identity, and requires the selected record to match exactly one
   persisted row. Removal then deletes that one row. No null-identity
-  exception; `--force` downgrades the mismatch refusal to a notice.
+  exception, and `--force` does not override the mismatch refusal. After
+  consent and before any git mutation, the lock is re-acquired, identity and
+  cardinality are revalidated inside it, and exclusion is held through the
+  registry commit; removal is a compare-and-swap on the selected row's token.
 - Migration probing runs before the lock; an unresolvable row persists as
   null and is never re-probed; the under-lock document is authoritative and
   probe results apply only to byte-for-byte unchanged rows.
@@ -386,25 +427,30 @@ Full inventory, which the rejected revision did not enumerate:
   branch, and row** (the migration-derived equality regression); a stale null
   row whose path is reused by an unrelated live worktree is refused;
   successful same-name cleanup in repo A leaves repo B's worktree, branch,
-  and row intact; branch-scoped foreign lookup; exact-path priority when one
-  entry's name equals another's worktree path; exact-path cleanup from a
-  non-repository cwd; moved repository, moved-and-repaired linked worktree,
-  and deleted parent common directory; broken row among live rows, git
-  nonzero exit, `OSError` on process start, slow probe with another writer
-  waiting, reader during v1→v2 replacement; raw v1 bytes unchanged after
+  and row intact; branch-scoped foreign lookup; a token that is both a valid
+  fork name and a valid relative path resolves under the **existing**
+  creation-ordered precedence, unchanged by this work; exact-path cleanup from
+  a non-repository cwd; moved repository, moved-and-repaired linked worktree,
+  and deleted parent common directory; raw v1 bytes unchanged after
   `read_registry` and `list`; bare repository identity; linked-worktree
   identity; `find_owned` with a null invoking identity cannot match null rows.
-- The two decisive merge races, each asserting an **explicit expected final
-  registry document** — row count and exact identities, not just a spot
-  check: a row added under the lock while another writer was probing
-  **survives**; a row removed under the lock while another writer was probing
-  is **not resurrected**.
-- Removal ambiguity: two rows sharing a resolved worktree path, two rows
-  sharing name and worktree, and the same worktree stored under differing
-  spellings (symlinked, trailing separator) each refuse with
-  `cleanup_registry_ambiguous` **before** any worktree is removed.
+- **Selection ambiguity:** two or more rows claiming one target — sharing a
+  resolved worktree path, or sharing name and worktree, or the same worktree
+  stored under differing spellings (symlinked, trailing separator) — refuse
+  with `cleanup_registry_ambiguous` and destroy nothing. These assert on the
+  candidate *count*, not on record equality, which is what round 3 showed
+  full-record matching fails to detect.
+- **Transaction window:** the planned row is replaced by another writer
+  between consent and mutation → refuse, nothing destroyed; the planned row is
+  removed by another writer in that window → refuse, nothing destroyed; the
+  post-consent lock times out → `registry_busy`, nothing destroyed.
 - Moved repository: `cleanup` refuses with `cleanup_registry_mismatch` naming
-  both identities, and `--force` downgrades it to a notice and completes.
+  both the stored and the live identity, and **`--force` does not override
+  it** — the refusal stands and the row is A7's to repair.
+- **Every migration and concurrency test asserts the complete expected final
+  registry document** — row count and exact identities, not a spot check. This
+  applies to the whole inventory above, not only to the concurrency rows; the
+  round-2 outcome claimed it while the operative text scoped it to two tests.
 
 ### Slice D — documentation, matrix, full gate
 
