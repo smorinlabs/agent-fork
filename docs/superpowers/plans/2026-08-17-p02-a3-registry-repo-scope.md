@@ -3,10 +3,37 @@
 **Fault:** A3 — global flat fork registry clobbers across repositories
 ([P02 register](../../../projects/P02-agent-fork-fault-remediation.md)).
 
-**Status:** gates 1 and 3 closed. Gate 4 (adversarial plan review) ran four
-rounds, all rejecting; the loop was stopped by owner decision and the design
-reshaped around a single resolution rule rather than continuing to patch
-sites. Gates 5 and 6 open.
+**Status:** gates 1, 3, 4, and 5 closed. Gate 4 ran four rounds, all
+rejecting; the loop was stopped by owner decision and the design reshaped
+around a single resolution rule rather than continuing to patch sites. Gate 5
+(implementation) is complete: `just all` green at 430 passed, 1 skipped, and
+`check_matrix.py` clean. Gate 6 (adversarial implementation review) open.
+
+## Implementation outcome (gate 5)
+
+Four slices landed as planned, in `9a39690` (A and B), `d7e6060` (C), and
+`6470537` (D). Two things the implementation established that the plan did
+not, both recorded here rather than left in commit messages:
+
+- **`git worktree list` reports a hand-deleted worktree as `prunable`.** The
+  predicate initially accepted such a record, and cleanup then died on a raw
+  git error against the missing path — which is A7's registered symptom,
+  reproduced from inside A3's own fix. `live_worktree_pairs` now excludes
+  `prunable` and detached records, so "freshly observed" means present, not
+  merely listed. This turns A7's dead-end into a typed refusal as a side
+  effect.
+- **Migration costs less than the design assumed.** Because the predicate
+  consults live state and never the stored identity, a v1 record with no
+  repository is still cleanable from its own repository. The design expected
+  such records to be unusable until backfilled; they are not. T-REG-18 and
+  T-REG-19 prove both halves rather than asserting them.
+
+**One user-visible behavior change**, surfaced by an existing test that had
+relied on the old global lookup: `cleanup <name>` now requires the invoking
+directory to be inside the repository. A fork name is resolved against that
+repository, and outside one there is nothing to resolve against. Documented in
+`README.md`; `pty_run` gained a `cwd` argument so the consent-prompt test
+exercises the intended usage.
 
 **Worktree:** `worktree-p02-a3-registry-repo-scope`, based on `origin/main`
 at `aefcda0`.
