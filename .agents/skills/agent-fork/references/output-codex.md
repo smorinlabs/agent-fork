@@ -21,7 +21,7 @@ reconstruct a command from.
 
 Fork command — paste in a new terminal to fork this session in place:
 
-```
+```bash
 codex fork 11111111-1111-4111-8111-111111111111 -C /Users/dev/project
 ```
 
@@ -82,7 +82,7 @@ specifies.
 
 Continue in the fork — paste in a new terminal:
 
-```
+```bash
 codex fork 11111111-1111-4111-8111-111111111111 -C /Users/dev/project-fork-review-auth
 ```
 

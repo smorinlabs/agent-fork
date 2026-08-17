@@ -21,7 +21,7 @@ reconstruct a command from.
 
 Fork command — paste in a new terminal to fork this session in place:
 
-```
+```bash
 cd /Users/dev/project && claude --session-id 33333333-3333-4333-8333-333333333333 --resume 11111111-1111-4111-8111-111111111111 --fork-session
 ```
 
@@ -84,7 +84,7 @@ specifies.
 
 Continue in the fork — paste in a new terminal:
 
-```
+```bash
 cd /Users/dev/project-fork-review-auth && claude --session-id 33333333-3333-4333-8333-333333333333 --resume 11111111-1111-4111-8111-111111111111 --fork-session -n review-auth
 ```
 
