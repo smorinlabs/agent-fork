@@ -132,7 +132,7 @@ It now runs inward from live state:
 
 ```
 _worktrees(cwd)          → live (path, branch) pairs   ← input: the user's cwd
-_git_root(cwd)           → this repository's identity  ← input: the user's cwd
+inspect_repository(cwd)  → this repository's identity  ← input: the user's cwd
 find_owned(target)       → candidate row(s)            ← memory: what to look for
 CONFIRM each candidate against the live pairs          ← the predicate
 act only on what live enumeration confirmed
@@ -201,7 +201,47 @@ cause a redundant row, never a wrong deletion:
 | Bare repositories | Works if the helper reads the common directory directly; requiring `--show-toplevel` would regress bare support (`repository.py:105-115`) |
 | Moved repositories | Stored value goes stale. Harmless: the predicate governs destruction, and the safe backfill below repairs the field |
 | Mount aliases, case-aliased paths | Residual weakness; `Path.resolve()` handles symlinks, not every mount-level alias |
-| `GIT_DIR` / `GIT_COMMON_DIR` in the environment | Redirects identity. A2's territory (`git.py:63-80` forwards the environment unchanged); explicitly not duplicated here |
+| `GIT_DIR` / `GIT_COMMON_DIR` in the environment | **Empirically refuted as a threat, not deferred.** See the A2 note below |
+
+### Rebased on A2 (merged 2026-08-17, `ba34a74`, PR #36)
+
+A2 landed while this plan was in review and changed three things it assumed.
+Corrections, not refinements — the earlier text was wrong on each:
+
+- **The environment claim is refuted, not deferred.** This document twice said
+  `GIT_DIR` / `GIT_COMMON_DIR` redirection was "A2's territory". A2 probed 12
+  canonical inputs against the fork path **and the cleanup path**, with
+  controls and bystander comparison, and found **zero wrong-repository
+  mutations, zero wrong-target deletions, and zero silent divergences
+  attributable to agent-fork**. Where behavior did change, plain
+  `git worktree add` behaves identically. A3 therefore inherits no
+  outstanding environment risk and defers nothing to A2.
+- **`run_git` is no longer a raw passthrough.** It now calls
+  `without_config_injection(env)`, which strips the `GIT_CONFIG_COUNT` /
+  `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>` triple and
+  `GIT_CONFIG_PARAMETERS`. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` are
+  **deliberately preserved**, because they name configuration *files* — the
+  supported way tooling controls git, including this project's own harness.
+  Any statement in this document that `run_git` forwards the environment
+  unchanged is stale.
+- **Use `inspect_repository`, not a bespoke helper.** It returns a resolved
+  `common_dir`, resolves relative git paths against the probed parent, and
+  handles bare repositories by skipping `--show-toplevel`. The predicate's
+  fresh identification of the invoking repository uses it rather than
+  `cleanup.py`'s local `_git_root`, which duplicates a subset of it.
+
+**Gate-1 coverage note.** A2 also introduced a process rule this item predates:
+gate 1 is now *validation-first*, requiring an exhaustive probe matrix —
+every implicated input crossed with every affected operation — because A2's
+register entry proved overstated when probed. A3's gate 1 ran four targeted
+live-git probes, not a matrix. The exposure is asymmetric and worth stating
+plainly: A2 was **overstated** and probing shrank it, whereas A3's four probes
+each **reproduced**, and the Codex pass *raised* severity rather than lowering
+it. Overstatement is therefore not the live risk here; unprobed adjacent
+surface is. Specifically unprobed: registry behavior under concurrent forks in
+two repositories, and cleanup against a worktree moved by `git worktree move`.
+Both are covered by slice C's staleness matrix, which is where the matrix
+discipline lands for this item rather than retrofitting gate 1.
 
 ### Ambiguity and removal
 
