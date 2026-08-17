@@ -108,9 +108,9 @@ def run_setup_hook(
             [str(hook)], cwd=child, env=environment, capture_output=True, text=True
         )
     except OSError as error:
-        return (f"setup hook failed to start: {error}",)
+        return (f"setup hook failed to start: {escape_terminal_text(str(error))}",)
     if completed.returncode == 0:
         return ()
     detail = completed.stderr.strip() or completed.stdout.strip()
-    suffix = f": {detail}" if detail else ""
+    suffix = f": {escape_terminal_text(detail)}" if detail else ""
     return (f"setup hook failed (exit {completed.returncode}){suffix}",)
