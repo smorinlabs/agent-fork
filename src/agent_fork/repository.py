@@ -135,12 +135,40 @@ def live_worktree_pairs(
 ) -> frozenset[tuple[str, str]]:
     """Freshly observed (worktree path, branch) pairs for one repository.
 
-    This is the evidence the registry is checked against. Detached worktrees
-    are absent by construction: a fork always has a branch, so a row that
-    matches nothing here is not one of this repository's forks.
+    This is the evidence the registry is checked against. Two kinds of record
+    are deliberately excluded, because neither is a worktree that exists now:
+
+    - `prunable` entries, which Git still lists after the directory has been
+      deleted, until someone runs `git worktree prune`;
+    - detached entries, which have no branch. A fork always has one, so a row
+      matching nothing here is not one of this repository's forks.
     """
-    attached = _worktree_branches(parent, env=env)
-    return frozenset((str(path), branch) for branch, path in attached.items())
+    result = run_git(parent, ["worktree", "list", "--porcelain"], env=env)
+    pairs: set[tuple[str, str]] = set()
+    path: Path | None = None
+    branch: str | None = None
+    prunable = False
+
+    def flush() -> None:
+        if path is not None and branch is not None and not prunable:
+            pairs.add((str(path), branch))
+
+    for line in result.stdout.decode(errors="surrogateescape").splitlines() + [""]:
+        if line.startswith("worktree "):
+            flush()
+            path = Path(line.removeprefix("worktree ")).resolve()
+            branch = None
+            prunable = False
+        elif line.startswith("branch refs/heads/"):
+            branch = line.removeprefix("branch refs/heads/")
+        elif line.startswith("prunable"):
+            prunable = True
+        elif not line:
+            flush()
+            path = None
+            branch = None
+            prunable = False
+    return frozenset(pairs)
 
 
 _OPERATION_SENTINELS = {
