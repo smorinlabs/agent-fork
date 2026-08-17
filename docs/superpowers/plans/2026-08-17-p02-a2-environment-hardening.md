@@ -214,3 +214,63 @@ with `textconv` plus `diff.drv.binary = true`.
 
 **Deferred:** `core.bigFileThreshold` is a fourth route to binary treatment.
 Add it to the matrix only if the attribute axis shows the mechanism bites.
+
+## T1 results — run 2026-08-17
+
+**Phase 1 — `git diff --binary --no-color`, the exact command agent-fork runs.**
+
+| Content | A1 none | A2 `diff=drv` textconv | A3 `-diff` | A4 textconv + `binary=true` |
+|---|---|---|---|---|
+| C1 NUL bytes | binary-patch | **textconv text** | binary-patch | **textconv text** |
+| C2 high bytes, no NUL | text-diff | **textconv text** | binary-patch | **textconv text** |
+| C3 pure ASCII | text-diff | **textconv text** | binary-patch | **textconv text** |
+
+Two findings, both contradicting the documentation's framing:
+
+1. **`--binary` does not suppress textconv.** Every cell with a driver
+   produced textconv output despite `--binary` being passed.
+2. **Textconv is not limited to binary files.** Cell C3/A2 — a pure ASCII text
+   file — ran textconv. The documentation describes textconv as being for
+   "binary files", but the attribute governs, not the content. Exposure is
+   therefore any path with a `diff=<driver>` attribute, of any content type.
+
+**Phase 2 — full fork against a repository shipping a textconv driver.**
+
+Control (no driver) forks cleanly and the child receives the uncommitted work.
+The probe fails:
+
+```
+{"error":{"code":"runtime_error","message":"error: patch failed: doc.txt:1\nerror: doc.txt: patch does not apply"}}
+```
+
+Verdict: **the repository is unforkable.** Not corruption — parent untouched,
+worktree rolled back, safety intact. The defects are (a) total loss of
+function on affected repositories, and (b) an uncategorized `runtime_error`
+carrying raw Git output that never mentions `.gitattributes`, leaving the user
+no path to diagnosis.
+
+**T5 — candidate fix validated before design.** Appliability of the produced
+patch, tested by applying into a pristine clone:
+
+| Scenario | Today | With `--no-textconv --no-ext-diff` |
+|---|---|---|
+| textconv on text, textconv+binary, binary content, plain control | **1 of 4 apply** | **4 of 4 apply** |
+| same, plus a hostile `diff.external` configured | **0 of 4 apply** | **4 of 4 apply** |
+
+Two flags on the transport diffs resolve both mechanisms across every cell,
+and leave the unaffected control unchanged.
+
+**Harness correction.** An earlier run of T5 reported the fix as partial
+(2 of 4). That was a defect in the probe, not the fix: capturing a binary
+patch through shell command substitution silently strips NUL bytes
+(`warning: command substitution: ignored null byte in input`). Routing the
+patch through a file corrected it. Recorded because the false result was
+plausible and would have mis-scoped the fix.
+
+### What T1 settles
+
+- The transport defect is **real, reproducible, and repository-triggered**.
+- Severity is **loss of function**, not data loss — A1's rollback holds.
+- The fix is **two flags at three call sites**, validated ahead of design.
+- Priority within A2 inverts: this outranks every environment variable,
+  because it needs no hostile environment at all.
