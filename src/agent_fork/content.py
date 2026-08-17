@@ -177,20 +177,27 @@ def _manifest_difference(expected: ManifestEntry, actual: ManifestEntry) -> str 
 def compare_states(expected: CarriedState, actual: CarriedState) -> tuple[str, ...]:
     """Describe every way ``actual`` departs from ``expected``, most specific first."""
     differences: list[str] = []
-    missing = [path for path in expected.paths if path not in set(actual.paths)]
-    extra = [path for path in actual.paths if path not in set(expected.paths)]
-    differences.extend(f"{path}: no longer carried" for path in missing)
-    differences.extend(f"{path}: newly carried" for path in extra)
+    expected_paths = set(expected.paths)
+    actual_paths = set(actual.paths)
+    differences.extend(
+        f"{path}: no longer carried"
+        for path in expected.paths
+        if path not in actual_paths
+    )
+    differences.extend(
+        f"{path}: newly carried" for path in actual.paths if path not in expected_paths
+    )
 
+    expected_index = _index_map(expected)
     actual_index = _index_map(actual)
-    for key, entry in _index_map(expected).items():
+    for key, entry in expected_index.items():
         other = actual_index.get(key)
         if other is None:
             differences.append(f"{entry.path}: staged entry missing")
         elif (entry.mode, entry.oid) != (other.mode, other.oid):
             differences.append(f"{entry.path}: staged content differs")
     for key, entry in actual_index.items():
-        if key not in _index_map(expected):
+        if key not in expected_index:
             differences.append(f"{entry.path}: unexpected staged entry")
 
     actual_manifest = _manifest_map(actual)
