@@ -84,8 +84,9 @@ repository-controlled text raw).
   "copied and verified" promise. Proposed direction: content-hash rung in
   the ladder for staged/modified files + pin `apply.whitespace` on apply
   calls. Impact: high. Type: correctness fix. Spot-checked 2026-08-16.
-- **A2 — [~] LARGELY RESOLVED: environment claim refuted on the fork and
-  cleanup paths; four configuration defects found and fixed.** *(Second rewrite 2026-08-17, after probing all 13 canonical
+- **A2 — [x] RESOLVED: environment claim refuted on the fork and cleanup
+  paths; four configuration defects found and fixed. Unprobed configuration
+  sources are recorded as coverage gaps in issue #38.** *(Second rewrite 2026-08-17, after probing all 13 canonical
   inputs. Evidence: `docs/superpowers/plans/2026-08-17-p02-a2-environment-hardening.md`.)*
 
   **Original claim, refuted.** The entry asserted that forwarding `os.environ`
@@ -132,10 +133,17 @@ repository-controlled text raw).
   Impact: was high → medium → **resolved**. Type: correctness fixes, not the
   robustness/hardening the entry predicted.
 
-  **Open, and why A2 is `[~]` rather than `[x]`:** the unprobed configuration
-  sources above, and `GIT_ATTR_NOSYSTEM`, which could not be probed — this
-  machine has no system attributes file to suppress. A coverage gap, not a
-  known defect; tracked with the other coverage items in issue #31.
+  **Closed with named coverage gaps (issue #38), not with a claim of
+  completeness.** Unprobed: clean/smudge filters under the new plumbing
+  transport (the most plausible of the group, since filters caused real
+  divergence in A1 and the transport layer changed beneath them),
+  `extensions.worktreeConfig`, conditional `includeIf`, and `GIT_ATTR_NOSYSTEM`
+  — the last untestable on this machine for lack of a system attributes file.
+  Observed but not demonstrated: the setup hook runs after verification with an
+  inherited environment and can write shared repository configuration, and the
+  Codex app-server and agent version probes inherit unfiltered environments.
+  None is a suspected defect; each is listed so the gap is visible rather than
+  implied.
 
 - **A3 — Global flat fork registry clobbers across repositories.**
   One machine-wide `forks.json`; `RegistryEntry` (`models.py:53-75`) has no
@@ -263,7 +271,7 @@ A T task is skipped (flipped `[-]`) if its TS verdict is *refuted*.
 - [x] [P02-TS01] A1 adversarial verification (incl. Codex): reproduce status-preserving content divergence end to end — CONFIRMED-WITH-CORRECTIONS 2026-08-16: empirical repro (apply.whitespace=fix diverged child bytes, identical porcelain, `verification.passed: true`) + Codex pass confirming mechanism, repro fairness, in-scope verdict, and sibling vectors; see [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
 - [x] [P02-T01] A1 fix per process: plan + adversarial plan review (APPROVE-WITH-CHANGES), TDD implementation, adversarial post-review (REJECT → findings absorbed or routed to issues #28–#31 per the owner's gate-6 routing) — whitespace pinned at the transport site, carried-state inventory drives both transport and verification, `content-match`/`parent-content` rungs with structured `failed_checks`, escaped repository-controlled text; 22 A1 rows green, 405 passed; see the [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
 - [x] [P02-TS02] A2 validation-first probe matrix (incl. Codex) — all 13 canonical inputs probed against full forks with controls; environment claim refuted (zero wrong-repository mutations); register entry rewritten to match
-- [~] [P02-T02] A2 fix — three configuration defects found and fixed: porcelain transport replaced with plumbing (T-MAT-21..24), and inline configuration injection sanitized at the `run_git` chokepoint (issue #35, T-GRD-17..20). The pinning policy was retired as unnecessary on the evidence.
+- [x] [P02-T02] A2 fix — three configuration defects found and fixed: porcelain transport replaced with plumbing (T-MAT-21..24), and inline configuration injection sanitized at the `run_git` chokepoint (issue #35, T-GRD-17..20). The pinning policy was retired as unnecessary on the evidence.
 - [ ] [P02-T03] A3 fix per process (registry schema migration)
 - [ ] [P02-TS04] A4 adversarial verification (incl. Codex): recipe-drift blindness and post-fork failure demonstration
 - [ ] [P02-T04] A4 fix per process

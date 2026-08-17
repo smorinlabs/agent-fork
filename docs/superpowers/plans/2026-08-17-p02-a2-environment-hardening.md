@@ -790,3 +790,28 @@ Still inheriting unfiltered environments, with no demonstrated Git consequence:
 the Codex app-server, agent version probes, and the setup hook. The hook is the
 notable one — it runs after verification and may invoke Git itself. Recorded
 rather than fixed, since no defect has been demonstrated through it.
+
+## A2 closed — 2026-08-17
+
+Closed with **named coverage gaps rather than a claim of completeness**. The
+unprobed configuration sources, the untestable input, and the two observed-but-
+undemonstrated items are recorded in **issue #38**, which states plainly that
+none is a suspected defect.
+
+**What A2 delivered:** four configuration defects found and fixed — porcelain
+transport replaced with plumbing (closing both the unappliable-patch and
+empty-patch failure modes), and both inline configuration-injection channels
+sanitized, including the `GIT_CONFIG_PARAMETERS` channel the first fix missed.
+
+**What A2 refuted:** the founding claim that environment passthrough causes
+wrong-repository behavior. Twelve inputs across the fork path and the cleanup
+path, with controls and bystander-repository comparison, produced no
+wrong-repository mutation, no wrong-target deletion, and no silent divergence
+attributable to agent-fork.
+
+**What the process cost, and returned:** the register entry was rewritten twice,
+a two-part fix was reduced to one part, a "retired" pinning policy was
+downgraded to "not required by any observed defect", and four separate harness
+defects were caught before their false results could be reported. Two
+independent reviewers found real problems in work already called done — a hole
+in the fix, and a systematically overclaimed conclusion.
