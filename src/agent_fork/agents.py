@@ -72,6 +72,14 @@ CODEX_ENV_MIN = (0, 95, 0)
 # for these instead. T-PRE-26 keeps the lists in step with the renderer.
 CLAUDE_RECIPE_FLAGS = ("--session-id", "--resume", "--fork-session", "-n")
 CODEX_RECIPE_FLAGS = ("-C",)
+# Codex declares the recipe's flags on the `fork` subcommand, not the root, so
+# the two agents are probed with different argument tails. Diagnostics name the
+# tail that actually ran: for Codex, `codex --help` succeeds even when `fork`
+# is gone, so reporting it would point the reader at a working command.
+_HELP_ARGS: dict[str, tuple[str, ...]] = {
+    "claude": ("--help",),
+    "codex": ("fork", "--help"),
+}
 _VERSION = re.compile(r"(?<![\d.])(\d+)\.(\d+)(?:\.(\d+))?")
 _BIDI_CONTROLS = frozenset(
     {
@@ -140,6 +148,11 @@ def missing_recipe_flags(agent: AgentName, help_output: str) -> tuple[str, ...]:
     )
 
 
+def help_invocation(agent: AgentName) -> str:
+    """The help command as a reader would type it, for diagnostics."""
+    return " ".join((agent, *_HELP_ARGS[agent]))
+
+
 def read_help(agent: AgentName, binary: str, env: Mapping[str, str]) -> str | None:
     """Installed help text, or None when the capability is unverifiable.
 
@@ -151,7 +164,7 @@ def read_help(agent: AgentName, binary: str, env: Mapping[str, str]) -> str | No
     Replacing the bad bytes instead would be worse — unreadable output would
     then be probed as if it were help, and report every flag as removed.
     """
-    argv = [binary, "--help"] if agent == "claude" else [binary, "fork", "--help"]
+    argv = [binary, *_HELP_ARGS[agent]]
     try:
         completed = subprocess.run(
             argv, env=dict(env), capture_output=True, text=True, timeout=10
@@ -320,8 +333,8 @@ def preflight_agent(
         # indistinguishable from "verified", and would hide removal of the
         # Codex `fork` subcommand entirely, since that makes help unreadable.
         notices.append(
-            f"could not read {context.agent} --help, so the paste command's "
-            "flags are unverified; run agent-fork doctor"
+            f"could not read the output of {help_invocation(context.agent)}, so "
+            "the paste command's flags are unverified; run agent-fork doctor"
         )
     else:
         absent = missing_recipe_flags(context.agent, help_text)

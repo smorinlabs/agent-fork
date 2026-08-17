@@ -123,7 +123,20 @@ def test_unreadable_help_reports_unverified_not_supported(repo_scenario):
     )
     assert result.verify is True
     assert any("unverified" in notice for notice in result.notices)
+    assert any("claude --help" in notice for notice in result.notices)
     assert not any("no longer documents" in notice for notice in result.notices)
+
+
+@pytest.mark.matrix("T-PRE-29")
+def test_unverified_notice_names_the_command_that_actually_ran():
+    """Codex declares recipe flags on the subcommand, so `codex --help` is
+    the wrong thing to report: it still succeeds when `fork` is gone."""
+    from agent_fork.agents import _HELP_ARGS, help_invocation
+
+    assert help_invocation("claude") == "claude --help"
+    assert help_invocation("codex") == "codex fork --help"
+    for agent in ("claude", "codex"):
+        assert help_invocation(agent).split()[1:] == list(_HELP_ARGS[agent])
 
 
 @pytest.mark.matrix("T-PRE-27")

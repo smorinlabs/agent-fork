@@ -108,6 +108,7 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 | T-PRE-26 | A4(b) — rendered and declared recipe flags match exactly, so neither a new flag nor a stale declaration can drift | baseline | U | live | P02 A4; REQ-28 |
 | T-PRE-27 | A4(b) — deprecation prose naming a flag is not an option declaration and does not prove the flag survives | baseline | U | live | P02 A4; TS04 Codex review 3.1 |
 | T-PRE-28 | A4(b) — undecodable help bytes return the unverified state instead of raising out of a never-refuse probe | agent=claude | U | live | P02 A4; TS04 Codex review 3.2 |
+| T-PRE-29 | A4(b) — the unverified notice names the invocation that actually ran (`codex fork --help`, not `codex --help`) | baseline | U | live | P02 A4; PR #37 review |
 
 ---
 
