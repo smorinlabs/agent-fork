@@ -113,17 +113,14 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
     parent_status = run_git(
         request.parent, ["status", "--porcelain=v1", "-z"], env=env
     ).stdout
+    inventory = collect_inventory(
+        request.parent,
+        with_state=request.with_state,
+        with_ignored=request.with_ignored,
+        env=env,
+    )
     parent_state = (
-        capture_state(
-            request.parent,
-            collect_inventory(
-                request.parent,
-                with_state=request.with_state,
-                with_ignored=request.with_ignored,
-                env=env,
-            ),
-            env=env,
-        )
+        capture_state(request.parent, inventory, env=env)
         if request.verify and request.with_state
         else None
     )
@@ -137,6 +134,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             creation.path,
             with_state=request.with_state,
             with_ignored=request.with_ignored,
+            inventory=inventory,
             env=env,
         )
         notices.extend(materialized.notices)

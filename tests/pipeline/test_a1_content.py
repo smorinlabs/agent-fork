@@ -32,6 +32,7 @@ import subprocess
 from typing import cast
 
 import pytest
+from conftest import untracked
 
 
 def _git(world, repo, *args, input_bytes=None, check=True):
@@ -692,3 +693,43 @@ def test_failure_detail_is_structured_and_terminal_safe(repo_scenario):
     machine.encode("utf-8")
     payload = json.loads(machine)["error"]["details"]["failed_checks"]
     assert "\x1b" not in json.dumps(payload)
+
+
+@pytest.mark.matrix("T-VER-34")
+def test_pipeline_transports_the_pre_creation_inventory(repo_scenario, monkeypatch):
+    """(j) — the inventory resolved before the worktree exists is what gets carried.
+
+    The whole point of resolving once, up front, is that transport and
+    verification act on the same fixed set. An earlier revision built the
+    inventory and then failed to hand it to `materialize()`, which silently fell
+    back to re-enumerating after the worktree existed — restoring exactly the
+    transient-file window the design closes.
+
+    This asserts the wiring directly: `materialize()` receives an `inventory`
+    argument, and it is the same object the pipeline resolved before creation.
+    """
+    from agent_fork import pipeline as pipeline_module
+    from agent_fork.content import Inventory
+
+    world = repo_scenario(states=(untracked("loose.txt"),))
+    seen: dict[str, object] = {}
+    real_materialize = pipeline_module.materialize
+
+    def recording_materialize(parent, child, **kwargs):
+        seen["inventory"] = kwargs.get("inventory")
+        return real_materialize(parent, child, **kwargs)
+
+    monkeypatch.setattr(pipeline_module, "materialize", recording_materialize)
+
+    request = pipeline_module.ForkRequest(
+        parent=world.parent_path,
+        destination=world.parent_path.parent / "a1-wired",
+        name="wired",
+        branch="fork/a1-wired",
+        agent=None,
+    )
+    pipeline_module.fork(request, env=world.env)
+
+    carried = seen["inventory"]
+    assert isinstance(carried, Inventory), "materialize fell back to re-enumerating"
+    assert "loose.txt" in carried.untracked

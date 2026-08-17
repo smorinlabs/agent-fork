@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_fork.git import run_git
+from agent_fork.text import escape_terminal_text
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,10 @@ def copy_worktree_includes(
         source = parent / relative
         destination = (child / relative).resolve(strict=False)
         if child_root not in destination.parents:
-            notices.append(f"skipped unsafe .worktreeinclude path: {relative}")
+            notices.append(
+                f"skipped unsafe .worktreeinclude path: "
+                f"{escape_terminal_text(relative)}"
+            )
             continue
         if destination.exists() or destination.is_symlink():
             continue
@@ -74,7 +78,10 @@ def copy_worktree_includes(
         elif stat.S_ISREG(info.st_mode):
             shutil.copy2(source, destination, follow_symlinks=False)
         else:
-            notices.append(f"skipped unsupported .worktreeinclude path: {relative}")
+            notices.append(
+                f"skipped unsupported .worktreeinclude path: "
+                f"{escape_terminal_text(relative)}"
+            )
             continue
         copied.append(relative)
     return IncludeResult(tuple(copied), tuple(notices))

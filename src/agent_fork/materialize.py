@@ -11,6 +11,7 @@ from pathlib import Path
 
 from agent_fork.content import Inventory, collect_inventory
 from agent_fork.git import GitCommandError, run_git
+from agent_fork.text import escape_terminal_text
 
 
 class MaterializeError(RuntimeError):
@@ -57,7 +58,9 @@ def _copy_entry(parent: Path, child: Path, relative: str) -> None:
         shutil.copyfile(source, destination, follow_symlinks=False)
         os.chmod(destination, stat.S_IMODE(info.st_mode), follow_symlinks=False)
     else:
-        raise MaterializeError(f"unsupported untracked file type: {relative}")
+        raise MaterializeError(
+            f"unsupported untracked file type: {escape_terminal_text(relative)}"
+        )
 
 
 def _apply_patch(
@@ -102,7 +105,8 @@ def _submodule_notices(
             paths.append(os.fsdecode(record.split(b"\t", 1)[1]))
     if not paths:
         return ()
-    return (f"submodules copied opaquely: {', '.join(sorted(paths))}",)
+    listed = ", ".join(escape_terminal_text(path) for path in sorted(paths))
+    return (f"submodules copied opaquely: {listed}",)
 
 
 def materialize(
