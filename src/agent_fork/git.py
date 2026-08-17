@@ -13,6 +13,34 @@ from pathlib import Path
 PRODUCT_GIT_MIN = (2, 19, 0)
 _ACTIVE = threading.local()
 
+_INJECTED_CONFIG_NAMES = frozenset({"GIT_CONFIG_COUNT"})
+_INJECTED_CONFIG_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+
+
+def _without_config_injection(env: Mapping[str, str] | None) -> dict[str, str]:
+    """Drop inline Git configuration injected through the environment.
+
+    `GIT_CONFIG_COUNT` with `GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>` adds
+    settings that outrank every configuration file, so an injected value
+    silently overrides what the repository and the user actually configured.
+    Nothing in this tool needs that, and it has produced at least one real
+    divergence: injected `core.symlinks=false` turned a committed symlink into
+    a regular file in the child worktree.
+
+    `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` are deliberately preserved.
+    They name configuration *files*, which is how tooling — including this
+    project's own test harness — deliberately controls Git; discarding them
+    would amount to ignoring the user's configuration rather than protecting
+    it.
+    """
+    source = os.environ if env is None else env
+    return {
+        name: value
+        for name, value in source.items()
+        if name not in _INJECTED_CONFIG_NAMES
+        and not name.startswith(_INJECTED_CONFIG_PREFIXES)
+    }
+
 
 def _signal_process_group(
     process: subprocess.Popen[bytes], signum: signal.Signals
@@ -72,7 +100,7 @@ def run_git(
     command = ("git", "-C", str(cwd), *args)
     process = subprocess.Popen(
         command,
-        env=dict(env) if env is not None else None,
+        env=_without_config_injection(env),
         stdin=subprocess.PIPE if input_bytes is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

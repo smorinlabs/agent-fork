@@ -557,3 +557,63 @@ fork time.
 problem has come from *configuration or attributes*. A2's fix is therefore
 converging on a pinning policy — now with C1's evidence that the mechanism
 works and C3's evidence that it must cover `worktree add`, not only transport.
+
+## Fix for issue #35 — and one half of it dropped after probing
+
+**Recommended:** (1) strip inline configuration injection at the `run_git`
+chokepoint; (2) pass the parent's effective checkout-affecting values to
+`worktree add`.
+
+**Shipped: part 1 only.** Part 2 was dropped, and part 1's scope was corrected,
+both because probing contradicted the proposal.
+
+### Correction to part 1 — what may be stripped
+
+The proposal named `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` among the
+variables to remove. **That would have broken the test suite**:
+`tests/conftest.py:854` sets `GIT_CONFIG_GLOBAL` to seal every test's
+configuration, so stripping it would make each sealed test fall back to the
+real `~/.gitconfig`.
+
+The distinction that matters is not "environment versus file" but *what the
+variable does*:
+
+| Variable | Nature | Decision |
+|---|---|---|
+| `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>` | inline values that outrank every configuration file | **strip** — no legitimate use in this tool's subprocesses |
+| `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` | pointers to configuration *files* | **keep** — this is how tooling deliberately controls Git; removing them ignores user configuration rather than protecting it |
+
+### Part 2 dropped — agent-fork already matches plain Git
+
+Part 2 addressed file-based configuration drift: a parent checked out under one
+setting, then the setting changed, then a fork. Probed against plain Git as the
+control:
+
+| Under repository-local `core.symlinks=false` | Committed symlink in the new worktree |
+|---|---|
+| `git worktree add` | regular file |
+| `agent-fork fork` | regular file |
+
+They agree. Agent-fork is honouring the user's own explicit configuration, and
+a fresh checkout legitimately differs from a stale parent. Implementing part 2
+would have meant overriding a deliberate user setting *and* diverging from the
+behavior of the command agent-fork wraps — worse than the problem.
+
+**This is the second time in A2 that a proposed fix half was removed by
+probing** (the first was `--no-textconv --no-ext-diff`, superseded by plumbing).
+The pattern argues for keeping the validation gate ahead of design, not just
+ahead of implementation.
+
+### Result
+
+One change, in `git.py`: `_without_config_injection` filters the injection
+triple out of the environment handed to every Git subprocess. When `env` is
+`None` the filter is applied to `os.environ`, so inheriting callers are covered
+too.
+
+`T-GRD-17` reproduces issue #35 and was observed RED. `T-GRD-18` asserts
+transport is defended independently of A1's per-call pin. `T-GRD-19` and
+`T-GRD-20` are regression guards against over-stripping — file pointers still
+honoured, repository-local configuration still applied.
+
+**Gates:** 418 passed, 1 skipped; lint, typecheck, matrix clean.

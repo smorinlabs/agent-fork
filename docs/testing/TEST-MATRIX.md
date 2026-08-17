@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 231 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 235 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -128,6 +128,10 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-14 | race loss — shim-barrier parks run A between guard-pass and `worktree add`; B completes first; A released → A exits 5, conflict_branch_exists, nothing left | baseline | F | live | REQ-11 (A1); spec §6.6 |
 | T-GRD-15 | issue #32 — the `conflict_branch_worktree` refusal escapes the attached worktree path, so a hostile directory name cannot drive the terminal | baseline | F | live | issue #32 |
 | T-GRD-16 | issue #32 — the `unmerged_index` refusal escapes conflicted filenames | baseline | F | live | issue #32 |
+| T-GRD-17 | issue #35 — injected `core.symlinks=false` cannot flatten a committed symlink in the child; the path is unmodified so no verification rung covers it | baseline | F | live | issue #35; A2 design doc §C3 |
+| T-GRD-18 | A2 — injected `apply.whitespace=fix` cannot rewrite transported content, independently of A1's per-call pin | baseline | F | live | A2 design doc §C1 |
+| T-GRD-19 | A2 guard — `GIT_CONFIG_GLOBAL` file pointers stay honoured; sanitization must not silently unseal configuration | baseline | F | live | A2 design doc §C1 |
+| T-GRD-20 | A2 guard — repository-local configuration still applies; sanitization targets inline injection only | baseline | F | live | A2 design doc §C2 |
 
 ---
 
