@@ -28,12 +28,16 @@ class DoctorCheck:
     detail: str
 
 
-def _recipe_flag_check(env: Mapping[str, str]) -> DoctorCheck:
+def _recipe_flag_check(env: Mapping[str, str], selected: str) -> DoctorCheck:
     """A4: report recipe flags the installed CLIs no longer document.
 
     This is where both preflight notices send the user, so it must actually
     answer the question they were warned about. An absent CLI or unreadable
-    help is not evidence of drift and is reported as a skip, not a failure.
+    help is not evidence of drift and is reported as unverified, not failure.
+
+    Only the selected agent's drift can fail the check. An unused CLI that
+    happens to be installed must not fail an otherwise healthy diagnosis,
+    matching how the version checks are made optional below.
     """
     name = "agent recipe flags"
     details: list[str] = []
@@ -45,14 +49,15 @@ def _recipe_flag_check(env: Mapping[str, str]) -> DoctorCheck:
             continue
         help_output = read_help(agent, binary, env)
         if help_output is None:
-            details.append(f"{agent}: help unreadable (skipped)")
+            details.append(f"{agent}: help unreadable (unverified)")
             continue
         absent = missing_recipe_flags(agent, help_output)
-        if absent:
-            drifted = True
-            details.append(f"{agent}: undocumented {', '.join(absent)}")
-        else:
+        if not absent:
             details.append(f"{agent}: {len(recipe_flags(agent))} documented")
+            continue
+        scope = "" if agent == selected else " (unselected)"
+        drifted = drifted or agent == selected
+        details.append(f"{agent}: undocumented {', '.join(absent)}{scope}")
     return DoctorCheck(name, not drifted, "; ".join(details))
 
 
@@ -101,7 +106,6 @@ def run_doctor(
         CODEX_ENV_MIN,
         env,
     )
-    recipes = _recipe_flag_check(env)
     try:
         resolved = resolve_discovered_config(cwd, env)
         selected_mode = agent_mode or resolved.agent_mode
@@ -127,6 +131,7 @@ def run_doctor(
         if claude_signal
         else "codex"
     )
+    recipes = _recipe_flag_check(env, selected)
     signals = DoctorCheck(
         "environment signals",
         signals_ok,

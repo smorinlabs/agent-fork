@@ -109,8 +109,8 @@ def test_codex_recipe_flag_probe_detects_absent_cd_flag():
 
 
 @pytest.mark.matrix("T-PRE-25")
-def test_unreadable_help_output_stays_silent(repo_scenario):
-    """Unreadable help is not evidence either way — no notice."""
+def test_unreadable_help_reports_unverified_not_supported(repo_scenario):
+    """Third state: no evidence must not read as verified support."""
     from agent_fork.agents import preflight_agent
 
     world = repo_scenario()
@@ -121,7 +121,39 @@ def test_unreadable_help_output_stays_silent(repo_scenario):
         version_output="2.1.233 (Claude Code)",
         help_output="",
     )
-    assert not any("--fork-session" in notice for notice in result.notices)
+    assert result.verify is True
+    assert any("unverified" in notice for notice in result.notices)
+    assert not any("no longer documents" in notice for notice in result.notices)
+
+
+@pytest.mark.matrix("T-PRE-27")
+def test_removal_prose_does_not_prove_a_flag_survives():
+    """Prose mentioning a flag is not an option declaration."""
+    from agent_fork.agents import missing_recipe_flags
+
+    prose = "This option replaces --fork-session; use --resume and --session-id."
+    assert set(missing_recipe_flags("claude", prose)) == {
+        "--session-id",
+        "--resume",
+        "--fork-session",
+        "-n",
+    }
+    assert missing_recipe_flags("codex", "The old -C flag is no longer supported.") == (
+        "-C",
+    )
+
+
+@pytest.mark.matrix("T-PRE-28")
+def test_undecodable_help_never_raises_out_of_the_probe(tmp_path):
+    """`never refuse` must hold for undecodable bytes, not just clean output."""
+    import os
+
+    from agent_fork.agents import read_help
+
+    stub = tmp_path / "claude"
+    stub.write_text('#!/bin/sh\nprintf "\\377"\n')
+    stub.chmod(0o755)
+    assert read_help("claude", str(stub), dict(os.environ)) is None
 
 
 @pytest.mark.matrix("T-PRE-26")
@@ -139,4 +171,7 @@ def test_declared_recipe_flags_cover_every_rendered_flag():
         rendered = set(re.findall(r"(?<!\S)-{1,2}[A-Za-z][\w-]*", launch.command))
         declared = set(recipe_flags(agent))
         assert rendered, f"no flags rendered for {agent}"
-        assert rendered <= declared, f"{agent}: {rendered - declared} not declared"
+        # Equality, not subset: a subset check lets a declared flag go stale
+        # after the renderer stops emitting it, leaving the probe guarding a
+        # flag the recipe no longer uses.
+        assert rendered == declared, f"{agent}: {rendered ^ declared} out of step"

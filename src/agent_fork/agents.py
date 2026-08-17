@@ -114,27 +114,49 @@ def recipe_flags(agent: AgentName) -> tuple[str, ...]:
     return CLAUDE_RECIPE_FLAGS if agent == "claude" else CODEX_RECIPE_FLAGS
 
 
+def option_declarations(help_output: str) -> str:
+    """The option-declaration part of each help line, description stripped.
+
+    A bare token search treats prose as evidence: "this replaces
+    --fork-session" would prove the flag still exists. Both CLIs declare
+    options at the start of a line and separate the description with two or
+    more spaces, so only that leading part counts.
+    """
+    declarations = []
+    for line in help_output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("-"):
+            declarations.append(re.split(r"\s{2,}", stripped, maxsplit=1)[0])
+    return "\n".join(declarations)
+
+
 def missing_recipe_flags(agent: AgentName, help_output: str) -> tuple[str, ...]:
     """Recipe flags absent from `help_output`, in declared order."""
+    declared = option_declarations(help_output)
     return tuple(
         flag
         for flag in recipe_flags(agent)
-        if re.search(rf"(?<![\w-]){re.escape(flag)}(?![\w-])", help_output) is None
+        if re.search(rf"(?<![\w-]){re.escape(flag)}(?![\w-])", declared) is None
     )
 
 
 def read_help(agent: AgentName, binary: str, env: Mapping[str, str]) -> str | None:
-    """Installed help text, or None when it cannot be read.
+    """Installed help text, or None when the capability is unverifiable.
 
-    Unreadable help is not evidence that a flag is gone, so callers stay
-    silent on None rather than warning on a transient failure.
+    None is a third state, distinct from "flag present" and "flag absent":
+    it means no evidence either way, which callers report rather than
+    silently treat as success. Undecodable bytes land in that state too:
+    `text=True` decodes inside `subprocess.run`, so UnicodeDecodeError must
+    be caught here or it escapes a mechanism that promises never to refuse.
+    Replacing the bad bytes instead would be worse — unreadable output would
+    then be probed as if it were help, and report every flag as removed.
     """
     argv = [binary, "--help"] if agent == "claude" else [binary, "fork", "--help"]
     try:
         completed = subprocess.run(
             argv, env=dict(env), capture_output=True, text=True, timeout=10
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
         return None
     if completed.returncode != 0:
         return None
@@ -190,6 +212,12 @@ def preflight_agent(
                 f"detected {context.agent} CLI at {binary}, but --version failed"
             )
         version_output = completed.stdout or completed.stderr
+        # Ambiguity can straddle the streams: a CLI may print its version on
+        # stdout and an updater banner on stderr, so count tokens across both
+        # even though only one stream is parsed.
+        token_source = f"{completed.stdout}\n{completed.stderr}"
+    else:
+        token_source = version_output
     try:
         version = parse_version(version_output)
     except ValueError as error:
@@ -198,7 +226,7 @@ def preflight_agent(
         ) from error
 
     notices: list[str] = []
-    tokens = version_tokens(version_output)
+    tokens = version_tokens(token_source)
     # A misparse is most damaging when it causes a floor refusal, and an
     # exception discards `notices` — so the refusals carry the hint too.
     hint = (
@@ -287,7 +315,15 @@ def preflight_agent(
         if help_output is not None
         else read_help(context.agent, binary, env)
     )
-    if help_text:
+    if not help_text:
+        # Third state: unverified. Silence here would make "no evidence"
+        # indistinguishable from "verified", and would hide removal of the
+        # Codex `fork` subcommand entirely, since that makes help unreadable.
+        notices.append(
+            f"could not read {context.agent} --help, so the paste command's "
+            "flags are unverified; run agent-fork doctor"
+        )
+    else:
         absent = missing_recipe_flags(context.agent, help_text)
         if absent:
             notices.append(

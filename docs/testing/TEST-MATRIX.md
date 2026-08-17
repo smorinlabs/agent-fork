@@ -102,10 +102,12 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 | T-PRE-10 | D14 — nothing is created (no worktree, no branch) on any preflight refusal | baseline | F | live | DESIGN-DECISIONS D14; REQ-29 |
 | T-PRE-21 | A4(a) — version output carrying two version-like tokens warns as ambiguous and names the tuple it read | agent=claude | U | live | P02 A4; REQ-27 |
 | T-PRE-22 | A4(a) — a single version token emits no ambiguity notice | agent=claude | U | live | P02 A4; REQ-27 |
-| T-PRE-23 | A4(b) — help lacking a recipe flag warns before mutation and proceeds, never refuses | agent=claude | U | live | P02 A4; REQ-28 |
+| T-PRE-23 | A4(b) — help lacking a recipe flag adds a notice and proceeds, never refuses (detection is pre-mutation; the notice is rendered with the fork result) | agent=claude | U | live | P02 A4; REQ-28 |
 | T-PRE-24 | A4(b) — recipe-flag probe is case-sensitive: `-c, --config` does not satisfy `-C` | agent=codex | U | live | P02 A4; REQ-28 |
-| T-PRE-25 | A4(b) — unreadable help emits no notice (absence of evidence is not evidence of removal) | agent=claude | U | live | P02 A4; REQ-28 |
-| T-PRE-26 | A4(b) — every flag the renderer emits is declared in the probe's flag list (guards list-vs-recipe drift) | baseline | U | live | P02 A4; REQ-28 |
+| T-PRE-25 | A4(b) — unreadable help reports the third state (unverified), never silence that reads as verified support | agent=claude | U | live | P02 A4; REQ-28 |
+| T-PRE-26 | A4(b) — rendered and declared recipe flags match exactly, so neither a new flag nor a stale declaration can drift | baseline | U | live | P02 A4; REQ-28 |
+| T-PRE-27 | A4(b) — deprecation prose naming a flag is not an option declaration and does not prove the flag survives | baseline | U | live | P02 A4; TS04 Codex review 3.1 |
+| T-PRE-28 | A4(b) — undecodable help bytes return the unverified state instead of raising out of a never-refuse probe | agent=claude | U | live | P02 A4; TS04 Codex review 3.2 |
 
 ---
 
@@ -477,7 +479,8 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-22 | `--no-agent` conflicts with explicit agent/session inputs | baseline | C | live | REQ-45; D16 |
 | T-CLI-23 | a real fork outside an agent succeeds in default auto mode as Git-only | baseline | C | live | REQ-45; D16 |
 | T-CLI-24 | help, positive/negative flag spelling, and dotted config set/get expose the Codex-specific control | agent=codex | C | live | REQ-46; D17 |
-| T-CLI-25 | A4 — `doctor` reports recipe-flag coverage per installed CLI, the destination both preflight notices name | baseline | C | live | P02 A4; REQ-28 |
+| T-CLI-25 | A4 — `doctor` reports recipe-flag coverage for both installed CLIs, the destination both preflight notices name | baseline | C | live | P02 A4; REQ-28 |
+| T-CLI-26 | A4 — recipe drift fails `doctor` only for the selected agent; an unselected CLI's drift is reported without changing exit status | baseline | C | live | P02 A4; TS04 Codex review 3.4 |
 
 ---
 
