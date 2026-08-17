@@ -600,9 +600,8 @@ def test_verification_hashes_each_carried_file_once_per_snapshot(
     Measured for reference on a 201-entry carried set: 1.08s representative,
     1.89s with --with-ignored over 2000 ignored files (REQ-40 budget ~2s).
     """
-    from conftest import untracked
-
     from agent_fork import content
+    from conftest import untracked
 
     states = tuple(untracked(f"loose{index}.txt") for index in range(5))
     world, creation, before = _fork(repo_scenario, "cost", states=states)
