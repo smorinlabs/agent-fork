@@ -9,6 +9,7 @@ from pathlib import Path
 
 from agent_fork.errors import PreconditionError
 from agent_fork.git import GitCommandError, run_git
+from agent_fork.text import escape_terminal_text
 
 
 @dataclass(frozen=True)
@@ -241,7 +242,8 @@ def validate_fork_guards(
     if branch in attached:
         raise PreconditionError(
             "conflict_branch_worktree",
-            f"branch {branch!r} already has a worktree at {attached[branch]}",
+            f"branch {branch!r} already has a worktree at "
+            f"{escape_terminal_text(str(attached[branch]))}",
         )
     branch_probe = run_git(
         info.parent_path,
@@ -281,7 +283,7 @@ def validate_fork_guards(
         if b"\t" in record:
             paths.add(os.fsdecode(record.split(b"\t", 1)[1]))
     if paths:
-        rendered = ", ".join(sorted(paths))
+        rendered = ", ".join(escape_terminal_text(path) for path in sorted(paths))
         raise PreconditionError(
             "unmerged_index",
             f"unmerged index paths: {rendered}; resolve conflicts and re-run",
