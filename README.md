@@ -32,8 +32,6 @@ From inside your agent session:
 /agent-fork try-redis       # fork without leaving the conversation
 ```
 
-(Codex spells the same skill `$agent-fork`; everything else is identical.)
-
 The skill previews the fork — target branch, destination worktree, the files it
 would carry — and asks for confirmation before creating anything. It drives the
 CLI below, which works directly from a terminal too:
