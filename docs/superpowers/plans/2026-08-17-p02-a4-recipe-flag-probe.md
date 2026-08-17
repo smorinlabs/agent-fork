@@ -120,9 +120,10 @@ that subcommand carries the help being read.
 | T-PRE-26 | rendered and declared flags match exactly, both directions |
 | T-PRE-27 | deprecation prose is not an option declaration |
 | T-PRE-28 | undecodable bytes return unverified instead of raising |
+| T-PRE-29 | the unverified notice names the invocation that actually ran |
 | T-CLI-25/26 | `doctor` reports coverage; drift fails only for the selected agent |
 
-`just all`: 424 passed, 1 skipped. `just check-matrix` clean. Verified
+`just all` at merge: 430 passed, 1 skipped. `just check-matrix` clean. Verified
 end-to-end against the real CLIs: `agent recipe flags: claude: 4 documented;
 codex: 1 documented`.
 
@@ -144,8 +145,25 @@ These were raised by the TS04 review, are real, and are **not** fixed here:
    ambiguous version.
 3. Derive the renderer and the probe's expectations from one structured
    option declaration, replacing the hardcoded list plus equality test.
-4. Bound version tokens on the right if four-component versions are
-   unsupported; `release 2.1.234.5` currently reads as `2.1.234`.
+4. Four-component version strings truncate: `2.1.233.4` reads as `2.1.233`.
+   Raised independently by the TS04 Codex review and by CodeRabbit on PR #37
+   (as Major), the latter proposing a trailing `(?![\d.])` guard on
+   `_VERSION`. **That fix is refused, with evidence.** `parse_version` is
+   shared with `preflight_git` and `doctor`'s git check, and the guard makes
+   real strings unparseable rather than truncated:
+
+   | input | current | proposed |
+   |---|---|---|
+   | `git version 2.19.0.windows.1` | `(2, 19, 0)` | **no match → refusal** |
+   | `2.1.233.4` | `(2, 1, 233)` | **no match → refusal** |
+   | `git version 2.50.1` | `(2, 50, 1)` | `(2, 50, 1)` |
+   | `2.1.234 (Claude Code)` | `(2, 1, 234)` | `(2, 1, 234)` |
+
+   For a genuine four-component version, taking the first three components is
+   the *desired* reading; the guard converts a benign truncation into a hard
+   refusal for Windows git. Any future work here must distinguish "a real
+   4-part version" from "unrelated dotted numeric text" — which is the
+   ambiguity notice's job, already shipped — rather than reject both.
 5. Both new `subprocess.run` call sites pass the caller environment
    unsanitized via `env=dict(env)`. A2 has since merged (`ba34a74`) and
    **closed**, shipping `without_config_injection()` in `git.py`, which
