@@ -16,6 +16,7 @@ from agent_fork.agents import (
     preflight_agent,
     preflight_git,
 )
+from agent_fork.content import capture_state, collect_inventory
 from agent_fork.git import run_git
 from agent_fork.include import copy_worktree_includes, run_setup_hook
 from agent_fork.lineage import LineageClaim, add_lineage
@@ -112,6 +113,20 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
     parent_status = run_git(
         request.parent, ["status", "--porcelain=v1", "-z"], env=env
     ).stdout
+    parent_state = (
+        capture_state(
+            request.parent,
+            collect_inventory(
+                request.parent,
+                with_state=request.with_state,
+                with_ignored=request.with_ignored,
+                env=env,
+            ),
+            env=env,
+        )
+        if request.verify and request.with_state
+        else None
+    )
     creation = create_worktree_at_anchor(
         request.parent, request.branch, request.destination, env=env
     )
@@ -131,6 +146,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                 with_state=request.with_state,
                 with_ignored=request.with_ignored,
                 parent_status_before=parent_status,
+                parent_state_before=parent_state,
                 env=env,
             )
         included = copy_worktree_includes(request.parent, creation.path, env=env)

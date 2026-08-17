@@ -1,18 +1,22 @@
 """G-VER — A1 content-level fork verification.
 
 Design: docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md
-(Implementation plan steps 1-2 only; production code is untouched here).
 
-Today's verify ladder (`agent_fork.verify.verify_fork`) compares only
-`git status --porcelain=v1 -z` bytes. Content mutations that preserve
-porcelain shape pass verification undetected. Negative fixtures below prove
-that gap for each sibling vector identified in the design doc's verification
-verdict, then assert the future `content-match` / `parent-content` rungs
-must fail and roll the fork back. They are RED today by construction: no
-rung with those labels exists yet (step 3 pins `--whitespace=nowarn`, step 4
-implements the rungs). Positive guards prove the inverse — these forks must
-verify cleanly today AND after step 4 lands, so the new rungs never produce
-a false rollback.
+Before A1, `agent_fork.verify.verify_fork` compared only
+`git status --porcelain=v1 -z` bytes, so content mutations that preserved
+porcelain shape passed verification undetected. Each negative fixture below
+pins one such vector: it asserts the same-porcelain precondition first —
+proving the divergence is invisible to the `exact-copy-status` rung — and
+then asserts that the `content-match` or `parent-content` rung fails and
+rolls the fork back. Every one of them was RED before the rungs existed;
+that state is preserved in the commit that introduced this file.
+
+The exception is T-VER-12, whose vector is closed at the source by
+`_apply_patch()`'s pinned `--whitespace=nowarn` rather than caught
+downstream, so it is a faithful-transport guard instead.
+
+Positive guards prove the inverse: these forks verify cleanly both before and
+after the rungs landed, so the new comparison never produces a false rollback.
 
 Hostile config for the negative fixtures is applied repo-locally on top of
 the sealed environment's parent repo (`git config <key> <value>` inside the
@@ -44,10 +48,21 @@ def _status(world, repo):
 
 
 def _create_and_materialize(world, name, *, with_state=True, with_ignored=False):
+    from agent_fork.content import capture_state, collect_inventory
     from agent_fork.materialize import materialize
     from agent_fork.repository import create_worktree_at_anchor
 
     before = _status(world, world.parent_path)
+    world.parent_state_before = capture_state(
+        world.parent_path,
+        collect_inventory(
+            world.parent_path,
+            with_state=with_state,
+            with_ignored=with_ignored,
+            env=world.env,
+        ),
+        env=world.env,
+    )
     child = world.parent_path.parent / f"a1-{name}"
     creation = create_worktree_at_anchor(
         world.parent_path, f"fork/a1-{name}", child, env=world.env
@@ -82,6 +97,7 @@ def _verify(world, creation, before, *, with_state=True, with_ignored=False):
         with_state=with_state,
         with_ignored=with_ignored,
         parent_status_before=before,
+        parent_state_before=getattr(world, "parent_state_before", None),
         env=world.env,
     )
 
@@ -140,7 +156,9 @@ def test_apply_whitespace_fix_cannot_rewrite_transported_hunk(repo_scenario):
 
     creation, before = _create_and_materialize(world, "ws")
 
-    assert (world.parent_path / "tracked.txt").read_bytes() == b"line one   \nline two\n"
+    assert (
+        world.parent_path / "tracked.txt"
+    ).read_bytes() == b"line one   \nline two\n"
     assert (world.child_path / "tracked.txt").read_bytes() == b"line one   \nline two\n"
     assert _status(world, world.parent_path) == _status(world, world.child_path)
 
@@ -168,7 +186,9 @@ def test_negative_idempotent_clean_filter_diverges_raw_bytes(repo_scenario):
     """
     world = repo_scenario()
     (world.parent_path / ".gitattributes").write_text("staged.txt filter=trimws\n")
-    _git(world, world.parent_path, "config", "filter.trimws.clean", r"sed 's/[ \t]*$//'")
+    _git(
+        world, world.parent_path, "config", "filter.trimws.clean", r"sed 's/[ \t]*$//'"
+    )
     _git(world, world.parent_path, "config", "filter.trimws.smudge", "cat")
     _git(world, world.parent_path, "add", ".gitattributes")
     _git(world, world.parent_path, "commit", "-m", "configure filter")
@@ -234,9 +254,7 @@ def test_negative_staged_index_blob_diverges_post_transport(repo_scenario):
         repo_scenario, "staged-idx", states=(staged(add="staged.txt"),)
     )
 
-    parent_blob = _git(
-        world, world.parent_path, "rev-parse", ":staged.txt"
-    ).stdout
+    parent_blob = _git(world, world.parent_path, "rev-parse", ":staged.txt").stdout
     (world.child_path / "staged.txt").write_bytes(b"different content\n")
     _git(world, world.child_path, "add", "staged.txt")
     child_blob = _git(world, world.child_path, "rev-parse", ":staged.txt").stdout
@@ -268,7 +286,9 @@ def test_negative_parent_working_tree_edit_after_materialize(repo_scenario):
     assert (world.child_path / "tracked.txt").read_bytes() == b"unstaged\n"
     (world.parent_path / "tracked.txt").write_bytes(b"unstaged two\n")
 
-    assert _status(world, world.parent_path) == before  # parent-untouched (porcelain) still passes
+    assert (
+        _status(world, world.parent_path) == before
+    )  # parent-untouched (porcelain) still passes
 
     _assert_rolls_back(world, creation, before, match="parent-content")
 
@@ -302,7 +322,9 @@ def test_negative_parent_index_swap_after_materialize_mm_path(repo_scenario):
     _git(world, world.parent_path, "add", "tracked.txt")
     (world.parent_path / "tracked.txt").write_bytes(b"unstaged\n")
 
-    assert _status(world, world.parent_path) == before  # parent-untouched (porcelain) still passes
+    assert (
+        _status(world, world.parent_path) == before
+    )  # parent-untouched (porcelain) still passes
 
     _assert_rolls_back(world, creation, before, match="parent-content")
 
