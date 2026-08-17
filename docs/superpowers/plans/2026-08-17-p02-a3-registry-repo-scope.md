@@ -141,10 +141,68 @@ identity, new `list` filters, stale-entry repair or pruning (A7),
 reconstruction of already-clobbered rows, A2's environment hardening, and
 A8's TOCTOU redesign.
 
-**Open owner decision:** whether the auto-name collision check should
-consult the registry — see the note in the P02 register. Recorded before
-gate 4 opens.
+**Owner decisions (2026-08-17).** Both settled before gate 4 opened:
+
+1. **Auto-naming is left untouched.** The register lists "auto-name collision
+   check never consults the registry" as part of A3. Once uniqueness is
+   `(repository, name)`, two repositories each holding a fork named
+   `main-0817` is *correct* and nothing is lost, so the bullet is recorded as
+   over-broad rather than left unfixed. Consulting the registry would impose
+   an artificial machine-wide namespace and suffix names across unrelated
+   repositories.
+2. **`list` is left unchanged** — global, unfiltered, public JSON pinned at
+   `"version": 1`.
+
+**New error code.** `cleanup_foreign_repository`, exit 5, "cleanup target
+belongs to another repository" — matching the existing `cleanup_*` refusal
+family in `errors.py:33-47`, all of which refuse before an unsafe mutation.
+The publishable-tier error catalog (REQ-38 / R7.12) is updated with it.
 
 ## Implementation plan (TDD; subagent-driven)
 
-Pending the open owner decision above.
+Failing tests land before each behavior change. Steps 2–6 are sequential —
+each depends on the previous type or signature.
+
+1. **Failing tests first.** New `tests/pipeline/test_reg_scope.py` carrying
+   the four live-git repros as two-repository rows under a shared
+   `XDG_STATE_HOME`, following the existing `world.env` fixture shape in
+   `tests/pipeline/test_reg.py`. Adds the coverage Codex identified as
+   missing: a **non-dry-run** assertion that cleanup invoked from repoE
+   cannot remove repoF; exact-path cross-repository cleanup still permitted;
+   linked-worktree identity (two worktrees of one repository share an
+   identity); v1 rows with a live worktree migrate, v1 rows with a missing
+   worktree survive as `repository: null`, v2 rewrite occurs on the next
+   mutation, unknown versions still rejected; lineage-write failure proves
+   repoA's same-named row survives repoB's compensation; `list` shows
+   duplicate names with public JSON version unchanged.
+2. **`models.py`** — append `repository: str | None = None` **last**, so
+   existing positional construction is not silently rebound. Split
+   registry-file serialization from the public result serialization that
+   `list --json` consumes.
+3. **`registry.py`** — on-disk version to 2; `_decode` accepts v1 and v2 and
+   still rejects unknown; replacement identity `(repository, name)`; removal
+   takes an exact entry; `find_owned` gains a required invoking-repository
+   identity for name and branch matches while exact resolved worktree paths
+   stay global; repository and worktree added to the sort key; migration and
+   writes stay inside the existing lock and atomic replacement.
+4. **`pipeline.py`** — construct one named `RegistryEntry` from
+   `creation.common_dir` (already available, `repository.py:336-343`), add
+   it, and hand that same object to the lineage-failure compensation at
+   `pipeline.py:182` in place of the bare-name removal.
+5. **`cleanup.py`** — resolve the invoking repository's common directory for
+   name and branch lookup; keep explicit worktree-path targeting global;
+   before building a plan, require the selected worktree's **live** common
+   directory to equal its stored identity, raising
+   `cleanup_foreign_repository` otherwise; remove `plan.entry` exactly at
+   `cleanup.py:394`.
+6. **`cli.py`** — no behavior change. Verify only that the public `list`
+   payload still emits `"version": 1` after the registry constant moves to 2.
+7. **Docs and matrix** — `errors.py` catalog entry; `REQUIREMENTS.md` and
+   `README.md` state that name and branch cleanup is scoped to the invoking
+   repository while a registered worktree path stays globally addressable,
+   plus the lazy migration and its older-binary no-downgrade consequence;
+   new `T-REG` rows in `docs/testing/TEST-MATRIX.md` under G-REG.
+
+**Gate 6 exit criteria.** `just all` green; the four repros pass as tests;
+the non-dry-run containment test passes; `tests/cli/test_reg.py:43-51`
+unchanged and still green, proving the public output contract held.

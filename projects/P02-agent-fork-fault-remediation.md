@@ -77,11 +77,21 @@ repository-controlled text raw).
   repo field. `add_entry` (`registry.py:111`) silently deletes a same-named
   entry from another repo; `find_owned` (`registry.py:127-136`) matches a
   bare name/branch across all repos, so cleanup can resolve to another
-  repo's worktree. Auto-name collision check (`cli.py:487-514`) never
-  consults the registry. Proposed direction: add repo/common-dir field,
-  scope uniqueness and cleanup resolution per-repo (registry has a version
-  field for migration). Impact: high. Type: data-safety fix. Spot-checked
-  2026-08-16.
+  repo's worktree. Auto-name collision check (`collision_state()` at
+  `cli.py:477-488`, selection through `cli.py:490-516`) never consults the
+  registry. Proposed direction: add repo/common-dir field, scope uniqueness
+  and cleanup resolution per-repo (registry has a version field for
+  migration). Impact: high. Type: data-safety fix. Spot-checked 2026-08-16.
+  **Amended 2026-08-17 (TS03 verification):** severity is higher than
+  recorded — the collision fires on the *default* auto-named path (two repos
+  on `main` forked the same day derive the same name and branch), and the
+  consequence is destructive rather than lost bookkeeping: cleanup issued
+  from the clobbered repo resolves and deletes another repo's worktree and
+  branch, with no repository-containment check anywhere in `cleanup.py`. The
+  original `cli.py:487-514` citation was stale and is corrected above.
+  **Owner decision 2026-08-17:** the auto-name bullet is recorded as
+  over-broad, not unfixed — once uniqueness is `(repo, name)`, equal names in
+  different repos are legal, so auto-naming is left untouched.
 - **A4 — Agent-CLI recipe drift is undetectable; failure lands post-fork.**
   Emitted recipes live in `agents.py:286-301` guarded only by version
   floors (`agents.py:65-68`) — a future CLI that drops `--fork-session`
@@ -199,7 +209,7 @@ A T task is skipped (flipped `[-]`) if its TS verdict is *refuted*.
 - [x] [P02-T01] A1 fix per process: plan + adversarial plan review (APPROVE-WITH-CHANGES), TDD implementation, adversarial post-review (REJECT → findings absorbed or routed to issues #28–#31 per the owner's gate-6 routing) — whitespace pinned at the transport site, carried-state inventory drives both transport and verification, `content-match`/`parent-content` rungs with structured `failed_checks`, escaped repository-controlled text; 22 A1 rows green, 405 passed; see the [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
 - [ ] [P02-TS02] A2 adversarial verification (incl. Codex): demonstrate wrong-repo/config-sensitive behavior with hostile env/gitconfig
 - [ ] [P02-T02] A2 fix per process
-- [ ] [P02-TS03] A3 adversarial verification (incl. Codex): two-repo registry clobber and cross-repo cleanup resolution repro
+- [x] [P02-TS03] A3 adversarial verification (incl. Codex): two-repo registry clobber and cross-repo cleanup resolution repro — CONFIRMED-WITH-CORRECTIONS 2026-08-17: four live-git probes reproduced the clobber, the cross-repo cleanup resolution, the same-name auto-derivation on the default path, and the destructive consequence (cleanup from repoE plans to delete repoF's worktree and branch); Codex confirmed the mechanism by source trace plus non-writing execution probes, corrected the root-cause framing and the stale `cli.py` citation, and found the missing repository-containment defense in `cleanup.py:331-356` — its sandbox blocked live-git repros, so that evidence is single-source; see [design doc](../docs/superpowers/plans/2026-08-17-p02-a3-registry-repo-scope.md)
 - [ ] [P02-T03] A3 fix per process (registry schema migration)
 - [ ] [P02-TS04] A4 adversarial verification (incl. Codex): recipe-drift blindness and post-fork failure demonstration
 - [ ] [P02-T04] A4 fix per process
