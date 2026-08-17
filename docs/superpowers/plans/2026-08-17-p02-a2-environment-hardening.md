@@ -482,3 +482,78 @@ harmless. The only confirmed A2-adjacent defects came from *configuration and
 attributes* (textconv, `diff.external`), not from the environment. If the
 remaining configuration-injection cells behave the same way, A2's severity
 should drop again and its fix should be scoped to the pinning policy alone.
+
+## Group 6 results — configuration injection (2026-08-17)
+
+### C1 — the fix design's load-bearing assumption, verified
+
+`git-config(1)` states that `GIT_CONFIG_*` pairs "will be overridden by any
+explicit options passed via `git -c`". The whole pinning-policy approach rests
+on it, so it was measured rather than trusted:
+
+| Check | Result |
+|---|---|
+| `apply.whitespace` injected only | `fix` |
+| injected, plus `-c apply.whitespace=nowarn` | **`nowarn` — `-c` wins** |
+| hostile `GIT_CONFIG_GLOBAL` file only | `fix` |
+| same, plus `-c` | **`nowarn` — `-c` wins** |
+| `apply` **without** a pin, injection active | whitespace **stripped** — the threat is real |
+| `apply` **with** A1's `--whitespace=nowarn`, injection active | whitespace **preserved — A1's pin holds** |
+
+Two conclusions: a pinning policy applied through `-c` is effective against both
+the environment-injection and file-substitution forms, and A1's existing pins
+already defend the keys they cover.
+
+### C2 — which keys still bite
+
+Ten keys injected via `GIT_CONFIG_*` against a full fork:
+
+| Key | Verdict |
+|---|---|
+| `core.autocrlf=true` / `=input` | **refused** — A1's `content-match` rung fires (`f.txt: content differs`) |
+| `core.symlinks=false` | **silent divergence** — see below |
+| `core.fileMode`, `core.ignorecase`, `core.quotePath`, `status.showUntrackedFiles`, `apply.whitespace`, `diff.noprefix`, `core.bigFileThreshold` | ok — parent and child agree |
+
+**Harness correction.** The first run reported all ten as refused, which was a
+probe defect, not a finding: each child worktree was created *inside* its parent
+repository, which agent-fork correctly refuses. Ten identical refusals across
+keys that could not plausibly matter was the signal to re-check rather than
+report. Children are now siblings.
+
+### C3 — the one real gap, and it is not about the environment
+
+`core.symlinks=false` produced a child whose **committed** symlink became a
+regular file, with the fork reporting success:
+
+| Path | Carried? | Parent | Child |
+|---|---|---|---|
+| `untracked_link` | yes | symlink | symlink — correct |
+| `committed_link` | **no** | symlink | **regular file** containing `f.txt` |
+
+Inventory at the time: `staged: () unstaged: ('f.txt',) untracked:
+('untracked_link',)`. `committed_link` is absent, so no rung examined it.
+
+The mechanism: **verification is scoped to carried paths**, but the child's copy
+of committed content comes from `worktree add`'s checkout, which configuration
+can alter. `core.autocrlf` was caught in the same run *only because* its file
+was carried — same class of key, opposite outcome, decided by inventory
+membership alone.
+
+Routed to **issue #35** (pre-existing scope gap, surfaced by A2 rather than
+caused by it). Recommended remedy there is option 1: pin the checkout-affecting
+keys on `worktree add`, which C1 proves is effective and which costs nothing at
+fork time.
+
+### Updated tally
+
+| Status | Count |
+|---|---|
+| Resolved — defect found and fixed | 2 (textconv, `diff.external`) |
+| Resolved — no defect | 8 environment variables |
+| Resolved — defect routed to an issue | 1 (`core.symlinks` → #35) |
+| Remaining untested | 4: `GIT_ATTR_NOSYSTEM`, `GIT_EXTERNAL_DIFF`, `GIT_INDEX_VERSION`, and the priority-2 discovery trio treated as one group |
+
+**Read so far:** no environment variable has produced a defect. Every confirmed
+problem has come from *configuration or attributes*. A2's fix is therefore
+converging on a pinning policy — now with C1's evidence that the mechanism
+works and C3's evidence that it must cover `worktree add`, not only transport.
