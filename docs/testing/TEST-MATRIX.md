@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 220 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 221 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -274,6 +274,7 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 | T-VER-29 | A1 positive guard — an exec-bit-only change transports correctly and verifies cleanly; must keep verifying after step 4 lands | baseline | F | live | REQ-21; A1 design doc step 2 |
 | T-VER-30 | A1 positive guard — a clean submodule gitlink (index-only) verifies without traversing its working tree; must keep verifying after step 4 lands | baseline | F | live | RESEARCH §2.1 step 6; A1 design doc §Design item 0 |
 | T-VER-31 | A1 cost gate — one `verify_fork` takes exactly two content snapshots and digests each carried file once, so verification stays proportional to the carried set (REQ-40 budget) | baseline | F | live | REQ-40; A1 design doc §Implementation plan step 5 |
+| T-VER-32 | A1 negative (h) — a path carried by the child but absent from the parent is caught by the child's own inventory, under `status.showUntrackedFiles=no` which blinds the porcelain rung | baseline | F | live | A1 gate-6 review finding 1 |
 
 ---
 

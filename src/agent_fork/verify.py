@@ -73,7 +73,7 @@ def verify_fork(
     if (str(creation.path), creation.branch) not in _worktree_pairs(creation, env=env):
         failures.append("worktree-list")
 
-    status_args = ["status", "--porcelain=v1", "-z"]
+    status_args = ["status", "--porcelain=v1", "-z", "--untracked-files=all"]
     if with_ignored:
         status_args.append("--ignored")
     child_status = run_git(creation.path, status_args, env=env).stdout
@@ -96,7 +96,16 @@ def verify_fork(
             env=env,
         )
         drift = compare_states(parent_state_before, parent_after)
-        child_state = capture_state(creation.path, parent_state_before.paths, env=env)
+        child_state = capture_state(
+            creation.path,
+            collect_inventory(
+                creation.path,
+                with_state=with_state,
+                with_ignored=with_ignored,
+                env=env,
+            ),
+            env=env,
+        )
         content = compare_states(parent_state_before, child_state)
         if drift:
             failures.append(_labelled("parent-content", drift))

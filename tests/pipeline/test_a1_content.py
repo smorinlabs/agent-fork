@@ -631,3 +631,25 @@ def test_verification_hashes_each_carried_file_once_per_snapshot(
     carried = len(world.parent_state_before.paths)
     assert carried >= len(states)
     assert len(digested) <= 2 * carried
+
+
+@pytest.mark.matrix("T-VER-32")
+def test_negative_child_carries_a_path_the_parent_does_not(repo_scenario):
+    """(h) — a path present in the child but not the parent must be caught.
+
+    Config: `status.showUntrackedFiles=no` on both worktrees, which suppresses
+    untracked paths from `git status` entirely, so the porcelain rung is blind
+    to the extra file. `ls-files --others` is unaffected by that setting, so the
+    inventory still sees it.
+
+    This pins the child-membership comparison specifically. An earlier
+    implementation handed the parent's own path list to the child snapshot, so
+    the missing/extra comparison compared a list against itself and could never
+    fire; the child now collects its own inventory.
+    """
+    world, creation, before = _fork(repo_scenario, "child-extra")
+    _git(world, world.parent_path, "config", "status.showUntrackedFiles", "no")
+    _git(world, world.child_path, "config", "status.showUntrackedFiles", "no")
+    (world.child_path / "smuggled.txt").write_bytes(b"not from the parent\n")
+
+    _assert_rolls_back(world, creation, before, match="content-match")

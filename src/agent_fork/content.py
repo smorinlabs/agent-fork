@@ -166,8 +166,10 @@ def _manifest_difference(expected: ManifestEntry, actual: ManifestEntry) -> str 
         return f"{expected.path}: symlink target differs"
     if expected.kind == "file" and expected.digest != actual.digest:
         return f"{expected.path}: content differs"
+    if expected.kind == "symlink":
+        return None
     if expected.tracked:
-        if bool(expected.mode & 0o111) != bool(actual.mode & 0o111):
+        if bool(expected.mode & stat.S_IXUSR) != bool(actual.mode & stat.S_IXUSR):
             return f"{expected.path}: executable bit differs"
     elif expected.mode != actual.mode:
         return f"{expected.path}: mode differs"
@@ -201,11 +203,16 @@ def compare_states(expected: CarriedState, actual: CarriedState) -> tuple[str, .
             differences.append(f"{entry.path}: unexpected staged entry")
 
     actual_manifest = _manifest_map(actual)
-    for path, entry in _manifest_map(expected).items():
+    expected_manifest = _manifest_map(expected)
+    for path, entry in expected_manifest.items():
         other = actual_manifest.get(path)
         if other is None:
+            differences.append(f"{path}: working-tree entry missing")
             continue
         difference = _manifest_difference(entry, other)
         if difference is not None:
             differences.append(difference)
+    for path in actual_manifest:
+        if path not in expected_manifest:
+            differences.append(f"{path}: unexpected working-tree entry")
     return tuple(differences)
