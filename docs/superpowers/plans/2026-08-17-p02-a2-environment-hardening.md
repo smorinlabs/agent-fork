@@ -274,3 +274,47 @@ plausible and would have mis-scoped the fix.
 - The fix is **two flags at three call sites**, validated ahead of design.
 - Priority within A2 inverts: this outranks every environment variable,
   because it needs no hostile environment at all.
+
+## T7/T8 — plumbing is immune, and a second failure mode
+
+**T7 — do the plumbing commands support what transport needs?** Yes, verified:
+`diff-index` and `diff-files` accept `--ita-invisible-in-index`,
+`--ita-visible-in-index`, `--no-renames`, and `--no-color`, and their patches
+apply. With a textconv driver active *and* a hostile `diff.external` set
+repository-wide, plumbing still produced a valid patch where porcelain produced
+garbage.
+
+**T8 — a lossy driver empties the patch.** A converter that renders every
+revision identically — realistic, since converters summarize — makes the
+porcelain diff **0 bytes** while plumbing produces the real 162-byte patch.
+Under porcelain the change is simply dropped. A1's content verification catches
+it as `verify_failed` with structured `failed_checks` naming the path, so it is
+a refusal rather than silent loss — but the fork still cannot be created.
+
+This is a **second, distinct failure mode**: T1 was *unappliable*, T8 is
+*empty*. Both are fixed by the same change, but a fix validated only against T1
+would not have been known to cover T8.
+
+## Decision and stage 1 outcome
+
+**Chose plumbing over the two-flag fix**, gated on A1's suite passing
+unchanged. Rationale: `--no-textconv --no-ext-diff` disables the two display
+features known today, whereas porcelain's contract permits new reader-facing
+behavior to be added and enabled by default — each addition a future recurrence.
+Plumbing is defined as the layer that does not apply display conversions.
+
+Changed in `materialize.py`, three call sites:
+
+| Was | Now |
+|---|---|
+| `diff --binary --no-color --cached --ita-invisible-in-index` | `diff-index -p --binary --no-color --cached --ita-invisible-in-index HEAD` |
+| `diff --binary --no-color --ita-invisible-in-index -- <path>` | `diff-files -p --binary --no-color --ita-invisible-in-index -- <path>` |
+| `diff --binary --no-color --ita-invisible-in-index` | `diff-files -p --binary --no-color --ita-invisible-in-index` |
+
+The `--name-only` enumeration calls were **left alone**: probing showed them
+unaffected by both textconv and `diff.external`, so changing them would be
+churn without evidence.
+
+**Gates:** T-MAT-21..24 observed RED, then green. A1's 22 verification cells
+pass unchanged — the condition for preferring plumbing. Full suite 413 passed,
+1 skipped; lint, typecheck, and matrix clean.

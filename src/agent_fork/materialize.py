@@ -139,7 +139,15 @@ def materialize(
         ita_paths = list(inventory.intent_to_add)
         staged = run_git(
             parent,
-            ["diff", "--binary", "--no-color", "--cached", "--ita-invisible-in-index"],
+            [
+                "diff-index",
+                "-p",
+                "--binary",
+                "--no-color",
+                "--cached",
+                "--ita-invisible-in-index",
+                "HEAD",
+            ],
             env=env,
         ).stdout
         staged_applied = _apply_patch(child, staged, ["--index"], env=env)
@@ -148,7 +156,8 @@ def materialize(
             ita_patch = run_git(
                 parent,
                 [
-                    "diff",
+                    "diff-files",
+                    "-p",
                     "--binary",
                     "--no-color",
                     "--ita-invisible-in-index",
@@ -160,7 +169,13 @@ def materialize(
             _apply_patch(child, ita_patch, [], env=env)
             run_git(child, ["add", "--intent-to-add", "--", path], env=env)
 
-        unstaged_args = ["diff", "--binary", "--no-color", "--ita-invisible-in-index"]
+        unstaged_args = [
+            "diff-files",
+            "-p",
+            "--binary",
+            "--no-color",
+            "--ita-invisible-in-index",
+        ]
         if ita_paths:
             unstaged_args.extend(
                 ["--", ".", *(f":(exclude){path}" for path in ita_paths)]
