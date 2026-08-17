@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 200 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 223 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -254,6 +254,29 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 | T-VER-09 | conditional check, detached-recorded — detached topology asserts the parent-detached flag is recorded and checked | topology=detached | F | live | REQ-23; spec §5 |
 | T-VER-10 | fault injection — non-idempotent clean filter on a staged new file → porcelain diverges → verify fails → rollback → exit 1, verify_failed (canary reference: G-FIX) | baseline | F | live | REQ-23; spec §5; spec §6.6 |
 | T-VER-11 | `--no-verify` → the verify ladder is skipped entirely, fork proceeds unverified | baseline | F | live | REQ-23 (D8) |
+| T-VER-12 | A1 guard (a) — ambient `apply.whitespace=fix` must not alter transported content; `_apply_patch()` pins `--whitespace=nowarn`, so parent and child bytes stay identical and verification passes | baseline | F | live | A1 design doc §Design item 1; gate-1 repro |
+| T-VER-13 | A1 negative (b) — idempotent status-preserving clean filter (`sed 's/[ \t]*$//'` clean, `cat` smudge) on a staged file masks a working-tree raw-byte divergence while porcelain stays `A ` both sides; verify must fail `content-match` and roll back | baseline | F | live | A1 design doc §Design item 3 |
+| T-VER-14 | A1 negative (c) — `core.autocrlf=true` round-trip normalizes a mixed CRLF/LF unstaged edit to uniform CRLF on re-apply, diverging from the parent's original bytes while porcelain is unchanged; verify must fail `content-match` and roll back | baseline | F | live | A1 design doc §Design item 3 |
+| T-VER-15 | A1 negative (d) — child staged-index blob diverges from the parent's post-transport while porcelain stays `A ` both sides; verify must fail `content-match` and roll back | baseline | F | live | A1 design doc §Design item 2 |
+| T-VER-16 | A1 negative (e) — parent working-tree edit lands after materialize captured the transported bytes, status-preserving; verify must fail `parent-content` and roll back | baseline | F | live | A1 design doc §Design item 4 |
+| T-VER-17 | A1 negative (f) — parent INDEX swap on an `MM` path after materialize (blob A→B, working bytes restored), porcelain unchanged throughout; verify must fail `parent-content` and roll back | baseline | F | live | A1 design doc §Design item 4 (plan-review correction) |
+| T-VER-18 | A1 negative (g1) — manifest dimension existence/type: untracked symlink corrupted to a regular file in the child post-transport, porcelain stays `?? path` both sides; verify must fail `content-match` and roll back | baseline | F | live | A1 design doc §Design item 3 |
+| T-VER-19 | A1 negative (g2) — manifest dimension mode: untracked file's POSIX mode changed in the child post-transport, porcelain stays `?? path` both sides; verify must fail `content-match` and roll back | baseline | F | live | A1 design doc §Design item 3 |
+| T-VER-20 | A1 negative (g3) — manifest dimension symlink target: untracked symlink's target changed in the child post-transport, porcelain stays `?? path` both sides; verify must fail `content-match` and roll back | baseline | F | live | A1 design doc §Design item 3 |
+| T-VER-21 | A1 negative (g4) — manifest dimension raw bytes: untracked file's content changed in the child post-transport, porcelain stays `?? path` both sides; verify must fail `content-match` and roll back | baseline | F | live | A1 design doc §Design item 3 |
+| T-VER-22 | A1 positive guard — symmetric `core.autocrlf=true` conversion (uniform CRLF, non-mixed) transports byte-identical; must keep verifying after step 4 lands | baseline | F | live | A1 design doc §Design (symmetric conversions) |
+| T-VER-23 | A1 positive guard — staged+unstaged edits on the same path (`MM`) transport correctly and verify cleanly; must keep verifying after step 4 lands | baseline | F | live | REQ-21; A1 design doc step 2 |
+| T-VER-24 | A1 positive guard — an intent-to-add entry transports correctly and verifies cleanly; must keep verifying after step 4 lands | baseline | F | live | REQ-21 (A3); A1 design doc step 2 |
+| T-VER-25 | A1 positive guard — a renamed-and-edited file transports correctly and verifies cleanly; must keep verifying after step 4 lands | baseline | F | live | REQ-21; A1 design doc step 2 |
+| T-VER-26 | A1 positive guard — an unstaged deletion of a tracked file transports correctly and verifies cleanly; must keep verifying after step 4 lands | baseline | F | live | REQ-21; A1 design doc step 2 |
+| T-VER-27 | A1 positive guard — an untracked file transports correctly and verifies cleanly; must keep verifying after step 4 lands | baseline | F | live | REQ-21; A1 design doc step 2 |
+| T-VER-28 | A1 positive guard — an ignored file transports correctly under `--with-ignored` and verifies cleanly; must keep verifying after step 4 lands | mode=exact+ignored | F | live | REQ-21; A1 design doc step 2 |
+| T-VER-29 | A1 positive guard — an exec-bit-only change transports correctly and verifies cleanly; must keep verifying after step 4 lands | baseline | F | live | REQ-21; A1 design doc step 2 |
+| T-VER-30 | A1 positive guard — a clean submodule gitlink (index-only) verifies without traversing its working tree; must keep verifying after step 4 lands | baseline | F | live | RESEARCH §2.1 step 6; A1 design doc §Design item 0 |
+| T-VER-31 | A1 cost gate — one `verify_fork` takes exactly two content snapshots and digests each carried file once, so verification stays proportional to the carried set (REQ-40 budget) | baseline | F | live | REQ-40; A1 design doc §Implementation plan step 5 |
+| T-VER-32 | A1 negative (h) — a path carried by the child but absent from the parent is caught by the child's own inventory, under `status.showUntrackedFiles=no` which blinds the porcelain rung | baseline | F | live | A1 gate-6 review finding 1 |
+| T-VER-33 | A1 negative (i) — a hostile filename (ESC, newline) is escaped in both the human message and `error.details.failed_checks`, machine output stays encodable, and exactly one check is marked primary | baseline | F | live | A1 gate-6 review finding 4 |
+| T-VER-34 | A1 negative (j) — the pipeline hands `materialize()` the inventory it resolved before worktree creation, so transport cannot fall back to re-enumerating afterwards | baseline | F | live | A1 gate-6 re-review blocker 1 |
 
 ---
 

@@ -9,7 +9,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_fork.content import Inventory, collect_inventory
 from agent_fork.git import GitCommandError, run_git
+from agent_fork.text import escape_terminal_text
 
 
 class MaterializeError(RuntimeError):
@@ -56,7 +58,9 @@ def _copy_entry(parent: Path, child: Path, relative: str) -> None:
         shutil.copyfile(source, destination, follow_symlinks=False)
         os.chmod(destination, stat.S_IMODE(info.st_mode), follow_symlinks=False)
     else:
-        raise MaterializeError(f"unsupported untracked file type: {relative}")
+        raise MaterializeError(
+            f"unsupported untracked file type: {escape_terminal_text(relative)}"
+        )
 
 
 def _apply_patch(
@@ -68,7 +72,12 @@ def _apply_patch(
 ) -> bool:
     if not patch:
         return False
-    run_git(child, ["apply", "--binary", *args], env=env, input_bytes=patch)
+    run_git(
+        child,
+        ["apply", "--binary", "--whitespace=nowarn", *args],
+        env=env,
+        input_bytes=patch,
+    )
     return True
 
 
@@ -96,7 +105,8 @@ def _submodule_notices(
             paths.append(os.fsdecode(record.split(b"\t", 1)[1]))
     if not paths:
         return ()
-    return (f"submodules copied opaquely: {', '.join(sorted(paths))}",)
+    listed = ", ".join(escape_terminal_text(path) for path in sorted(paths))
+    return (f"submodules copied opaquely: {listed}",)
 
 
 def materialize(
@@ -105,16 +115,28 @@ def materialize(
     *,
     with_state: bool = True,
     with_ignored: bool = False,
+    inventory: Inventory | None = None,
     env: Mapping[str, str] | None = None,
 ) -> MaterializeResult:
-    """Transport staged → ITA/unstaged → untracked → optional ignored state."""
+    """Transport staged → ITA/unstaged → untracked → optional ignored state.
+
+    ``inventory`` is the carried-state resolution taken before the worktree
+    existed. Supplying it is what makes transport and verification operate on
+    one fixed set of paths: without it this function re-resolves the paths now,
+    and a file that appeared or vanished since the snapshot would be carried
+    without being checked. The pipeline always supplies it; the parameter stays
+    optional for callers transporting a tree they resolved themselves.
+    """
     if with_ignored and not with_state:
         raise ValueError("with_ignored requires with_state")
     if not with_state:
         return MaterializeResult(False, False, 0, 0, (), ())
-
     try:
-        ita_paths = _intent_to_add_paths(parent, env=env)
+        if inventory is None:
+            inventory = collect_inventory(
+                parent, with_state=with_state, with_ignored=with_ignored, env=env
+            )
+        ita_paths = list(inventory.intent_to_add)
         staged = run_git(
             parent,
             ["diff", "--binary", "--no-color", "--cached", "--ita-invisible-in-index"],
@@ -146,33 +168,16 @@ def materialize(
         unstaged = run_git(parent, unstaged_args, env=env).stdout
         unstaged_applied = _apply_patch(child, unstaged, [], env=env)
 
-        untracked = _nul_paths(
-            run_git(
-                parent,
-                ["ls-files", "--others", "-z", "--exclude-standard"],
-                env=env,
-            ).stdout
-        )
+        untracked = list(inventory.untracked)
         for path in untracked:
             _copy_entry(parent, child, path)
 
         ignored: list[str] = []
         if with_ignored:
-            ignored = _nul_paths(
-                run_git(
-                    parent,
-                    [
-                        "ls-files",
-                        "--others",
-                        "-z",
-                        "--ignored",
-                        "--exclude-standard",
-                    ],
-                    env=env,
-                ).stdout
-            )
+            ignored = list(inventory.ignored)
+            untracked_set = set(untracked)
             for path in ignored:
-                if path not in untracked:
+                if path not in untracked_set:
                     _copy_entry(parent, child, path)
     except (GitCommandError, OSError) as error:
         raise MaterializeError(str(error)) from error

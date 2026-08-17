@@ -10,18 +10,9 @@ from agent_fork.errors import AgentForkError, PreconditionError
 from agent_fork.git import run_git
 from agent_fork.models import RegistryEntry
 from agent_fork.registry import find_owned, remove_entry
+from agent_fork.text import escape_terminal_text as _escape_terminal_text
 
 DETAIL_LIMIT = 10
-
-_CONTROL_ESCAPES = {
-    "\a": r"\a",
-    "\b": r"\b",
-    "\t": r"\t",
-    "\n": r"\n",
-    "\v": r"\v",
-    "\f": r"\f",
-    "\r": r"\r",
-}
 
 
 class CleanupTargetError(AgentForkError):
@@ -263,25 +254,6 @@ def _inspect(plan: CleanupPlan, *, env: Mapping[str, str]) -> CleanupDetails:
         unpushed=tuple(unpushed),
         unpushed_count=unpushed_count,
     )
-
-
-def _escape_terminal_text(value: str) -> str:
-    escaped: list[str] = []
-    for character in value:
-        codepoint = ord(character)
-        if character == "\\":
-            escaped.append(r"\\")
-        elif character in _CONTROL_ESCAPES:
-            escaped.append(_CONTROL_ESCAPES[character])
-        elif codepoint < 0x20 or 0x7F <= codepoint <= 0x9F:
-            escaped.append(f"\\x{codepoint:02x}")
-        elif 0xDC80 <= codepoint <= 0xDCFF:
-            escaped.append(f"\\x{codepoint - 0xDC00:02x}")
-        elif 0xD800 <= codepoint <= 0xDFFF:
-            escaped.append(f"\\u{codepoint:04x}")
-        else:
-            escaped.append(character)
-    return "".join(escaped)
 
 
 def _dirty_lines(details: CleanupDetails, heading: str) -> list[str]:

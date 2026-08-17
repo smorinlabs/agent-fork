@@ -5,7 +5,7 @@
 - **Depends on:** [P01 — agent-fork v1](P01-agent-fork-v1.md) — faults found in the shipped v1 surface; A8 extends the already-tracked P01-T51
 - **Discussion:** fault analysis session 2026-08-16 (three-agent code sweep: pipeline, session/lineage, UX/config; findings spot-checked against source before recording)
 
-## [ ] Project P02: agent-fork fault remediation (v1.x)
+## [~] Project P02: agent-fork fault remediation (v1.x)
 **Goal**: Work the thirteen faults A1–A13 found in the 2026-08-16 analysis,
 one at a time in order, each through the gated process below. A fault is
 closed when its fix has passed adversarial post-implementation review, or
@@ -32,6 +32,17 @@ refuted, no fix).
 5. **Implementation** — TDD (failing test first) and subagent-driven, in its
    own worktree per house discipline.
 6. **Adversarial review of the implementation** (incl. Codex); loop until clean.
+
+**Gate-6 routing (owner decision 2026-08-17).** When an item's adversarial
+implementation review raises findings beyond that item's minimal remediation,
+the item absorbs only what its own approved design promised plus defects the
+work introduced; everything else is opened as a GitHub issue and, where it
+matches a registered fault, noted against that fault. A1's routed findings are
+issues #28 (root-confined hashing → overlaps A2), #29 (intent-to-add pathspec
+magic → A13(e)), #30 (latency gate and progress output → A13(h)), #31
+(coverage gaps: dirty submodules → A6, sparse checkout, exotic filenames), and
+#32 (pre-existing guard-error and hook-output sinks that render
+repository-controlled text raw).
 
 **Out of Scope**
 - Enhancements B1–B4 (separate project: [P03](P03-agent-fork-core-enhancements.md))
@@ -184,8 +195,8 @@ refuted, no fix).
 Order is A1 → A13; each item's TS gate precedes its T fix (TDD bias).
 A T task is skipped (flipped `[-]`) if its TS verdict is *refuted*.
 
-- [ ] [P02-TS01] A1 adversarial verification (incl. Codex): reproduce status-preserving content divergence end to end
-- [ ] [P02-T01] A1 fix per process: plan + adversarial plan review, TDD implementation, adversarial post-review
+- [x] [P02-TS01] A1 adversarial verification (incl. Codex): reproduce status-preserving content divergence end to end — CONFIRMED-WITH-CORRECTIONS 2026-08-16: empirical repro (apply.whitespace=fix diverged child bytes, identical porcelain, `verification.passed: true`) + Codex pass confirming mechanism, repro fairness, in-scope verdict, and sibling vectors; see [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
+- [x] [P02-T01] A1 fix per process: plan + adversarial plan review (APPROVE-WITH-CHANGES), TDD implementation, adversarial post-review (REJECT → findings absorbed or routed to issues #28–#31 per the owner's gate-6 routing) — whitespace pinned at the transport site, carried-state inventory drives both transport and verification, `content-match`/`parent-content` rungs with structured `failed_checks`, escaped repository-controlled text; 22 A1 rows green, 405 passed; see the [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
 - [ ] [P02-TS02] A2 adversarial verification (incl. Codex): demonstrate wrong-repo/config-sensitive behavior with hostile env/gitconfig
 - [ ] [P02-T02] A2 fix per process
 - [ ] [P02-TS03] A3 adversarial verification (incl. Codex): two-repo registry clobber and cross-repo cleanup resolution repro

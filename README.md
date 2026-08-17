@@ -222,8 +222,12 @@ agent-fork cleanup try-redis --yes   # remove one when you are done
 3. **Create** a linked Git worktree at the destination.
 4. **Copy** staged, then unstaged, then untracked files into it, preserving
    symlinks and the executable bit.
-5. **Verify** that the new worktree's Git-visible state matches what was
-   promised. A failed check rolls the fork back and reports exactly what to do.
+5. **Verify** that the new worktree matches what was promised — Git-visible
+   state, and the contents themselves: staged entries, file types, permissions,
+   symlink targets, and a checksum of every carried file. The parent is
+   snapshotted before the fork starts and rechecked afterwards, so a file that
+   changes mid-fork fails rather than producing an ambiguous copy. A failed
+   check rolls the fork back and reports exactly what to do.
 6. **Emit** the launch command for the detected agent, and record the fork in a
    local registry so `list` and `cleanup` can find it later.
 
@@ -484,8 +488,13 @@ with `REPO_ROOT` and `WORKTREE_PATH` set.
 
 - **Your parent worktree and session transcript are never modified.** The fork
   is additive.
-- **Verification is on by default.** A failed check rolls the fork back and
-  reports the exact manual recovery steps.
+- **Verification is on by default, and it compares contents.** Matching
+  `git status` output is not enough: the fork's carried files are compared by
+  checksum, along with staged entries, file types, permissions, and symlink
+  targets. Configuration that would silently rewrite content in transit — such
+  as `apply.whitespace`, end-of-line conversion, or content filters — is
+  therefore caught rather than reported as a successful copy. A failed check
+  rolls the fork back and reports the exact manual recovery steps.
 - **Ignored files stay put unless you ask.** `--with-ignored` may copy
   secret-bearing files such as `.env` between working trees, which is precisely
   why it is off by default.
