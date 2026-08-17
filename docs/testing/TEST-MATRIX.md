@@ -328,6 +328,17 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-06 | registry ownership check feeds cleanup — `cleanup` refuses a target it didn't create unless `--force` | baseline | F | live | REQ-31; D12 |
 | T-REG-07 | `list` renders registry entries (name, branch, worktree path, agent, worktree-still-exists) in creation-time order; `-o json` emits the stable schema | baseline | C | live | REQ-31; D10; REQ-17 |
 | T-REG-08 | registry records mode and reads legacy records without mode as agent mode | baseline | U | live | REQ-45; D16 |
+| T-REG-09 | same fork name created in two repositories under one registry → both records survive; neither clobbers the other | baseline | F | live | REQ-41 (A3); A3 repro 1 |
+| T-REG-10 | `cleanup <name>` from a repository that has no such fork → `cleanup_registry_stale`, the other repository's worktree is never named, registry unchanged | baseline | F | live | REQ-31 (A3); A3 repro 2 |
+| T-REG-11 | auto-named forks in two repositories on the same branch and day derive one name → both records survive | baseline | F | live | REQ-41 (A3); A3 repro 3 |
+| T-REG-12 | after an auto-name collision, `cleanup` plans against the invoking repository's own worktree, never the other's | baseline | F | live | REQ-31 (A3); A3 repro 4 |
+| T-REG-13 | staleness — worktree removed by hand → `cleanup` refuses with `cleanup_registry_stale` and keeps the record, instead of failing on a raw Git error against the missing path | baseline | F | live | REQ-31 (A3); overlaps A7 |
+| T-REG-14 | staleness — recorded path is live but on a different branch → the pair does not match, `cleanup` refuses | baseline | F | live | REQ-31 (A3) |
+| T-REG-15 | `prune` removes only records whose worktree path does not exist; `--dry-run` writes nothing | baseline | F | live | REQ-31 (A3); absorbs A7's prune |
+| T-REG-16 | `prune` keeps and reports a record whose path another repository's live worktree now occupies | baseline | F | live | REQ-31 (A3) |
+| T-REG-17 | `prune` on a healthy registry reports nothing to remove and changes nothing | baseline | F | live | REQ-31 (A3) |
+| T-REG-18 | a v1 record carrying no repository is read, not rejected, and stays cleanable from its own repository — liveness decides, not the recorded identity | baseline | F | live | REQ-41 (A3); migration |
+| T-REG-19 | forking backfills a repository onto a live legacy record and rewrites the file as v2; the evidence is live enumeration, never the record's stored path | baseline | F | live | REQ-41 (A3); migration |
 
 ---
 

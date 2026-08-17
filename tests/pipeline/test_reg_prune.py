@@ -121,6 +121,63 @@ def test_prune_keeps_a_record_whose_path_another_repository_occupies(repo_scenar
     assert len(_rows(shared)) == 1, "the record must survive"
 
 
+@pytest.mark.matrix("T-REG-18")
+def test_v1_record_without_a_repository_is_still_cleanable(repo_scenario):
+    """Migration keeps pre-1.1 records usable: liveness, not identity, decides."""
+    from agent_fork.registry import registry_path
+    from conftest import run_cli
+
+    world = repo_scenario()
+    created = _fork(world.env, world.parent_path, "legacy")
+    assert created.returncode == 0
+
+    # Rewrite the registry exactly as agent-fork 1.0 would have left it.
+    path = registry_path(world.env)
+    document = json.loads(path.read_text())
+    for row in document["forks"]:
+        row.pop("repository")
+    document["version"] = 1
+    path.write_text(json.dumps(document))
+
+    rows = _rows(world.env)
+    assert rows and "repository" not in rows[0]
+
+    result = run_cli(
+        ["cleanup", "legacy", "--yes", "--allow-unpushed"],
+        world.env,
+        world.parent_path,
+    )
+    assert result.returncode == 0, result.stderr
+    assert _rows(world.env) == []
+
+
+@pytest.mark.matrix("T-REG-19")
+def test_forking_backfills_a_repository_onto_a_live_legacy_record(repo_scenario):
+    """Backfill takes its evidence from live enumeration, not a stored path."""
+    from agent_fork.registry import registry_path
+    from conftest import run_cli
+
+    world = repo_scenario()
+    assert _fork(world.env, world.parent_path, "legacy").returncode == 0
+    path = registry_path(world.env)
+    document = json.loads(path.read_text())
+    for row in document["forks"]:
+        row.pop("repository")
+    document["version"] = 1
+    path.write_text(json.dumps(document))
+
+    assert _fork(world.env, world.parent_path, "fresh").returncode == 0
+
+    rows = {row["name"]: row for row in _rows(world.env)}
+    assert rows["legacy"]["repository"] == rows["fresh"]["repository"]
+    assert rows["legacy"]["repository"] is not None
+    assert json.loads(path.read_text())["version"] == 2
+
+    # Unrelated bookkeeping only: the legacy fork is untouched on disk.
+    listed = run_cli(["list"], world.env, world.parent_path)
+    assert b"legacy" in listed.stdout
+
+
 @pytest.mark.matrix("T-REG-17")
 def test_prune_reports_nothing_to_do_on_a_healthy_registry(repo_scenario):
     from conftest import run_cli
