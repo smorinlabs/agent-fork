@@ -114,10 +114,20 @@ state transport. Mirrors the existing `with_state` / `with_ignored` coupling at
 
 ### The recipe, per gitlink, depth-first
 
+0. **Resolve name → path.** A submodule's config *name* is not its *path*; they
+   coincide only by convention. Probed 2026-08-17:
+   `git submodule add --name libfoo <url> vendor/module` yields
+   `[submodule "libfoo"] path = vendor/module`, config key `submodule.libfoo.url`,
+   and module dir `.git/modules/libfoo`. Read the map with
+   `git config -f .gitmodules --get-regexp 'submodule\..*\.path'` and key every
+   config override by **name**, while every pathspec uses the **path**. Keying by
+   path would silently fail to override a renamed submodule's URL, sending step 2
+   to the remote and losing the offline guarantee — and, for cell `c`, sending it
+   somewhere the unpushed commit does not exist.
 1. **Skip what the parent left cold** — if `<parent>/<path>/.git` is absent, the
    child stays uninitialized. Cell `g`.
 2. **Initialize from the parent's own checkout, never the remote:**
-   `git -c protocol.file.allow=always -c submodule.<path>.url=<parent>/<path> submodule update --init -- <path>`
+   `git -c protocol.file.allow=always -c submodule.<name>.url=<parent>/<path> submodule update --init -- <path>`
    Offline, and the only source guaranteed to hold commits the parent made
    locally and never pushed — which is what makes cell `c` carriable.
    `protocol.file.allow` is command-scoped for the path URL agent-fork computes
@@ -168,10 +178,11 @@ state transport. Mirrors the existing `with_state` / `with_ignored` coupling at
 ## Implementation plan (TDD; subagent-driven)
 
 1. **Test rows first.** Extend the `submodule()` state constructor
-   (`tests/conftest.py:168`) to express the eight cells (dirty variants,
-   uninitialized-in-parent, nested, staged-in-own-index). Add G-MAT and G-VER
-   rows for each cell × both modes to `docs/testing/TEST-MATRIX.md`, failing
-   first.
+   (`tests/conftest.py:168`) to express the nine cells (dirty variants,
+   uninitialized-in-parent, nested, staged-in-own-index, and
+   `j_renamed_submodule` where the config name differs from the path). Add G-MAT
+   and G-VER rows for each cell × both modes to `docs/testing/TEST-MATRIX.md`,
+   failing first.
 2. **`submodules.py`** — the recipe and its recursion, taking `(parent, child,
    env)` and returning carried paths plus notices.
 3. **Pipeline wiring** — run after `create_worktree_at_anchor`, before
