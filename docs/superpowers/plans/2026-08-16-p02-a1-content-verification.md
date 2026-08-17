@@ -8,8 +8,47 @@ from verification verdict through implementation sign-off.
 | 1. Adversarial verification | **CONFIRMED-WITH-CORRECTIONS** (2026-08-16) |
 | 3. Design doc | this document |
 | 4. Plan + adversarial plan review (incl. Codex) | **APPROVE-WITH-CHANGES** (2026-08-16) — all changes incorporated below |
-| 5. Implementation (TDD, subagent-driven) | not started |
-| 6. Adversarial implementation review (incl. Codex) | not started |
+| 5. Implementation (TDD, subagent-driven) | **complete** — see Outcome below |
+| 6. Adversarial implementation review (incl. Codex) | dispatched 2026-08-16 |
+
+## Outcome (gate 5)
+
+Landed as three commits: `06f9e88` (RED tests), `a8d2877` (whitespace pin),
+`b06c5b8` (inventory + rungs), plus the cost gate and documentation.
+
+- **RED observed before implementation:** 10 negative fixtures failed with
+  `DID NOT RAISE VerificationError`; 9 positive guards passed. Verified
+  independently of the authoring agent.
+- **New module `agent_fork.content`:** `collect_inventory` (pre-create,
+  `--no-renames` so renames yield both endpoints), `capture_state` (index +
+  working-tree manifest, gitlinks index-only), `compare_states`. All path
+  filtering happens in Python on literal strings — no recorded path is ever
+  handed back to Git as a pathspec operand.
+- **Two rungs**, both referenced against the pre-creation snapshot:
+  `content-match` (child reproduces the parent's carried state) and
+  `parent-content` (parent still matches it afterwards).
+- **T-VER-12 changed character:** the whitespace vector is closed at the
+  source, so nothing remains downstream to catch. It became a
+  faithful-transport regression guard rather than a rollback fixture. Its RED
+  evidence is preserved in `06f9e88`.
+- **End-to-end proof:** the gate-1 repro re-run against patched code gives
+  identical parent and child SHA-256 (`8734d513…`) where it previously
+  diverged.
+- **Cost (measured, this machine):** 1.08 s for a representative fork (201
+  carried entries); 1.89 s with `--with-ignored` over 2000 ignored files.
+  Both inside REQ-40's ~2 s budget, the second one narrowly. T-VER-31 pins the
+  structural contract instead of wall clock (two snapshots per verification,
+  each carried file digested once) because a timing assertion would be flaky
+  under CI load. **The `--with-ignored` margin is thin and worth revisiting if
+  A13's efficiency items are taken.**
+- **Gates:** `just fmt`/`lint`/`typecheck` clean; full suite 402 passed, 1
+  skipped, no regressions; `just check-matrix` exit 0 (220 rows).
+
+**Deviation from plan:** the plan promised rung detail in an additive
+`error.details.failed_checks` field. As implemented, detail is embedded in the
+failure message (bounded to 5 differences) and the stable `verify_failed` code
+and exit 1 are unchanged. The structured field is not yet added — flagged to
+the gate-6 review as an open question rather than silently dropped.
 
 ## Verification verdict and evidence
 

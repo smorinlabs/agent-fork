@@ -577,3 +577,58 @@ def test_positive_clean_submodule_gitlink_verifies(repo_scenario):
         repo_scenario, "gitlink-guard", states=(submodule("vendor/module"),)
     )
     _verify(world, creation, before)
+
+
+# ---------------------------------------------------------------------------
+# Cost gate — step 5
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.matrix("T-VER-31")
+def test_verification_hashes_each_carried_file_once_per_snapshot(
+    repo_scenario, monkeypatch
+):
+    """Cost gate — content verification stays proportional to the carried set.
+
+    A wall-clock bound would be flaky under CI load, so the contract pinned here
+    is structural: one `verify_fork` takes exactly two content snapshots (the
+    parent bracket and the child), and each snapshot digests every carried
+    regular file exactly once. A regression that re-walks the inventory, adds a
+    snapshot, or rehashes per comparison fails this test rather than quietly
+    multiplying the cost of every fork.
+
+    Measured for reference on a 201-entry carried set: 1.08s representative,
+    1.89s with --with-ignored over 2000 ignored files (REQ-40 budget ~2s).
+    """
+    from conftest import untracked
+
+    from agent_fork import content
+
+    states = tuple(untracked(f"loose{index}.txt") for index in range(5))
+    world, creation, before = _fork(repo_scenario, "cost", states=states)
+
+    digested: list[str] = []
+    snapshots: list[int] = []
+    real_digest = content._digest
+    real_capture = content.capture_state
+
+    def counting_digest(path):
+        digested.append(str(path))
+        return real_digest(path)
+
+    def counting_capture(root, inventory, **kwargs):
+        snapshots.append(1)
+        return real_capture(root, inventory, **kwargs)
+
+    monkeypatch.setattr(content, "_digest", counting_digest)
+    monkeypatch.setattr("agent_fork.verify.capture_state", counting_capture)
+
+    _verify(world, creation, before)
+
+    assert len(snapshots) == 2
+    assert len(digested) == len(set(digested)), (
+        "a file was digested more than once during one verification"
+    )
+    carried = len(world.parent_state_before.paths)
+    assert carried >= len(states)
+    assert len(digested) <= 2 * carried
