@@ -536,5 +536,25 @@ self-contradictory. All absorbed; none declined.
 | **P1** — exact-path precedence was rejected in slice B and still required as a test in slice C | Contradiction removed; the test now asserts the **existing** creation-ordered precedence is unchanged |
 | **P2** — "every migration/concurrency test asserts a full expected document" was claimed in the outcome table but scoped to two tests in the operative text | Requirement now applies to the whole inventory, stated where the tests are listed |
 
-Round 4 review: not yet dispatched — pending an owner call on whether to
-continue the loop.
+## Adversarial plan review (gate 4) — round 4 outcome
+
+**Codex verdict: REJECT** (4 P0). Narrowed round: an audit for sites where a
+destructive action is authorized by stored, historical, derived, or cached
+data instead of freshly observed state, plus verification of the round-3
+claims. **A fourth ownership-principle site was found, and a fifth.**
+
+Dispositions below are **proposed, pending owner sign-off** — this is the
+first round whose findings are not all A3's to fix.
+
+| Finding | Proposed disposition |
+|---|---|
+| **P0 — fork-time replacement (4th ownership site).** The new `(repository, name)` key compares a freshly observed identity against *stored* ones. An unrelated repository occupying a stale row's recorded path lets a same-name fork delete that row. Lineage-failure compensation then removes the new row without restoring the displaced one (`pipeline.py:154-182`); the existing test starts from an empty registry and cannot detect it (`tests/pipeline/test_reg.py:146`) | **Absorb.** This is A3's own new mechanism |
+| **P0 — the null `--force` fallback is unreachable.** `find_owned` still matches a null row by path (`registry.py:127-136`), so `resolve_cleanup_target` takes the owned branch (`cleanup.py:152`) and returns before the fallback (`cleanup.py:158-179`); the mismatch check then refuses. Owner decision 4 collapses into the stricter variant it was chosen over | **Absorb.** Defect in this document's own mechanism |
+| **P0 — the migration route strips safety guards.** `--force` also overrides the dirty and unpushed refusals (`cleanup.py:337-356`). A fork that `cleanup` refuses today is destroyed by the `--force` route recommended for migrated rows | **Absorb.** Target extension must be separable from guard override for this path |
+| **P0 — worktree/branch association unverified (5th site).** Common-directory equality proves repository membership, not that live worktree `W` is still on stored branch `B`; `worktree remove W` and `branch -D B` then run on unverified associations (`cleanup.py:385-392`) | **Propose routing to A8.** Pre-existing; A3 neither creates nor widens it. Absorbing it means A3 re-verifies every git association cleanup already trusts |
+| **P1 — name targeting lost on the fallback.** Live discovery matches resolved path or exact live branch (`cleanup.py:170`), so `cleanup alpha --force` cannot find `fork/alpha`; custom `--branch` / `--worktree-dir` prevent deriving them (`README.md:357`) | **Absorb** as part of the fallback rework |
+| **P1 — Slice B still carries the rejected "complete persisted record" instruction** (superseded by candidate-count plus token compare-and-swap), and Slice A schedules no token representation | **Absorb.** Claim-drift; the round-3 resolution was recorded but only half-applied |
+| **P2 — two false claims in this document.** `worktree_exists` derives from `Path.exists()` alone (`models.py:77-85`, `cli.py:1143-1155`), so a reused historical path reports `true`; and the `--force` fallback can inspect an explicit target's own repository when cwd is not one (`cleanup.py:165`), so "the repository the user is standing in" is too narrow | **Absorb** as corrections; extend the A7 note with the reused-path `list` case |
+
+**Loop status.** Four rounds, four rejections. Per the pre-commitment made
+before this round, the review loop stops here rather than running a fifth.
