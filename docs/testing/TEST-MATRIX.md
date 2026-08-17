@@ -477,6 +477,7 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-22 | `--no-agent` conflicts with explicit agent/session inputs | baseline | C | live | REQ-45; D16 |
 | T-CLI-23 | a real fork outside an agent succeeds in default auto mode as Git-only | baseline | C | live | REQ-45; D16 |
 | T-CLI-24 | help, positive/negative flag spelling, and dotted config set/get expose the Codex-specific control | agent=codex | C | live | REQ-46; D17 |
+| T-CLI-25 | A4 — `doctor` reports recipe-flag coverage per installed CLI, the destination both preflight notices name | baseline | C | live | P02 A4; REQ-28 |
 
 ---
 

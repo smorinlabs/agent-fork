@@ -123,7 +123,7 @@ def missing_recipe_flags(agent: AgentName, help_output: str) -> tuple[str, ...]:
     )
 
 
-def _read_help(agent: AgentName, binary: str, env: Mapping[str, str]) -> str | None:
+def read_help(agent: AgentName, binary: str, env: Mapping[str, str]) -> str | None:
     """Installed help text, or None when it cannot be read.
 
     Unreadable help is not evidence that a flag is gone, so callers stay
@@ -199,6 +199,11 @@ def preflight_agent(
 
     notices: list[str] = []
     tokens = version_tokens(version_output)
+    # A misparse is most damaging when it causes a floor refusal, and an
+    # exception discards `notices` — so the refusals carry the hint too.
+    hint = (
+        f" (ambiguous version output: {len(tokens)} tokens)" if len(tokens) > 1 else ""
+    )
     if len(tokens) > 1:
         notices.append(
             f"{context.agent} version output carried {len(tokens)} version-like "
@@ -211,7 +216,7 @@ def preflight_agent(
         if version < CLAUDE_FORK_MIN:
             raise _diagnosis(
                 f"detected Claude {_render(version)}; pinned-session fork requires "
-                f">={_render(CLAUDE_FORK_MIN)}"
+                f">={_render(CLAUDE_FORK_MIN)}{hint}"
             )
         if version < CLAUDE_RELIABLE_MIN:
             notices.append(
@@ -222,12 +227,12 @@ def preflight_agent(
         if version < CODEX_FORK_MIN:
             raise _diagnosis(
                 f"detected Codex {_render(version)}; fork requires "
-                f">={_render(CODEX_FORK_MIN)}"
+                f">={_render(CODEX_FORK_MIN)}{hint}"
             )
         if version < CODEX_ENV_MIN:
             raise _diagnosis(
                 f"detected Codex {_render(version)}; CODEX_THREAD_ID support requires "
-                f">={_render(CODEX_ENV_MIN)}"
+                f">={_render(CODEX_ENV_MIN)}{hint}"
             )
         try:
             canonical = str(uuid.UUID(context.parent_session_id))
@@ -280,7 +285,7 @@ def preflight_agent(
     help_text = (
         help_output
         if help_output is not None
-        else _read_help(context.agent, binary, env)
+        else read_help(context.agent, binary, env)
     )
     if help_text:
         absent = missing_recipe_flags(context.agent, help_text)

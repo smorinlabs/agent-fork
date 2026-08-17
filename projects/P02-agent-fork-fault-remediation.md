@@ -204,6 +204,11 @@ repository-controlled text raw).
   way. A rendered-command/flag-list sync test keeps (b) honest, since the
   flag list is the same drift problem one level in.
 
+  *Prose duplication — no action, by disposition.* The recipe is repeated in
+  four docs, but T-EMT-01/02 already pin the rendered template byte-exact, so
+  the executable copy is drift-tested; the prose copies are display-only and
+  a doc-drift checker would gate more than it protects.
+
   *Dropped from the original direction:* the recorded
   verified-against-version fingerprint (re-encodes the floor problem; the
   probe subsumes it) and the above-ceiling preflight warning (on `0.x`
