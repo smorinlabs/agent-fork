@@ -116,17 +116,23 @@ def _assert_rolls_back(
 
 
 @pytest.mark.matrix("T-VER-12")
-def test_negative_apply_whitespace_fix_rewrites_trailing_whitespace(repo_scenario):
-    """(a) — ambient `apply.whitespace = fix` strips trailing whitespace from an
-    unstaged hunk during `_apply_patch()`'s `git apply` (`materialize.py`).
+def test_apply_whitespace_fix_cannot_rewrite_transported_hunk(repo_scenario):
+    """(a) — ambient `apply.whitespace = fix` must not alter transported content.
 
     Config: `git config apply.whitespace fix` (repo-local, on the parent).
     Input:  parent unstaged `tracked.txt` = b"line one   \\nline two\\n" (trailing
             spaces on line one).
-    Empirically: child ends up b"line one\\nline two\\n" (spaces stripped);
-    porcelain stays ` M tracked.txt` on both sides throughout. Gate-1's exact
-    empirical repro (docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md
-    lines 20-25). RED until step 3 pins `--whitespace=nowarn`.
+
+    Gate-1's empirical repro: before `_apply_patch()` pinned
+    `--whitespace=nowarn`, the child ended up b"line one\\nline two\\n" (spaces
+    stripped) while porcelain stayed ` M tracked.txt` on both sides — divergence
+    invisible to the exact-copy-status rung, and the fork reported
+    `verification: passed`. That RED state is preserved in the commit that
+    introduced this file.
+
+    The vector is closed at the source rather than caught downstream, so this is
+    a faithful-transport regression guard, not a rollback fixture: remove
+    `--whitespace=nowarn` from `_apply_patch()` and this test fails.
     """
     world = repo_scenario()
     _git(world, world.parent_path, "config", "apply.whitespace", "fix")
@@ -135,9 +141,10 @@ def test_negative_apply_whitespace_fix_rewrites_trailing_whitespace(repo_scenari
     creation, before = _create_and_materialize(world, "ws")
 
     assert (world.parent_path / "tracked.txt").read_bytes() == b"line one   \nline two\n"
-    assert (world.child_path / "tracked.txt").read_bytes() == b"line one\nline two\n"
+    assert (world.child_path / "tracked.txt").read_bytes() == b"line one   \nline two\n"
+    assert _status(world, world.parent_path) == _status(world, world.child_path)
 
-    _assert_rolls_back(world, creation, before, match="content-match")
+    _verify(world, creation, before)
 
 
 @pytest.mark.matrix("T-VER-13")

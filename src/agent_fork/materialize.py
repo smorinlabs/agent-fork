@@ -68,7 +68,12 @@ def _apply_patch(
 ) -> bool:
     if not patch:
         return False
-    run_git(child, ["apply", "--binary", *args], env=env, input_bytes=patch)
+    run_git(
+        child,
+        ["apply", "--binary", "--whitespace=nowarn", *args],
+        env=env,
+        input_bytes=patch,
+    )
     return True
 
 
