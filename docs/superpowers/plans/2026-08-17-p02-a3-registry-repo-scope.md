@@ -3,7 +3,8 @@
 **Fault:** A3 — global flat fork registry clobbers across repositories
 ([P02 register](../../../projects/P02-agent-fork-fault-remediation.md)).
 
-**Status:** gate 1 (adversarial verification) in progress. Gates 3–6 open.
+**Status:** gates 1 and 3 closed. Gate 4 (adversarial plan review) in its
+third round. Gates 5 and 6 open.
 
 **Worktree:** `worktree-p02-a3-registry-repo-scope`, based on `origin/main`
 at `aefcda0`.
@@ -134,13 +135,28 @@ A3 is removing an *unsafe* resolution path, which is not the same as
 removing a safe one: the only reason such a row resolved before was the
 unscoped bare-name match that is this fault.
 
-**Removal identity must survive migration.** Removal cannot key on the
+**Removal must delete exactly one row.** Removal cannot key on the
 `repository` field, because that field is *derived*: a live v1 row backfills
 to a real identity when the cleanup plan is built, then re-decodes to null
 after cleanup deletes the worktree but before the registry write — so the
 entry would no longer match itself and the row would survive a successful
-cleanup. Removal therefore matches on the persisted, non-derived pair
-`(name, worktree)`.
+cleanup.
+
+A persisted `(name, worktree)` pair fixes that but is **not** an identity, as
+gate 4 round 2 showed: nothing makes the pair unique, the current
+name-filtered removal (`registry.py:116-124`) would naturally be adapted into
+an all-matches filter, and stored worktree strings are not normalized — new
+entries resolve the path (`models.py:70-75`) while raw v1 rows are accepted
+verbatim (`registry.py:29-38`), so several distinct stored spellings can
+resolve to one live path.
+
+The rule is therefore a **protocol, not a key**. Removal matches on the
+complete persisted record as decoded — every stored field, byte-for-byte, no
+resolution applied — and requires exactly one match. Zero or multiple matches
+is a refusal, and the ambiguity is detected when the cleanup plan is built,
+**before** any git mutation, so a cleanup can never delete a worktree and
+then fail to remove or over-remove rows. Path resolution stays confined to
+lookup, where it belongs.
 
 **Two serialization contracts, deliberately separated — three callers, not
 two.** `to_dict()` (`models.py:77-85`) currently feeds the on-disk registry
@@ -177,15 +193,35 @@ writer with `registry_busy`.
 - **Probing is a separate, explicit step** performed only by mutation paths,
   and performed **before** the lock is taken, never while holding it. Order:
   probe → acquire lock → re-decode → merge → atomic write.
-- **Per-row failure classification is explicit.** A worktree that is absent,
-  or present but not a valid git worktree, is a *permanent* negative and
-  persists as null. A probe that fails transiently — nonzero git exit,
-  `OSError` starting git, permission denial, an in-progress repair — leaves
-  the row **unmigrated in memory and unchanged on disk**, so a later run can
-  still resolve it. One bad row never aborts `list` and never blocks a
-  mutation on unrelated rows.
-- **v2 null rows are re-probed** on subsequent mutations, so a transient
-  failure or a later `git worktree repair` self-heals.
+- **One failure rule, no classifier.** A row whose identity cannot be
+  resolved — for any reason: worktree absent, not a valid git worktree,
+  nonzero git exit, `OSError` starting git, permission denied — persists as
+  null. One bad row never aborts `list` and never blocks a mutation on
+  unrelated rows.
+
+  The rejected revision instead split permanent from transient failures and
+  claimed a transient row stayed "unchanged on disk". That was internally
+  contradictory — every mutation atomically rewrites the *whole* document
+  (`registry.py:70-92`), so one row cannot stay unwritten while another is
+  written — and the distinction could not be drawn anyway, since an invalid
+  worktree is normally *observed as* a nonzero git exit (`git.py:98-105`).
+  Since v2 null already means "unknown", both outcomes persist identically
+  and the classifier had no consumer.
+- **Null rows are never re-probed.** The rejected revision promised
+  self-healing on a later mutation, which contradicted this document's own
+  reason for making null rows inert: an unrelated worktree occupying a stale
+  row's historical path would be probed and its identity grafted onto the
+  stale row, restoring the authority the null rule exists to deny. It was
+  also A7's scope — automatic stale-entry repair — which A3 explicitly
+  excludes.
+- **Merge rule: the under-lock document is authoritative.** Probe results are
+  computed against a pre-lock snapshot, so the re-decode under the lock may
+  show a different row set. A probe result is applied only to a row that is
+  still present and whose complete persisted record is byte-for-byte
+  unchanged since the snapshot. Rows added under the lock are preserved
+  untouched; rows absent under the lock are never re-appended. Without this
+  rule the pre-lock probe would lose a concurrently-added row or resurrect a
+  concurrently-removed one.
 - **Ordering is null-safe.** The sort key wraps `repository` as
   `(item.repository is None, item.repository or "")` rather than placing a
   possibly-`None` value in a tuple, which would raise `TypeError` on a row
@@ -217,33 +253,38 @@ A8's TOCTOU redesign.
 2. **`list` is left unchanged** — global, unfiltered, public JSON pinned at
    `"version": 1`.
 
-**New error code.** `cleanup_repository_mismatch`, exit 5, "cleanup target's
-repository identity does not match the invoking repository" — matching the
-existing `cleanup_*` refusal family in `errors.py:33-47`, all of which refuse
-before an unsafe mutation. The publishable-tier error catalog (REQ-38 /
-R7.12) is updated with it.
+**Two new error codes**, both exit 5, both joining the `cleanup_*` refusal
+family in `errors.py:33-47` whose members all refuse before an unsafe
+mutation, and both added to the publishable-tier catalog (REQ-38 / R7.12):
 
-Two constraints on it, both from gate 4:
+| Code | Meaning |
+|---|---|
+| `cleanup_registry_mismatch` | the target worktree's **live** repository identity differs from the identity stored in its registry record |
+| `cleanup_registry_ambiguous` | the selected record does not match exactly one persisted row — zero or several |
 
-- **The wording is deliberately neutral.** The rejected revision named it
-  `cleanup_foreign_repository`, "belongs to another repository" — which is
-  false in the case that will produce it most often in practice: the same
-  repository, moved on disk, whose stored common-directory path no longer
-  matches the live one.
-- **It must be catalogued before any code raises it.** `T-OUT-14`
-  (`tests/cli/test_out.py:442-469`) inventories literal production error
-  codes and requires exact equality with `ERROR_CATALOG`, and
-  `PreconditionError` degrades an uncatalogued code to
-  `ValueError("uncataloged precondition error code")` (`errors.py:77-86`).
-  The rejected revision raised it in step 5 and catalogued it in step 7,
-  which would have left two steps unconditionally red.
+Naming went through two corrections. `cleanup_foreign_repository` ("belongs
+to another repository") was false for the case that will produce it most
+often: the same repository, moved on disk. `cleanup_repository_mismatch`
+("does not match the invoking repository") was still wrong about *which two
+things are compared* — the check is live-versus-stored on the target record,
+which is why it also fires for an explicit path used from a non-repository
+directory, where there is no invoking repository at all.
 
-**Moved repositories are an accepted, typed limitation.** Identity continuity
-across a repository move is explicitly not supported. The refusal above is
-the recovery surface, and the documentation states the manual remedy rather
-than attempting an automatic rebind — path reuse is indistinguishable from
-legitimate movement, which is the same reasoning that rules out the null-row
-path exception.
+**Both must be catalogued before any code raises them.** `T-OUT-14`
+(`tests/cli/test_out.py:442-469`) inventories literal production error codes
+and requires exact equality with `ERROR_CATALOG`, and `PreconditionError`
+degrades an uncatalogued code to
+`ValueError("uncataloged precondition error code")` (`errors.py:77-86`).
+
+**Moved repositories: an accepted limitation with a named remedy.** Identity
+continuity across a repository move is not supported — path reuse is
+indistinguishable from legitimate movement, the same reasoning that rules out
+null-row rebinding. The remedy is the existing `--force` flag, whose
+documented meaning is already "extend targeting" beyond registry ownership
+(`cleanup.py:158-162`): `--force` downgrades `cleanup_registry_mismatch` from
+a refusal to a notice, so the user can clean the worktree, and the stale row
+is then A7's to prune. The refusal message names both the stored and the live
+identity so the user can see what moved.
 
 **The containment check is a guard, not a guarantee.** Target resolution
 happens before CLI consent (`cli.py:1087-1105`) and mutation happens later
@@ -293,12 +334,21 @@ Full inventory, which the rejected revision did not enumerate:
 
 - Replacement identity `(repository, name)` with an explicit **non-null
   guard** on both sides, so two null rows never compare equal.
-- Removal keys on the persisted `(name, worktree)` pair, per the design rule
-  — not on the derived `repository` field.
-- `find_owned` matches an exact resolved worktree path **first**, before any
-  attempt to resolve the invoking repository, so path targeting keeps working
-  from a non-repository cwd; name and branch matching then requires a
-  non-null invoking identity.
+- Removal takes the complete persisted record and requires exactly one match,
+  per the design rule — not the derived `repository` field, and not a
+  `(name, worktree)` pair.
+- `find_owned` keeps its **existing single-pass, creation-ordered scan and
+  its existing selector precedence**; the only change is that a name or
+  branch match now additionally requires a non-null invoking identity to
+  equal the row's. Path matching is untouched, which keeps explicit paths
+  working from a non-repository cwd for free.
+
+  The rejected revision promoted exact-path matches ahead of all symbolic
+  matches. That is a new targeting policy `REQ-31` does not define
+  (`REQUIREMENTS.md:151-154`), it silently changes behavior for a token that
+  is both a valid fork name and a valid relative path, and existing tests
+  cover only unambiguous targets so they would have stayed green through the
+  change. Not needed for A3, so not done in A3.
 - `pipeline.py` builds one named entry from `creation.common_dir`
   (`repository.py:336-343`) and hands that same object to the lineage-failure
   compensation.
@@ -309,15 +359,18 @@ Full inventory, which the rejected revision did not enumerate:
 
 ### Slice C — cleanup safety and migration behavior
 
-- `cleanup_repository_mismatch` enters `ERROR_CATALOG` **before** any code
-  raises it (`T-OUT-14`, `PreconditionError`).
-- Cleanup resolves the invoking common directory for name and branch lookup,
-  keeps explicit paths global, requires the selected worktree's live common
-  directory to equal its stored identity before planning, and removes
-  `plan.entry` by its persisted pair. No null-identity exception.
-- Migration probing runs before the lock, classifies per row (permanent
-  negative → null; transient failure → unmigrated, disk unchanged), and
-  re-probes v2 nulls.
+- `cleanup_registry_mismatch` and `cleanup_registry_ambiguous` enter
+  `ERROR_CATALOG` **before** any code raises them (`T-OUT-14`,
+  `PreconditionError`).
+- Cleanup resolves the invoking common directory for name and branch lookup
+  and keeps explicit paths global. While the plan is built — **before any git
+  mutation** — it requires the target's live common directory to equal its
+  stored identity, and requires the selected record to match exactly one
+  persisted row. Removal then deletes that one row. No null-identity
+  exception; `--force` downgrades the mismatch refusal to a notice.
+- Migration probing runs before the lock; an unresolvable row persists as
+  null and is never re-probed; the under-lock document is authoritative and
+  probe results apply only to byte-for-byte unchanged rows.
 - Behavioral tests, written first: the four repros; non-dry-run cleanup from
   repoE cannot touch repoF; **live-v1 cleanup by name removes worktree,
   branch, and row** (the migration-derived equality regression); a stale null
@@ -331,6 +384,17 @@ Full inventory, which the rejected revision did not enumerate:
   waiting, reader during v1→v2 replacement; raw v1 bytes unchanged after
   `read_registry` and `list`; bare repository identity; linked-worktree
   identity; `find_owned` with a null invoking identity cannot match null rows.
+- The two decisive merge races, each asserting an **explicit expected final
+  registry document** — row count and exact identities, not just a spot
+  check: a row added under the lock while another writer was probing
+  **survives**; a row removed under the lock while another writer was probing
+  is **not resurrected**.
+- Removal ambiguity: two rows sharing a resolved worktree path, two rows
+  sharing name and worktree, and the same worktree stored under differing
+  spellings (symlinked, trailing separator) each refuse with
+  `cleanup_registry_ambiguous` **before** any worktree is removed.
+- Moved repository: `cleanup` refuses with `cleanup_registry_mismatch` naming
+  both identities, and `--force` downgrades it to a notice and completes.
 
 ### Slice D — documentation, matrix, full gate
 
@@ -371,4 +435,20 @@ mutate window belongs to A8), and A3 narrows the stale-row surface that A7
 owns rather than widening it — the only reason a stale row resolved before
 was the unscoped bare-name match that *is* this fault.
 
-Round 2 review: pending.
+## Adversarial plan review (gate 4) — round 2 outcome
+
+**Codex verdict: REJECT** (7 remaining changes; 3 P0). Round 1 findings 4–9
+and 11 were verified as fully absorbed. Four were only partial, and the
+revision introduced new defects of its own. All absorbed; none declined.
+
+| Finding | Resolution |
+|---|---|
+| **P0** — the plan declared null rows inert *because* historical path equality is not proof of ownership, then re-probed them, letting an unrelated worktree at that path graft its identity onto the stale row. Also A7 scope drift, contradicting A3's own exclusion list | Re-probing removed. Null rows are never re-probed in A3. With no consumer left, the permanent-versus-transient failure classifier was deleted too — both outcomes persist identically as null, and the distinction could not have been drawn anyway since an invalid worktree *is* observed as a nonzero git exit |
+| **P0** — `(name, worktree)` is not unique, would naturally become an all-matches filter, and stored path spellings are not normalized (resolved on create, verbatim on v1 decode), so several stored rows can resolve to one live path | Replaced with a protocol: match the complete persisted record byte-for-byte, require **exactly one**, refuse otherwise via `cleanup_registry_ambiguous` — checked while the plan is built, before any git mutation |
+| **P0** — "merge" was named but never defined; a pre-lock probe merged naively loses a concurrently-added row or resurrects a concurrently-removed one. And "transient row unchanged on disk" is contradictory, since every write rewrites the whole document | Merge rule stated: the under-lock document is authoritative, probe results apply only to byte-for-byte unchanged rows, additions preserved, removals never re-appended. Both interleavings added as tests with explicit expected final documents |
+| **P1** — exact-path-first matching is a new targeting policy `REQ-31` does not define, silently changes behavior for a token that is both a name and a relative path, and existing tests would stay green through it | Reverted. `find_owned` keeps its existing single-pass creation-ordered scan and selector precedence; the only change is that name and branch matches additionally require a non-null invoking identity |
+| **P1** — `cleanup_repository_mismatch` still described the wrong comparison; the check is live-versus-stored on the target, so it also fires for an explicit path used outside any repository | Renamed `cleanup_registry_mismatch` with an accurate description; the message names both the stored and the live identity |
+| **P1** — migration and concurrency tests lacked explicit expected final registry state | Every such test now asserts the full expected document, row count and identities included |
+| **P2** — the moved-repository "manual remedy" was promised but never named; the status line was stale | Remedy named: `--force` downgrades the mismatch refusal to a notice, per its existing "extend targeting" meaning, leaving the stale row to A7. Status line corrected |
+
+Round 3 review: dispatched.
