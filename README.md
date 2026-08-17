@@ -1,6 +1,8 @@
 # agent-fork
 
-**Fork your repo and your agent session in one command.**
+**Forking a session is easy; forking your files isn't. This Claude Code /
+Codex skill gives the forked session its own branch and worktree with every
+uncommitted file copied and verified.**
 
 [![CI](https://github.com/smorinlabs/agent-fork/actions/workflows/ci.yml/badge.svg)](https://github.com/smorinlabs/agent-fork/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
@@ -11,16 +13,29 @@ want to rebuild, and your working tree is full of uncommitted work. Now you want
 to try a *second* approach — without stashing, without losing the first one, and
 without starting the conversation over.
 
-`agent-fork` does that in one command. It creates a new branch and a linked Git
-worktree, copies your current staged, unstaged, and untracked files into it,
-verifies the copy matched, and prints the exact command that continues *this
-conversation* in that new worktree. Your original worktree and session are never
-touched.
+The `agent-fork` skill does that without leaving the conversation. Type
+`/agent-fork try-redis` (Claude Code) or `$agent-fork try-redis` (Codex) and it
+creates a new branch and a linked Git worktree, copies your current staged,
+unstaged, and untracked files into it, verifies the copy matched, and prints
+the exact command that continues *this conversation* in that new worktree. Your
+original worktree and session are never touched.
 
-Outside an agent session it does the same branch-and-worktree work and prints a
-`cd` command instead, so the same tool works in a plain terminal.
+Underneath the skill is a standalone `agent-fork` CLI that does the same work
+from any terminal. Outside an agent session it prints a `cd` command instead of
+a session-continuation command, so the same tool covers plain Git workflows.
 
 ## Demo
+
+From inside your agent session:
+
+```text
+/agent-fork try-redis       # Claude Code — fork without leaving the conversation
+$agent-fork try-redis       # Codex — same skill, same behavior
+```
+
+The skill previews the fork — target branch, destination worktree, the files it
+would carry — and asks for confirmation before creating anything. It drives the
+CLI below, which works directly from a terminal too:
 
 ```console
 $ agent-fork fork try-redis --dry-run
@@ -35,76 +50,20 @@ Drop `--dry-run` and the fork is created. Paste the final line into a fresh
 terminal and the agent picks up where it left off — same context, new branch,
 your uncommitted work already there.
 
-## Install
+## The skill
 
-```bash
-uv tool install git+https://github.com/smorinlabs/agent-fork
-```
-
-Or run it without installing:
-
-```bash
-uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
-```
-
-> PyPI and Homebrew releases land with v1.0.0.
-
-**Requirements:** Python 3.11+ and Git 2.19+. Forking an agent session
-additionally needs Claude Code 2.0.73+ or Codex 0.95+ (Codex's native `fork`
-itself requires 0.81+). Run `agent-fork doctor` to check all of this at once.
-
-### Local development installation
-
-Run these commands from the repository root before registry publication. The
-editable `uv` tool install keeps the command connected to this checkout. The
-two `skillsmith dev` commands create user-level development symlinks for Claude
-Code and Codex, so both agents discover the same canonical skill.
-
-```bash
-uv tool install --editable --force .
-skillsmith dev agent-fork --tool claude-code \
-  --source "$PWD/.agents/skills/agent-fork"
-skillsmith dev agent-fork --tool codex \
-  --source "$PWD/.agents/skills/agent-fork"
-```
-
-Verify the installed version and both placements:
-
-```bash
-agent-fork --version
-skillsmith list agent-fork --long
-```
-
-The version command must print `agent-fork 1.0.0`. The placement list must show
-`~/.claude/skills/agent-fork` for Claude Code and
-`~/.agents/skills/agent-fork` for Codex, both resolving to this repository's
-`.agents/skills/agent-fork` directory.
-
-## Quickstart
-
-```bash
-agent-fork doctor              # confirm Git, agent CLIs, config, and XDG paths
-agent-fork fork try-redis      # create the fork, print the paste command
-agent-fork session             # inspect context and print a native fork command
-agent-fork list                # see the forks you have created
-agent-fork cleanup try-redis --yes   # remove one when you are done
-```
-
-## From inside your agent session
-
-You do not need to leave the conversation. This repository ships a companion
-skill — just type:
+The full set of skill invocations:
 
 ```text
+/agent-fork try-redis       # Claude: explicit fork name
+$agent-fork try-redis       # Codex: explicit fork name
+/agent-fork try-redis --now  # Claude: fork immediately, no confirmation
+$agent-fork try-redis --now  # Codex: fork immediately, no confirmation
+/agent-fork                 # fork with context-aware naming
 /agent-fork --session       # Claude: inspect this agent session
 $agent-fork --session       # Codex: inspect this agent session
 /agent-fork --session-only  # Claude: print only the native session-fork command
 $agent-fork --session-only  # Codex: print only the native session-fork command
-/agent-fork try-redis --now  # Claude: fork immediately, no confirmation
-$agent-fork try-redis --now  # Codex: fork immediately, no confirmation
-/agent-fork try-redis       # Claude: explicit fork name
-$agent-fork try-redis       # Codex: explicit fork name
-/agent-fork                 # fork with context-aware naming
 ```
 
 The skill calls the installed CLI directly. When that CLI is missing, it prints
@@ -128,9 +87,75 @@ directory from the active agent session; they do not accept a directory option.
 The skill lives at one canonical Agent Skills artifact,
 `.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`; Claude
 Code discovers the same artifact through `.claude/skills/agent-fork` as
-`/agent-fork`. It calls `agent-fork` on `PATH`; when that is missing it prints
-the source install command and, if it can confirm a local checkout, offers to
-run from it instead.
+`/agent-fork`.
+
+## Install
+
+Install the CLI:
+
+```bash
+uv tool install git+https://github.com/smorinlabs/agent-fork
+```
+
+Or run it without installing:
+
+```bash
+uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
+```
+
+> PyPI and Homebrew releases land with v1.0.0.
+
+**Requirements:** Python 3.11+ and Git 2.19+. Forking an agent session
+additionally needs Claude Code 2.0.73+ or Codex 0.95+ (Codex's native `fork`
+itself requires 0.81+). Run `agent-fork doctor` to check all of this at once.
+
+### Install the skill
+
+The skill ships in this repository. Clone it, then symlink the canonical
+artifact into the user-level skill directories for both agents:
+
+```bash
+git clone https://github.com/smorinlabs/agent-fork
+cd agent-fork
+mkdir -p ~/.claude/skills ~/.agents/skills
+ln -sfn "$PWD/.agents/skills/agent-fork" ~/.claude/skills/agent-fork
+ln -sfn "$PWD/.agents/skills/agent-fork" ~/.agents/skills/agent-fork
+```
+
+Claude Code then discovers it as `/agent-fork` and Codex as `$agent-fork`.
+
+### Local development installation
+
+Run these commands from the repository root before registry publication. The
+editable `uv` tool install keeps the command connected to this checkout; skill
+placement uses the same two symlinks shown above.
+
+```bash
+uv tool install --editable --force .
+mkdir -p ~/.claude/skills ~/.agents/skills
+ln -sfn "$PWD/.agents/skills/agent-fork" ~/.claude/skills/agent-fork
+ln -sfn "$PWD/.agents/skills/agent-fork" ~/.agents/skills/agent-fork
+```
+
+Verify the installed version and both placements:
+
+```bash
+agent-fork --version
+readlink ~/.claude/skills/agent-fork ~/.agents/skills/agent-fork
+```
+
+The version command must print `agent-fork 1.0.0`. Both symlinks must resolve
+to this repository's `.agents/skills/agent-fork` directory.
+
+## Quickstart
+
+```bash
+agent-fork doctor              # confirm Git, agent CLIs, config, and XDG paths
+agent-fork fork try-redis      # create the fork, print the paste command
+agent-fork session             # inspect context and print a native fork command
+agent-fork list                # see the forks you have created
+agent-fork cleanup try-redis --yes   # remove one when you are done
+```
 
 ## How it works
 
