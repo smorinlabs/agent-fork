@@ -149,3 +149,17 @@ These were raised by the TS04 review, are real, and are **not** fixed here:
 5. Both new `subprocess.run` call sites pass the caller environment
    unsanitized — the surface A2 exists to harden, now merged and to be swept
    across these sites.
+6. Ambiguity is untested at the subprocess boundary. Production now counts
+   tokens across stdout and stderr, but T-PRE-21 still injects a
+   pre-combined string, so no test proves the split-stream case the fix was
+   written for. Closing it needs a stub CLI that prints its version on one
+   stream and a banner on the other — a fixture shape the sealed harness
+   does not currently offer.
+
+Live re-validation after the review fixes (the hermetic suite feeds the
+probe synthetic help, so this is the only check of the real parser against
+real CLIs): `doctor` reports `claude: 4 documented; codex: 1 documented`
+against Claude Code 2.1.234 and Codex 0.147.0, and `fork --dry-run` renders
+the full recipe with no notices and no mutation. Claude Code moved
+2.1.233 → 2.1.234 during this item's review, which is the drift rate the
+whole mechanism exists to survive.
