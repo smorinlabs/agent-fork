@@ -13,19 +13,24 @@ from pathlib import Path
 PRODUCT_GIT_MIN = (2, 19, 0)
 _ACTIVE = threading.local()
 
-_INJECTED_CONFIG_NAMES = frozenset({"GIT_CONFIG_COUNT"})
+_INJECTED_CONFIG_NAMES = frozenset({"GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"})
 _INJECTED_CONFIG_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
 
 
 def _without_config_injection(env: Mapping[str, str] | None) -> dict[str, str]:
     """Drop inline Git configuration injected through the environment.
 
-    `GIT_CONFIG_COUNT` with `GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>` adds
-    settings that outrank every configuration file, so an injected value
-    silently overrides what the repository and the user actually configured.
-    Nothing in this tool needs that, and it has produced at least one real
-    divergence: injected `core.symlinks=false` turned a committed symlink into
-    a regular file in the child worktree.
+    Two channels do this. `GIT_CONFIG_COUNT` with
+    `GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>` adds settings that outrank every
+    configuration file, and `GIT_CONFIG_PARAMETERS` — which Git uses internally
+    to propagate `-c` to subprocesses — does the same. Either silently overrides
+    what the repository and the user actually configured, and nothing in this
+    tool needs them.
+
+    Both were shown to produce the same real divergence: injected
+    `core.symlinks=false` turns a committed symlink into a regular file in the
+    child worktree, while the fork reports success. Stripping only the first
+    channel left the second open, so both are removed.
 
     `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` are deliberately preserved.
     They name configuration *files*, which is how tooling — including this

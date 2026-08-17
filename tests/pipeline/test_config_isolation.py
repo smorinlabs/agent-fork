@@ -83,10 +83,7 @@ def test_injected_core_symlinks_cannot_flatten_committed_symlinks(repo_scenario)
     world = repo_scenario()
     (world.parent_path / "target.txt").write_bytes(b"target content\n")
     _git(world, "add", "target.txt")
-    subprocess.run(
-        ["ln", "-s", "target.txt", str(world.parent_path / "committed_link")],
-        check=True,
-    )
+    (world.parent_path / "committed_link").symlink_to("target.txt")
     _git(world, "add", "committed_link")
     _git(world, "commit", "-m", "commit a symlink")
     (world.parent_path / "tracked.txt").write_bytes(
@@ -178,3 +175,32 @@ def test_repository_local_configuration_still_applies(repo_scenario):
         .strip()
     )
     assert observed == "repo-local-value"
+
+
+@pytest.mark.matrix("T-GRD-21")
+def test_git_config_parameters_is_also_stripped(repo_scenario):
+    """`GIT_CONFIG_PARAMETERS` is a second inline-injection channel.
+
+    Git uses it internally to propagate `-c` settings to subprocesses, and it
+    injects configuration exactly as the `GIT_CONFIG_COUNT` triple does. An
+    earlier revision stripped only the triple, leaving this path open: probing
+    reproduced the full issue #35 defect through it, with a committed symlink
+    flattened and the fork reporting success.
+    """
+    world = repo_scenario()
+    (world.parent_path / "target.txt").write_bytes(b"target content\n")
+    _git(world, "add", "target.txt")
+    (world.parent_path / "committed_link").symlink_to("target.txt")
+    _git(world, "add", "committed_link")
+    _git(world, "commit", "-m", "commit a symlink")
+    (world.parent_path / "tracked.txt").write_bytes(
+        b"an edit, so the fork carries state\n"
+    )
+
+    env = dict(world.env)
+    env["GIT_CONFIG_PARAMETERS"] = "'core.symlinks=false'"
+    result = _fork(world, "params", env=env)
+
+    assert (result.creation.path / "committed_link").is_symlink(), (
+        "GIT_CONFIG_PARAMETERS bypassed sanitization"
+    )

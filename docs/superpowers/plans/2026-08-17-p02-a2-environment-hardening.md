@@ -677,3 +677,27 @@ so overriding it would substitute the tool's judgement for the user's.
 **Remaining, and deliberately not fixed:** `GIT_ATTR_NOSYSTEM` is unprobed
 because this machine has no system attributes file. That is a coverage gap, not
 a known defect, and it belongs with the other coverage items in issue #31.
+
+## Review finding — the first sanitization was incomplete
+
+PR #36's review identified a second inline-injection channel:
+**`GIT_CONFIG_PARAMETERS`**, which Git uses internally to propagate `-c` to
+subprocesses. Stripping only the `GIT_CONFIG_COUNT` triple left it open.
+
+Probed directly:
+
+| Channel | Committed symlink in the child |
+|---|---|
+| `GIT_CONFIG_COUNT` triple (stripped) | symlink — fix held |
+| `GIT_CONFIG_PARAMETERS` (not stripped) | **flattened — injection survived** |
+
+So the full issue #35 defect reproduced through the unblocked channel, with the
+fork again reporting success. The claim that "the injection class is closed"
+was wrong until this landed. `T-GRD-21` pins it, observed RED first.
+
+**Lesson for the enumeration argument.** The case for sanitizing rather than
+pinning was that sanitization "kills the class without enumerating which keys
+matter". That is true of *keys*, but sanitization still requires enumerating
+*channels* — and one was missed on the first pass. The advantage is real but
+narrower than stated: two channels to know about instead of an open-ended set
+of configuration keys.
