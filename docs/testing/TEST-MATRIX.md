@@ -235,7 +235,7 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 ---
 
 ## G-VER — Verify ladder
-Status: tdd
+Status: done
 
 Purpose: verify ladder — the 6 base checks plus per-topology conditional checks (branch≠default on main; common-dir match in worktrees; detached recorded); fault-injection rows.
 
