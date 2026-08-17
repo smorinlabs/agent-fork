@@ -9,7 +9,55 @@ from verification verdict through implementation sign-off.
 | 3. Design doc | this document |
 | 4. Plan + adversarial plan review (incl. Codex) | **APPROVE-WITH-CHANGES** (2026-08-16) — all changes incorporated below |
 | 5. Implementation (TDD, subagent-driven) | **complete** — see Outcome below |
-| 6. Adversarial implementation review (incl. Codex) | dispatched 2026-08-16 |
+| 6. Adversarial implementation review (incl. Codex) | **REJECT** 2026-08-16 → findings absorbed or routed; see below |
+
+## Gate 6 — adversarial implementation review
+
+Codex returned **REJECT** against commits `06f9e88`, `a8d2877`, `b06c5b8`.
+The findings were sound; three were defects this work introduced.
+
+**Absorbed into A1** (its own approved design, or defects introduced here):
+
+1. *Child membership comparison was tautological.* `capture_state` stores the
+   path tuple it is handed, and verification handed it the parent's own list,
+   so missing/extra could never fire. The child now resolves its own
+   inventory. `T-VER-32` pins it under `status.showUntrackedFiles=no`, which
+   blinds the porcelain rung; that rung now pins `--untracked-files=all` so
+   ambient configuration cannot suppress it either.
+2. *Executable-bit comparison caused false rollbacks.* It tested any of
+   `0o111`, but Git regular-file index modes are only `100644`/`100755`, so a
+   group- or other-execute bit made an identical file compare unequal. Now
+   `S_IXUSR` only, and mode is not compared for symlinks, whose permissions
+   transport does not reproduce.
+3. *The inventory did not control materialization.* `collect_inventory` now
+   returns faceted `Inventory`, resolved once before the worktree exists and
+   passed into `materialize`, which no longer re-enumerates. Closes the
+   transient-membership false pass. The fallback resolution for direct callers
+   sits inside the try block so a Git failure rolls back rather than escaping
+   as `runtime_error`.
+4. *Structured failure detail landed as promised.* `details.failed_checks`
+   carries path, kind, and detail per difference with exactly one check marked
+   primary (parent drift wins). `verify_failed` and exit 1 unchanged.
+5. *Repository-controlled text is escaped on both surfaces.* Terminal escapes
+   in a filename can no longer drive the reader's terminal, and surrogate
+   bytes can no longer break machine output. `T-VER-33` pins it.
+6. *Quadratic comparison* — found by self-review before the verdict, fixed in
+   `6b73606`.
+
+**Routed to issues** (owner decision 2026-08-17: absorb only design-promised
+items and defects introduced here; open the rest):
+
+- #28 root-confined hashing and verification I/O exception safety (overlaps A2)
+- #29 intent-to-add paths as raw pathspecs (registered as A13(e))
+- #30 full-fork latency gate and slow-path progress output (overlaps A13(h))
+- #31 coverage gaps: dirty submodules (A6), sparse checkout, exotic filenames
+
+**Confirmed correct by the review:** inventory collection across rename
+endpoints, deletions, intent-to-add, staged-plus-unstaged, untracked and
+opted-in ignored paths; `ls-files --stage -z` parsing including
+`surrogateescape`; gitlink pruning; the parent-index bracket catching the `MM`
+blob swap *for the right reason*; `--no-with-state`, detached HEAD, empty
+repository, and symmetric-conversion behavior.
 
 ## Outcome (gate 5)
 
