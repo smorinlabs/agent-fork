@@ -59,21 +59,20 @@ that smells like scope creep or divergence from core functionality.
 
 ### Tests & Tasks
 
-Blocked on P02 (at minimum A3) per Depends on. Each item: plan + adversarial
-plan review first, tests before implementation (TDD bias).
+Blocked on P02 (at minimum A3) per Depends on. Each item's TS task owns the
+design doc (`docs/superpowers/plans/<date>-p03-b<NN>-<slug>.md`): the
+implementation plan, its adversarial review incl. Codex, and the
+failing-test matrix observed RED before implementation — the P01-TS16
+pattern. The T task implements per that approved doc.
 
-- [ ] [P03-T01] B1 implementation plan (`status`/`diff`/`finish`/`sync` scope + sequencing) with adversarial plan review incl. Codex
-- [ ] [P03-TS01] B1 failing-test-first coverage per approved plan
-- [ ] [P03-T02] B1 implementation + adversarial post-review incl. Codex
-- [ ] [P03-T03] B2 implementation plan (registry session-ID fields, `command <name>` verb, `--session-only` recording) with adversarial plan review incl. Codex
-- [ ] [P03-TS02] B2 failing-test-first coverage per approved plan
-- [ ] [P03-T04] B2 implementation + adversarial post-review incl. Codex
-- [ ] [P03-T05] B3 implementation plan (parent field, divergence columns, dynamic completion) with adversarial plan review incl. Codex
-- [ ] [P03-TS03] B3 failing-test-first coverage per approved plan
-- [ ] [P03-T06] B3 implementation + adversarial post-review incl. Codex
-- [ ] [P03-T07] B4 implementation plan (launch surface scope — owner decision on emulator coverage) with adversarial plan review incl. Codex
-- [ ] [P03-TS04] B4 failing-test-first coverage per approved plan
-- [ ] [P03-T08] B4 implementation + adversarial post-review incl. Codex
+- [ ] [P03-TS01] B1 design doc: plan (`status`/`diff`/`finish`/`sync` scope + sequencing), adversarial plan review incl. Codex, failing-test matrix RED before implementation
+- [ ] [P03-T01] B1 implementation per approved doc + adversarial post-review incl. Codex
+- [ ] [P03-TS02] B2 design doc: plan (registry session-ID fields, `command <name>` verb, `--session-only` recording), adversarial plan review incl. Codex, failing-test matrix RED before implementation
+- [ ] [P03-T02] B2 implementation per approved doc + adversarial post-review incl. Codex
+- [ ] [P03-TS03] B3 design doc: plan (parent field, divergence columns, dynamic completion), adversarial plan review incl. Codex, failing-test matrix RED before implementation
+- [ ] [P03-T03] B3 implementation per approved doc + adversarial post-review incl. Codex
+- [ ] [P03-TS04] B4 design doc: plan (launch surface scope — owner decision on emulator coverage), adversarial plan review incl. Codex, failing-test matrix RED before implementation
+- [ ] [P03-T04] B4 implementation per approved doc + adversarial post-review incl. Codex
 - [ ] Regression Test Status
 
 ### Deliverable
