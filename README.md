@@ -105,9 +105,10 @@ above (advanced flags are for direct CLI use), and the two inspection forms
 always use the active session's directory (there is no directory option).
 
 The skill ships as one copy: the Agent Skills artifact at
-`.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`;
-Claude Code discovers the same files through the `.claude/skills/agent-fork`
-symlink as `/agent-fork`. The plugin manifests (`.claude-plugin/` for Claude
+`.agents/skills/agent-fork` in this repository. Codex discovers it there as
+`$agent-fork`; Claude Code discovers the same files through the repository's
+`.claude/skills/agent-fork` symlink as `/agent-fork`. The user-level installs
+above create the same two links under your home directory. The plugin manifests (`.claude-plugin/` for Claude
 Code, `.codex-plugin/` for Codex) and the repo-root `skills/` directory all
 point at that same artifact.
 
