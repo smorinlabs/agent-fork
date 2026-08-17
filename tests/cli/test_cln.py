@@ -85,7 +85,7 @@ def test_tty_consent_prompt_names_exact_removal_targets(repo_scenario):
     from conftest import pty_run
 
     world, result = _forked(repo_scenario, "prompt")
-    completed = pty_run(["cleanup", "prompt"], world.env, 2)
+    completed = pty_run(["cleanup", "prompt"], world.env, 2, world.parent_path)
     assert completed.returncode == 2
     prompt = completed.tty.decode()
     assert f"remove worktree {result.creation.path}" in prompt
@@ -96,7 +96,7 @@ def test_tty_consent_prompt_names_exact_removal_targets(repo_scenario):
 
 @pytest.mark.matrix("T-CLN-13")
 def test_dry_run_prints_removal_plan_without_mutating(repo_scenario):
-    from agent_fork.registry import find_owned
+    from agent_fork.registry import find_candidates
     from conftest import run_cli
 
     world, result = _forked(repo_scenario, "dry")
@@ -105,7 +105,7 @@ def test_dry_run_prints_removal_plan_without_mutating(repo_scenario):
     assert b"would remove worktree" in completed.stdout
     assert str(result.creation.path).encode() in completed.stdout
     assert result.creation.path.exists()
-    assert find_owned("dry", env=world.env) is not None
+    assert find_candidates("dry", env=world.env)
 
 
 @pytest.mark.matrix("T-CLN-15")

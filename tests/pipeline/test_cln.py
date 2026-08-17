@@ -119,7 +119,7 @@ def test_cleanup_deletes_branch_unless_keep_branch(repo_scenario):
 @pytest.mark.matrix("T-CLN-04")
 def test_cleanup_removes_registry_entry(repo_scenario):
     from agent_fork.cleanup import cleanup, resolve_cleanup_target
-    from agent_fork.registry import find_owned
+    from agent_fork.registry import find_candidates
 
     world, _ = _forked(repo_scenario)
     cleanup(
@@ -127,7 +127,7 @@ def test_cleanup_removes_registry_entry(repo_scenario):
         cwd=world.parent_path,
         env=world.env,
     )
-    assert find_owned("cleanup", env=world.env) is None
+    assert not find_candidates("cleanup", env=world.env)
 
 
 @pytest.mark.parametrize(

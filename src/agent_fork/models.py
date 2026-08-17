@@ -52,7 +52,13 @@ class ResolvedConfig:
 
 @dataclass(frozen=True)
 class RegistryEntry:
-    """Stable v1 record for one worktree created by agent-fork."""
+    """One worktree created by agent-fork.
+
+    `repository` is the resolved Git common directory the fork belongs to. It
+    is appended last so existing positional construction keeps its meaning, and
+    it is None for rows migrated from a v1 registry, where the repository was
+    never recorded and cannot be inferred after the fact.
+    """
 
     name: str
     branch: str
@@ -60,6 +66,7 @@ class RegistryEntry:
     agent: str | None
     created_at: str
     mode: str = "agent"
+    repository: str | None = None
 
     @classmethod
     def create(
@@ -70,11 +77,21 @@ class RegistryEntry:
         worktree: Path,
         agent: str | None,
         mode: str = "agent",
+        repository: Path | str | None = None,
     ) -> RegistryEntry:
         created = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-        return cls(name, branch, str(worktree.resolve()), agent, created, mode)
+        return cls(
+            name,
+            branch,
+            str(worktree.resolve()),
+            agent,
+            created,
+            mode,
+            None if repository is None else str(repository),
+        )
 
     def to_dict(self, *, include_exists: bool = False) -> dict[str, object]:
+        """Serialize for public command output; `repository` is internal."""
         value: dict[str, object] = {
             "name": self.name,
             "branch": self.branch,
@@ -86,3 +103,23 @@ class RegistryEntry:
         if include_exists:
             value["worktree_exists"] = Path(self.worktree).exists()
         return value
+
+    def to_registry_dict(self) -> dict[str, object]:
+        """Serialize for the on-disk registry, which records `repository`."""
+        return {**self.to_dict(), "repository": self.repository}
+
+    def token(self) -> tuple[str, ...]:
+        """Identity for compare-and-swap removal.
+
+        Built from persisted fields only, never from `repository`, which a
+        migration may fill in between the moment a row is selected and the
+        moment it is removed.
+        """
+        return (
+            self.name,
+            self.branch,
+            self.worktree,
+            self.agent or "",
+            self.created_at,
+            self.mode,
+        )

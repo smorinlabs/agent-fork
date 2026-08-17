@@ -98,7 +98,7 @@ def test_setup_hook_runs_with_worktree_cwd_and_env(repo_scenario):
 @pytest.mark.matrix("T-INC-04")
 def test_setup_hook_failure_is_non_fatal(repo_scenario):
     from agent_fork.pipeline import fork
-    from agent_fork.registry import find_owned
+    from agent_fork.registry import find_candidates
 
     world = repo_scenario()
     _commit_support(world, hook="#!/bin/sh\necho deliberate >&2\nexit 17\n")
@@ -107,7 +107,7 @@ def test_setup_hook_failure_is_non_fatal(repo_scenario):
     assert any(
         "setup hook failed (exit 17): deliberate" in notice for notice in result.notices
     )
-    assert find_owned("hook-fail", env=world.env) is not None
+    assert find_candidates("hook-fail", env=world.env)
 
     second = repo_scenario()
     _commit_support(second, hook="#!/bin/sh\nexit 0\n")
@@ -137,7 +137,7 @@ def test_include_and_hook_run_after_verify(repo_scenario):
     assert result.verification is True
     assert result.included == ("post-verify.env",)
     assert (result.creation.path / "hook-after-verify.txt").read_text() == "hook"
-    from agent_fork.registry import find_owned
+    from agent_fork.registry import find_candidates
 
-    assert find_owned("order", env=world.env) is not None
+    assert find_candidates("order", env=world.env)
     assert result.launch.command.endswith("--fork-session -n order")

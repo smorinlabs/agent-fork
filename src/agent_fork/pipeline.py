@@ -6,6 +6,7 @@ import shlex
 import subprocess
 import uuid
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from agent_fork.agents import (
     preflight_git,
 )
 from agent_fork.content import capture_state, collect_inventory
+from agent_fork.errors import PreconditionError
 from agent_fork.git import run_git
 from agent_fork.include import copy_worktree_includes, run_setup_hook
 from agent_fork.lineage import LineageClaim, add_lineage
@@ -26,6 +28,7 @@ from agent_fork.registry import add_entry, remove_entry
 from agent_fork.repository import (
     WorktreeCreation,
     create_worktree_at_anchor,
+    live_worktree_pairs,
     validate_fork_guards,
 )
 from agent_fork.rollback import run_with_rollback
@@ -151,14 +154,17 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         notices.extend(included.notices)
         hook_notices = run_setup_hook(request.parent, creation.path, env=env)
         notices.extend(hook_notices)
+        entry = RegistryEntry.create(
+            name=request.name,
+            branch=request.branch,
+            worktree=creation.path,
+            agent=resolved_agent.agent if resolved_agent is not None else None,
+            mode="agent" if resolved_agent is not None else "git-only",
+            repository=creation.common_dir,
+        )
         add_entry(
-            RegistryEntry.create(
-                name=request.name,
-                branch=request.branch,
-                worktree=creation.path,
-                agent=resolved_agent.agent if resolved_agent is not None else None,
-                mode="agent" if resolved_agent is not None else "git-only",
-            ),
+            entry,
+            live=live_worktree_pairs(request.parent, env=env),
             env=env,
         )
         if (
@@ -179,7 +185,12 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                     env=env,
                 )
             except Exception:
-                remove_entry(request.name, env=env)
+                # Compensate by removing the row just written, identified
+                # exactly. A bare name would also delete another repository's
+                # same-named fork. A compensation that cannot find its own row
+                # must not mask the failure that triggered it.
+                with suppress(PreconditionError):
+                    remove_entry(entry.token(), env=env)
                 raise
         return included.copied, hook_notices
 

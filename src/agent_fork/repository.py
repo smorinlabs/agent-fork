@@ -130,6 +130,19 @@ def _worktree_branches(
     return branches
 
 
+def live_worktree_pairs(
+    parent: Path, *, env: Mapping[str, str] | None = None
+) -> frozenset[tuple[str, str]]:
+    """Freshly observed (worktree path, branch) pairs for one repository.
+
+    This is the evidence the registry is checked against. Detached worktrees
+    are absent by construction: a fork always has a branch, so a row that
+    matches nothing here is not one of this repository's forks.
+    """
+    attached = _worktree_branches(parent, env=env)
+    return frozenset((str(path), branch) for branch, path in attached.items())
+
+
 _OPERATION_SENTINELS = {
     "rebase": ("rebase-merge", "rebase-apply"),
     "merge": ("MERGE_HEAD",),

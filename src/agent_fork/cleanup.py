@@ -9,7 +9,8 @@ from pathlib import Path
 from agent_fork.errors import AgentForkError, PreconditionError
 from agent_fork.git import run_git
 from agent_fork.models import RegistryEntry
-from agent_fork.registry import find_owned, remove_entry
+from agent_fork.registry import find_candidates, is_live, remove_entry
+from agent_fork.repository import live_worktree_pairs
 from agent_fork.text import escape_terminal_text as _escape_terminal_text
 
 DETAIL_LIMIT = 10
@@ -149,11 +150,41 @@ def resolve_cleanup_target(
     env: Mapping[str, str],
     force: bool = False,
 ) -> CleanupPlan:
-    owned = find_owned(target, env=env)
-    if owned is not None:
+    """Select a fork to remove, confirming every candidate against live state.
+
+    A registry row proposes a target; the invoking repository's worktree list
+    decides whether that proposal still describes reality. A row that names a
+    worktree this repository does not currently have is refused, whether it
+    belongs to another repository or to a fork that no longer exists.
+    """
+    candidates = find_candidates(target, env=env)
+    live: frozenset[tuple[str, str]] = frozenset()
+    try:
+        live = live_worktree_pairs(cwd, env=env)
+    except Exception:
+        # Not invoked inside a repository. Registry rows then confirm against
+        # nothing, so every one of them is refused below.
+        pass
+    actionable = [entry for entry in candidates if is_live(entry, live)]
+    if len(actionable) > 1:
+        paths = ", ".join(_escape_terminal_text(entry.worktree) for entry in actionable)
+        raise PreconditionError(
+            "cleanup_registry_ambiguous",
+            f"several registry records claim {_escape_terminal_text(target)}: {paths}",
+        )
+    if actionable:
+        owned = actionable[0]
         worktree = Path(owned.worktree).resolve()
         return CleanupPlan(
             owned, worktree, owned.branch, _git_root(worktree, env=env), True
+        )
+    if candidates and not force:
+        stale = candidates[0]
+        raise PreconditionError(
+            "cleanup_registry_stale",
+            f"registry records {_escape_terminal_text(stale.worktree)} on "
+            f"{_escape_terminal_text(stale.branch)}, which is not a worktree of "
+            f"this repository; run 'agent-fork prune' if the fork is gone",
         )
     if not force:
         raise CleanupTargetError(
@@ -391,5 +422,5 @@ def cleanup(
     if not keep_branch:
         run_git(plan.git_root, ["branch", "-D", plan.branch], env=env)
     if plan.owned:
-        remove_entry(plan.entry.name, env=env)
+        remove_entry(plan.entry.token(), env=env)
     return CleanupResult(plan, True, notices, details)

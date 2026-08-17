@@ -126,21 +126,23 @@ def test_lock_timeout_rolls_back_with_registry_busy(repo_scenario):
 
 @pytest.mark.matrix("T-REG-06")
 def test_registry_ownership_check_feeds_cleanup_refusal(repo_scenario):
-    from agent_fork.registry import add_entry, find_owned
+    from agent_fork.registry import add_entry, find_candidates
 
     world = repo_scenario()
-    assert find_owned("unknown", env=world.env) is None
+    assert not find_candidates("unknown", env=world.env)
     entry = _entry("mine", world.parent_path)
     add_entry(entry, env=world.env)
-    assert find_owned("mine", env=world.env) == entry
-    assert find_owned("fork/mine", env=world.env) == entry
-    assert find_owned(str(world.parent_path), env=world.env) == entry
+    assert find_candidates("mine", env=world.env) == [entry]
+    assert find_candidates("fork/mine", env=world.env) == [entry]
+    assert find_candidates(str(world.parent_path), env=world.env) == [entry]
 
     from agent_fork.registry import registry_path
 
+    # A truncated document must still surface as a decode failure. The oracle
+    # is the raised ValueError, so the call has to reach decoding to be a test.
     registry_path(world.env).write_text('{"version":1,"forks":[')
     with pytest.raises(ValueError, match="invalid agent-fork registry"):
-        find_owned("mine", env=world.env)
+        find_candidates("mine", env=world.env)
 
 
 @pytest.mark.matrix("T-SES-16")
