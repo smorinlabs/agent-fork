@@ -38,9 +38,16 @@ The findings were sound; three were defects this work introduced.
 4. *Structured failure detail landed as promised.* `details.failed_checks`
    carries path, kind, and detail per difference with exactly one check marked
    primary (parent drift wins). `verify_failed` and exit 1 unchanged.
-5. *Repository-controlled text is escaped on both surfaces.* Terminal escapes
-   in a filename can no longer drive the reader's terminal, and surrogate
-   bytes can no longer break machine output. `T-VER-33` pins it.
+5. *Repository-controlled text is escaped on the paths A1 touches.* Terminal
+   escapes in a filename can no longer drive the reader's terminal, and
+   surrogate bytes can no longer break machine output, for verification
+   failures, the unsupported-file-type error, the submodule notice, and both
+   `.worktreeinclude` skip notices. `T-VER-33` pins the verification path.
+   **This is narrower than the claim first written here.** The confirming
+   pass probed three further sinks that predate A1 and still emit raw control
+   bytes — the attached-worktree and unmerged-index refusals
+   (`repository.py`) and setup-hook output (`include.py`) — routed to
+   issue #32 because they are neither design-promised nor introduced here.
 6. *Quadratic comparison* — found by self-review before the verdict, fixed in
    `6b73606`.
 
@@ -51,6 +58,20 @@ items and defects introduced here; open the rest):
 - #29 intent-to-add paths as raw pathspecs (registered as A13(e))
 - #30 full-fork latency gate and slow-path progress output (overlaps A13(h))
 - #31 coverage gaps: dirty submodules (A6), sparse checkout, exotic filenames
+- #32 guard-error and hook-output sinks that still render repository-controlled
+  text raw (pre-existing; found by the confirming pass)
+
+**Confirming pass (2026-08-17).** A third, narrowly-scoped review verified the
+two remediation blockers. Blocker 1 (inventory wiring) is fully fixed: one
+inventory object is resolved before worktree creation and reaches both the
+verification snapshot and transport, production can no longer enter
+`materialize`'s fallback, and `T-VER-34` was confirmed to fail if the argument
+were dropped. It also judged three adjacent questions clean — unconditional
+`collect_inventory` under both flags, the `G-VER` status flip, and the import
+reordering — and accepted that `Inventory.staged`/`.unstaged` stay unconsumed
+because staged and unstaged content transports as whole-repository patches
+rather than per path. Blocker 2 remains open only through the pre-existing
+sinks now tracked in #32.
 
 **Confirmed correct by the review:** inventory collection across rename
 endpoints, deletions, intent-to-add, staged-plus-unstaged, untracked and

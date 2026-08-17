@@ -39,8 +39,10 @@ the item absorbs only what its own approved design promised plus defects the
 work introduced; everything else is opened as a GitHub issue and, where it
 matches a registered fault, noted against that fault. A1's routed findings are
 issues #28 (root-confined hashing → overlaps A2), #29 (intent-to-add pathspec
-magic → A13(e)), #30 (latency gate and progress output → A13(h)), and #31
-(coverage gaps: dirty submodules → A6, sparse checkout, exotic filenames).
+magic → A13(e)), #30 (latency gate and progress output → A13(h)), #31
+(coverage gaps: dirty submodules → A6, sparse checkout, exotic filenames), and
+#32 (pre-existing guard-error and hook-output sinks that render
+repository-controlled text raw).
 
 **Out of Scope**
 - Enhancements B1–B4 (separate project: [P03](P03-agent-fork-core-enhancements.md))
