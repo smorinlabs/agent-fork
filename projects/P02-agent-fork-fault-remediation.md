@@ -255,6 +255,7 @@ repository-controlled text raw).
   lineage records reference a child session that never ran). Type:
   robustness.
 - **A5 — One bad untracked filesystem entry destroys the whole fork.**
+  *(Rewritten 2026-08-17 after probing; see "Corrected claim" below.)*
   Socket/fifo raises at `materialize.py:58-59`; unreadable or mid-copy
   deleted file raises at `materialize.py:156-157`; both roll back the whole
   worktree. The include path already has the right policy — notice and skip
@@ -263,6 +264,115 @@ repository-controlled text raw).
   roll back a correct fork. Proposed direction: skip-with-notice for
   non-regular/unreadable entries; retry-once or warn for the parent-status
   race. Impact: medium-high. Type: robustness.
+
+  **Corrected claim.** The entry bundles three faults that probing on
+  2026-08-17 separates into three different verdicts. Probe environment:
+  macOS 25.4 (APFS), this repository's `.venv` build, a scratch parent of 200
+  tracked files with one modified and one untracked file, baseline fork
+  1.1 s wall clock. Every citation below was re-checked against `origin/main`
+  on 2026-08-17: the original entry's line numbers predate the A1 fix and no
+  longer resolve.
+
+  - **(a) Socket/fifo — refuted; no work.** Git does not report FIFOs or
+    Unix-domain sockets as untracked at all. With both present in the parent,
+    `git status --porcelain` and `git ls-files --others --exclude-standard`
+    listed neither, and a fork of that parent succeeded normally:
+
+    ```bash
+    mkfifo dev.sock
+    python3 -c "import socket; socket.socket(socket.AF_UNIX).bind('real.sock')"
+    git ls-files --others --exclude-standard   # only new.txt
+    git status --porcelain                     # only  M tracked.txt / ?? new.txt
+    agent-fork fork sockcase --no-agent        # succeeds
+    ```
+
+    `Inventory.untracked` is exactly that listing (`content.py:160`), so the
+    `unsupported untracked file type` raise (`materialize.py:60-63`) is
+    unreachable from an entry that existed when the fork started. It is
+    reachable only if a listed regular file is *replaced* by a non-regular
+    one inside the fork window — which is case (c), not a file-type fault.
+    Keep the raise as a cheap guard.
+
+  - **(b) Unreadable file — confirmed, but it fails earlier than recorded and
+    outside `materialize.py`.** With verification on (the default) the fork
+    dies *before any worktree exists*: `capture_state` (`pipeline.py:122-126`)
+    runs ahead of `create_worktree_at_anchor` (`pipeline.py:127-129`), and
+    `_digest` (`content.py:165-170`) opens every carried path with no guard.
+    There is therefore nothing to roll back on the default path; the original
+    "rolls back the whole worktree" holds only under `--no-verify`, which
+    skips the snapshot and reaches `_copy_entry` (`materialize.py:45-63`).
+
+    ```bash
+    echo secret > locked.txt && chmod 000 locked.txt
+    agent-fork fork lk1 --no-agent              # exit 1, no worktree created
+    # runtime_error: [Errno 13] Permission denied: .../locked.txt
+    agent-fork fork lk2 --no-agent --no-verify  # exit 1, worktree rolled back
+    ```
+
+    Both surface as an untyped `runtime_error` carrying a raw errno string:
+    no step attribution, no statement that skipping the entry was possible.
+    The include path already implements the intended policy for the same
+    situation — notice and skip (`include.py:80-85`) — so the defect is two
+    code paths answering one question differently. "Mid-copy deleted file" is
+    **not** part of this case: it is case (c) reaching a different tripwire
+    (`_copy_entry`'s `lstat`, `materialize.py:48`).
+
+  - **(c) Parent edited mid-fork — confirmed, deterministically reproduced;
+    the rollback is correct and must stay.** The window runs from the status
+    snapshot (`pipeline.py:113-115`) through the content snapshot
+    (`pipeline.py:122-126`), worktree creation, and materialization
+    (`pipeline.py:132-139`) to the final parent re-read (`verify.py:149-153`)
+    — measured at roughly 0.5 s to 0.7 s of a 1.1 s command, and it widens
+    with repository size because untracked entries are copied one at a time
+    (`materialize.py:187-188`). Sweeping the delay of a single background
+    write pins the edges:
+
+    ```bash
+    # each line races one fork; run from the parent
+    ( sleep 0.55; echo autosave >> f1.txt ) & agent-fork fork c055 --no-agent
+    # -> verify_failed: verification failed: parent-content (f1.txt: content differs)
+    ( sleep 0.65; echo autosave >> f1.txt ) & agent-fork fork c065 --no-agent
+    # -> same failure
+    ( sleep 0.75; echo autosave >> f1.txt ) & agent-fork fork c075 --no-agent
+    # -> succeeds; the write landed after the window closed
+    ```
+
+    A write that changes a path's *status class* trips `parent-untouched`
+    (`verify.py:149-153`); a write that only changes bytes in an
+    already-modified path trips `parent-content` (`verify.py:140-147`), the
+    rung A1 added. That is not a regression from A1: before A1 this exact
+    race passed silently and produced a child whose relationship to the
+    snapshot was never checked. Failing is right — a write inside the window
+    can tear the copy, leaving the child matching no single moment of the
+    parent. The defects are the *reporting* and the *absence of recovery*:
+    the message names a check, not a cause, and never says that nothing was
+    lost and that a rerun will likely succeed.
+
+    Retry-once cures a one-shot autosave and does nothing for a continuous
+    writer — a dev-server log, a watch build, or another agent session working
+    in the parent — which fails every attempt until the writer stops. That is
+    what the original "or warn" half must cover.
+
+  Revised impact: **(a) none** (refuted); **(b) medium** — one unreadable
+  carried path makes the repository unforkable, with an unattributable error;
+  **(c) medium** — no data is ever at risk, the cost is an undiagnosable
+  failure and, for continuous writers, a repository that cannot be forked at
+  all. Type: robustness + error reporting. Not data loss on current evidence.
+
+  **Unverified surface — the gate must probe before any fix.** macOS/APFS
+  only, one Git version, `--no-agent` only. Untested: Linux and
+  case-sensitive filesystems; whether any Git version lists non-regular
+  entries; the `--with-ignored` listing (`content.py:154`), which shares the
+  same `ls-files` mechanism but was not probed; unreadable *directories* as
+  opposed to files; a regular file swapped for a FIFO inside the window; and
+  the interaction with A6's dirty-submodule case. The window figures come
+  from one machine at one repository size — indicative, not a bound.
+
+  Revised direction: (a) no change; (b) skip-with-notice at both
+  `content.py:_digest` and `_copy_entry`, matching `include.py:80-85`, with a
+  typed error replacing the raw `runtime_error`; (c) keep the rollback, add a
+  named cause ("the parent changed during the fork; nothing was lost") plus
+  retry-once, and a distinct message when the retry fails identically.
 - **A6 — Dirty submodules likely make the repo unforkable by default.**
   `git worktree add` leaves submodules uninitialized; `materialize.py:89-99`
   only emits a (misleading "copied opaquely") notice; parent ` M vendor/mod`
