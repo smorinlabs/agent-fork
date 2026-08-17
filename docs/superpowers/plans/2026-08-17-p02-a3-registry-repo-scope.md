@@ -252,6 +252,16 @@ A8's TOCTOU redesign.
    repositories.
 2. **`list` is left unchanged** — global, unfiltered, public JSON pinned at
    `"version": 1`.
+3. **Migration is retained; v1 registries are not refused.** Raised after two
+   review rounds established that migration and concurrency handling — the
+   pre-lock probe, the merge rule, null-row semantics, exact-one removal —
+   account for most of A3's risk surface while fixing none of A3's fault. The
+   alternative was a typed refusal of v1 plus a one-time manual step for
+   existing users, which would delete that whole class of defect from this
+   item. The owner chose to keep migrating: silently breaking a shipped
+   tool's state file is the worse trade. This is a **standing** decision, not
+   conditional on the remaining review rounds — a further migration defect is
+   to be fixed, not routed around by cutting migration.
 
 **Two new error codes**, both exit 5, both joining the `cleanup_*` refusal
 family in `errors.py:33-47` whose members all refuse before an unsafe
