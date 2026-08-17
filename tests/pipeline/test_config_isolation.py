@@ -13,8 +13,11 @@ and reported success. Verification did not catch it because verification is
 scoped to *carried* paths, while the child's copy of committed content comes
 from the checkout `git worktree add` performs.
 
-The defence is to **strip the inline-injection triple** in `run_git`, which
-kills the class without enumerating which keys matter.
+The defence is to **strip both inline-injection channels** — the
+`GIT_CONFIG_COUNT` triple and `GIT_CONFIG_PARAMETERS` — in `run_git`. That
+removes the need to enumerate which configuration *keys* matter, but it still
+requires enumerating *channels*: the first revision stripped only the triple
+and left `GIT_CONFIG_PARAMETERS` open.
 
 Two things are deliberately *not* done, each because probing showed they would
 be wrong:
@@ -100,48 +103,59 @@ def test_injected_core_symlinks_cannot_flatten_committed_symlinks(repo_scenario)
 
 
 @pytest.mark.matrix("T-GRD-18")
-def test_injected_apply_whitespace_cannot_rewrite_transported_content(repo_scenario):
-    """Injection must not reach transport even for keys A1 already pins.
+def test_injection_is_absent_from_the_environment_git_receives(repo_scenario):
+    """Discriminating check: the injected pair never reaches Git at all.
 
-    A1 pins `--whitespace=nowarn` on the apply, which holds. This asserts the
-    same outcome through the sanitization layer, so the guarantee does not
-    depend on one flag being remembered at one call site.
+    An earlier version of this test injected `apply.whitespace=fix` and asserted
+    the transported bytes were unchanged. That passes with or without
+    sanitization, because A1 independently pins `--whitespace=nowarn` on the
+    apply — so it demonstrated nothing about this layer. This instead observes
+    the environment Git is actually handed, which fails if the filter is
+    removed.
     """
+    from agent_fork.git import run_git, without_config_injection
+
     world = repo_scenario()
-    (world.parent_path / "tracked.txt").write_bytes(b"line one   \nline two\n")
+    env = _inject(world, "core.symlinks", "false")
+    env["GIT_CONFIG_PARAMETERS"] = "'core.autocrlf=true'"
 
-    result = _fork(world, "ws", env=_inject(world, "apply.whitespace", "fix"))
+    filtered = without_config_injection(env)
+    assert "GIT_CONFIG_COUNT" not in filtered
+    assert "GIT_CONFIG_KEY_0" not in filtered
+    assert "GIT_CONFIG_VALUE_0" not in filtered
+    assert "GIT_CONFIG_PARAMETERS" not in filtered
 
-    carried = (result.creation.path / "tracked.txt").read_bytes()
-    assert carried == b"line one   \nline two\n"
+    # and end to end: Git resolves the setting from configuration, not injection
+    observed = run_git(
+        world.parent_path, ["config", "--get", "core.symlinks"], env=env, check=False
+    )
+    assert b"false" not in observed.stdout
 
 
 @pytest.mark.matrix("T-GRD-19")
-def test_config_file_pointers_are_still_honoured(repo_scenario):
-    """Regression guard — do not over-strip.
+def test_config_file_pointers_survive_sanitization(repo_scenario):
+    """Regression guard — do not over-strip, checked through `run_git` itself.
 
-    `GIT_CONFIG_GLOBAL` points at a configuration file, which is how tooling
-    (this harness included) deliberately controls Git. If sanitization removed
-    it, every sealed test would silently fall back to the real `~/.gitconfig`.
+    An earlier version ran raw `git` rather than `run_git`, so deleting
+    `GIT_CONFIG_GLOBAL` from the filter would not have failed it. This asserts
+    the pointer survives the filter and that Git, invoked the way agent-fork
+    invokes it, still reads the file it names — which is how the sealed test
+    harness controls configuration.
     """
+    from agent_fork.git import run_git, without_config_injection
+
     world = repo_scenario()
     marker = world.parent_path.parent / "marker.gitconfig"
-    marker.write_text("[user]\n\tname = sentinel-from-file-pointer\n")
+    marker.write_text("[custom]\n\tsentinel = from-file-pointer\n")
     env = dict(world.env)
     env["GIT_CONFIG_GLOBAL"] = str(marker)
 
-    observed = (
-        subprocess.run(
-            ["git", "-C", str(world.parent_path), "config", "--get", "user.name"],
-            env=env,
-            capture_output=True,
-            check=False,
-        )
-        .stdout.decode()
-        .strip()
-    )
+    assert without_config_injection(env)["GIT_CONFIG_GLOBAL"] == str(marker)
 
-    assert observed == "sentinel-from-file-pointer"
+    observed = run_git(
+        world.parent_path, ["config", "--get", "custom.sentinel"], env=env, check=False
+    )
+    assert observed.stdout.decode().strip() == "from-file-pointer"
 
 
 @pytest.mark.matrix("T-GRD-20")

@@ -701,3 +701,92 @@ matter". That is true of *keys*, but sanitization still requires enumerating
 *channels* — and one was missed on the first pass. The advantage is real but
 narrower than stated: two channels to know about instead of an open-ended set
 of configuration keys.
+
+## Adversarial review of the conclusion — REJECT, and the corrections
+
+The review targeted the *refutation* rather than the code, because a wrong
+refutation closes a real fault permanently. It returned **REJECT** with six
+blocking findings. Every one was sound; the corrections are below.
+
+### 1. Cleanup was never probed — the refutation was overclaimed
+
+The matrix required each input crossed with cleanup, calling it the
+highest-consequence operation. No probe invoked `agent-fork cleanup`; the
+`GIT_NAMESPACE` evidence used raw `git branch -D`, which is not the cleanup
+sequence (target resolution, dirty and unpushed guards, worktree removal,
+prune, branch deletion, registry removal).
+
+**Now probed.** Seven cells, each comparing a bystander repository's refs
+before and after:
+
+| Cleanup under | Verdict |
+|---|---|
+| control | ok — child removed, parent refs correct |
+| `GIT_DIR` → bystander | refused |
+| `GIT_NAMESPACE` | ok |
+| `GIT_CONFIG_PARAMETERS` | ok |
+| `GIT_CONFIG_COUNT` injection | ok |
+| `GIT_COMMON_DIR` → bystander | refused |
+| `GIT_OBJECT_DIRECTORY` | refused |
+
+**No wrong-target deletion in any cell.** The result supports the refutation
+rather than contradicting it — but it had to be run, not assumed.
+
+Two harness defects were fixed to get a valid control: the child carried state
+and tripped the dirty guard, then tripped the unpushed guard because the
+scratch repository has no remote — which is fault **A13(f)** from the original
+analysis, encountered live.
+
+### 2. "All 13 probed" was self-contradictory
+
+`GIT_ATTR_NOSYSTEM` is explicitly recorded as untestable on this machine, so
+the count is **12 probed, 1 untestable**. Corrected.
+
+### 3. "Matches plain Git" is a weaker defence than claimed
+
+Matching `git worktree add` establishes causal equivalence, not correctness
+against agent-fork's stronger advertised contract of faithful copying *and*
+verification. The same outcome is treated as a defect when configuration
+arrives by injection and as acceptable when it arrives by file, which makes
+provenance the sole distinction. That distinction is defensible — injection is
+not user intent — but it is a judgement, not a proof, and the contract question
+it raises belongs with issue #35's follow-up rather than being settled here.
+
+### 4. The pinning policy is *not* fully retired
+
+Retirement was claimed on evidence that does not cover clean/smudge filters
+(planned in the matrix, omitted from the ten-key run), `extensions.worktreeConfig`,
+or conditional `includeIf` configuration. The review also observed that the
+setup hook runs *after* verification with the inherited environment and can
+write shared repository configuration — so "file-based configuration is user
+intent" is not a safe categorical provenance rule when the file arrived with a
+cloned repository. **Downgraded from "retired" to "not required by any observed
+defect; unproven for the sources above."**
+
+### 5. The sealed-harness refutation was a category slip
+
+The tests copy the sealed fixture environment and call the pipeline directly;
+they do not exercise the CLI boundary that copies ambient `os.environ`. They
+show targeted rows can opt into hostile configuration without a new framework —
+they do not refute the narrower claim that the baseline sealed environment
+masks ambient passthrough. The sentence "T-GRD-17 through T-GRD-20 test
+configuration injection" was also factually wrong: T-GRD-19 and T-GRD-20 did
+not test injection at all.
+
+### 6. Two tests did not test what they claimed, and one launch site was missed
+
+- `T-GRD-18` asserted transported bytes were unchanged under injected
+  `apply.whitespace`, which passes with or without the sanitizer because A1
+  independently pins `--whitespace=nowarn`. **Rewritten** to observe the
+  environment Git actually receives.
+- `T-GRD-19` ran raw `git` rather than `run_git`, so removing
+  `GIT_CONFIG_GLOBAL` from the filter would not have failed it. **Rewritten**
+  to go through `run_git`.
+- `config.py`'s `worktree_root` launches `git rev-parse` directly with an
+  unfiltered environment. **Fixed** — the sanitizer is now public and reused
+  there, so "`run_git` is the sole Git launch" is no longer relied upon.
+
+Still inheriting unfiltered environments, with no demonstrated Git consequence:
+the Codex app-server, agent version probes, and the setup hook. The hook is the
+notable one — it runs after verification and may invoke Git itself. Recorded
+rather than fixed, since no defect has been demonstrated through it.

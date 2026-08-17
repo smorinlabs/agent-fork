@@ -17,7 +17,7 @@ _INJECTED_CONFIG_NAMES = frozenset({"GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"}
 _INJECTED_CONFIG_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
 
 
-def _without_config_injection(env: Mapping[str, str] | None) -> dict[str, str]:
+def without_config_injection(env: Mapping[str, str] | None) -> dict[str, str]:
     """Drop inline Git configuration injected through the environment.
 
     Two channels do this. `GIT_CONFIG_COUNT` with
@@ -105,7 +105,7 @@ def run_git(
     command = ("git", "-C", str(cwd), *args)
     process = subprocess.Popen(
         command,
-        env=_without_config_injection(env),
+        env=without_config_injection(env),
         stdin=subprocess.PIPE if input_bytes is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

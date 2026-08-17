@@ -84,15 +84,17 @@ repository-controlled text raw).
   "copied and verified" promise. Proposed direction: content-hash rung in
   the ladder for staged/modified files + pin `apply.whitespace` on apply
   calls. Impact: high. Type: correctness fix. Spot-checked 2026-08-16.
-- **A2 — [x] RESOLVED: environment claim refuted; three configuration defects
-  found and fixed.** *(Second rewrite 2026-08-17, after probing all 13 canonical
+- **A2 — [~] LARGELY RESOLVED: environment claim refuted on the fork and
+  cleanup paths; four configuration defects found and fixed.** *(Second rewrite 2026-08-17, after probing all 13 canonical
   inputs. Evidence: `docs/superpowers/plans/2026-08-17-p02-a2-environment-hardening.md`.)*
 
   **Original claim, refuted.** The entry asserted that forwarding `os.environ`
   to all 50 `run_git` call sites meant "probes and mutations target the wrong
-  repository", rated high. Thirteen environment inputs were probed against full
-  forks with controls: **zero wrong-repository mutations, zero silent
-  divergences attributable to agent-fork.** Every refusal left both the intended
+  repository", rated high. Twelve environment inputs were probed against full forks
+  **and against cleanup** with controls (one, `GIT_ATTR_NOSYSTEM`, is untestable
+  on this machine for lack of a system attributes file): **zero wrong-repository
+  mutations, zero wrong-target deletions, zero silent divergences attributable
+  to agent-fork.** Every refusal left both the intended
   and the unintended repository untouched — checked for branches, worktrees,
   status, and content. Where a variable did change behavior
   (`GIT_CONFIG_SYSTEM` flattening a committed symlink), plain
@@ -113,19 +115,25 @@ repository-controlled text raw).
      the checkout. Fixed by sanitizing the injection triple at the `run_git`
      chokepoint (issue #35, T-GRD-17..20).
 
-  **The "untestable under the sealed harness" claim is also refuted**, by
-  demonstration: T-GRD-17..20 test injection inside the existing harness. No new
-  test tier was needed, which was the premise of the original sequencing.
+  **The "untestable under the sealed harness" claim is narrowed, not refuted.**
+  T-GRD-17, T-GRD-18, and T-GRD-21 show targeted rows can opt into hostile
+  configuration without a new framework, so no test tier was needed. They do not
+  refute the narrower point that the *baseline* sealed environment masks ambient
+  passthrough, because they call the pipeline directly rather than through the
+  CLI boundary that copies `os.environ`.
 
-  **The pinning policy — scoped at roughly a week — is retired.** A1's existing
-  pins hold under injection, injection is now stripped, and for file-based
-  configuration agent-fork matches plain Git, so pinning would override
-  deliberate user settings.
+  **The pinning policy is not required by any observed defect**, though not
+  fully disproven: clean/smudge filters, `extensions.worktreeConfig`, and
+  conditional `includeIf` sources remain unprobed, and the setup hook runs after
+  verification with an inherited environment and can write shared repository
+  configuration — so "file-based configuration is user intent" is not a safe
+  categorical rule for a cloned repository.
 
   Impact: was high → medium → **resolved**. Type: correctness fixes, not the
   robustness/hardening the entry predicted.
 
-  **Deliberately not fixed:** `GIT_ATTR_NOSYSTEM` could not be probed — this
+  **Open, and why A2 is `[~]` rather than `[x]`:** the unprobed configuration
+  sources above, and `GIT_ATTR_NOSYSTEM`, which could not be probed — this
   machine has no system attributes file to suppress. A coverage gap, not a
   known defect; tracked with the other coverage items in issue #31.
 
@@ -255,7 +263,7 @@ A T task is skipped (flipped `[-]`) if its TS verdict is *refuted*.
 - [x] [P02-TS01] A1 adversarial verification (incl. Codex): reproduce status-preserving content divergence end to end — CONFIRMED-WITH-CORRECTIONS 2026-08-16: empirical repro (apply.whitespace=fix diverged child bytes, identical porcelain, `verification.passed: true`) + Codex pass confirming mechanism, repro fairness, in-scope verdict, and sibling vectors; see [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
 - [x] [P02-T01] A1 fix per process: plan + adversarial plan review (APPROVE-WITH-CHANGES), TDD implementation, adversarial post-review (REJECT → findings absorbed or routed to issues #28–#31 per the owner's gate-6 routing) — whitespace pinned at the transport site, carried-state inventory drives both transport and verification, `content-match`/`parent-content` rungs with structured `failed_checks`, escaped repository-controlled text; 22 A1 rows green, 405 passed; see the [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
 - [x] [P02-TS02] A2 validation-first probe matrix (incl. Codex) — all 13 canonical inputs probed against full forks with controls; environment claim refuted (zero wrong-repository mutations); register entry rewritten to match
-- [x] [P02-T02] A2 fix — three configuration defects found and fixed: porcelain transport replaced with plumbing (T-MAT-21..24), and inline configuration injection sanitized at the `run_git` chokepoint (issue #35, T-GRD-17..20). The pinning policy was retired as unnecessary on the evidence.
+- [~] [P02-T02] A2 fix — three configuration defects found and fixed: porcelain transport replaced with plumbing (T-MAT-21..24), and inline configuration injection sanitized at the `run_git` chokepoint (issue #35, T-GRD-17..20). The pinning policy was retired as unnecessary on the evidence.
 - [ ] [P02-T03] A3 fix per process (registry schema migration)
 - [ ] [P02-TS04] A4 adversarial verification (incl. Codex): recipe-drift blindness and post-fork failure demonstration
 - [ ] [P02-T04] A4 fix per process

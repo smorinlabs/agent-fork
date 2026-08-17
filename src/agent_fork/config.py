@@ -204,9 +204,11 @@ def load_config(path: Path) -> ConfigValues:
 
 def worktree_root(cwd: Path, env: Mapping[str, str] | None = None) -> Path:
     """Resolve the current worktree's own root through PATH-resolved Git."""
+    from agent_fork.git import without_config_injection
+
     result = subprocess.run(
         ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
-        env=dict(env) if env is not None else None,
+        env=without_config_injection(env),
         capture_output=True,
         text=True,
     )
