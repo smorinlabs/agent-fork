@@ -58,6 +58,50 @@ writes and newly created repositories. agent-fork does not create repositories,
 so these are lowest priority — but `GIT_INDEX_VERSION` touches index writes,
 which `apply --index` performs.
 
+### Diff drivers — transport uses porcelain where plumbing is required
+
+This surfaced during research and is **not in A2's register entry at all**. It
+may be the largest real defect in the item.
+
+Agent-fork transports every staged, unstaged, and intent-to-add change by
+piping `git diff --binary --no-color …` into `git apply`
+(`materialize.py:142`, `:151`, `:163`). It passes neither `--no-ext-diff` nor
+`--no-textconv`, and `grep` finds no external-diff guard anywhere in `src/`.
+
+| Mechanism | Documented behavior | Consequence for transport |
+|---|---|---|
+| `diff.external` (config) and `GIT_EXTERNAL_DIFF` (environment) | "diff generation is not performed using the internal diff machinery, but using the given command" | The patch becomes whatever that program prints. `git apply` receives something that is not a Git patch. |
+| textconv diff drivers, set per-path by `.gitattributes` plus a `diff.<driver>.textconv` config entry | "Because textconv filters are typically a one-way conversion, the resulting diff is suitable for human consumption, **but cannot be applied**. For this reason, textconv filters are enabled by default only for **git-diff(1)** and git-log(1), but not for git-format-patch(1) or diff plumbing commands." | Agent-fork uses `git diff` — precisely the command where textconv is on by default. Git states plainly that the result cannot be applied. |
+
+Two properties make this worse than the rest of A2:
+
+1. **It is repository-controlled, not user-controlled.** `.gitattributes` is a
+   committed file. Cloning a repository that uses a textconv driver — a
+   legitimate, common practice for binary formats such as PDFs or images — is
+   enough. No hostile environment is required.
+2. **`--no-ext-diff` and `--no-textconv` are the documented remedies**, so the
+   fix is small and precise: use plumbing semantics on the transport path
+   rather than porcelain defaults.
+
+Whether `--binary` suppresses textconv in practice is **not settled by the
+documentation** and must be probed. That probe is priority 1.
+
+## Worktree-specific facts (from `git-worktree(1)`)
+
+- "**all refs starting with `refs/` are shared**" across worktrees; pseudo refs
+  such as HEAD are per-worktree. This is the surface `GIT_NAMESPACE` relocates,
+  and it confirms why namespace confusion would affect the guard, the create,
+  and the delete uniformly.
+- "By default, the repository config file is **shared across all worktrees**."
+  Per-worktree configuration requires `extensions.worktreeConfig`, after which
+  settings live at `git rev-parse --git-path config.worktree`.
+- "`core.sparseCheckout` should not be shared, unless you are sure you always
+  use sparse checkout for all worktrees" — independent corroboration of the
+  sparse-checkout gap tracked in issue #31.
+- "Older Git versions will refuse to access repositories with this extension"
+  (`extensions.worktreeConfig`) — a compatibility edge worth a probe against
+  the declared Git floor.
+
 ## What the research changes
 
 **Two conclusions that the earlier "probe everything" plan would have missed.**
@@ -95,6 +139,8 @@ highest consequence) · registry write.
 
 | Input | Hypothesis to falsify |
 |---|---|
+| textconv driver via committed `.gitattributes` + `diff.<driver>.textconv` | The transport patch is unappliable or lossy, because `git diff` enables textconv by default and Git documents that its output "cannot be applied". **Repository-controlled — no hostile environment needed.** Probe with and without `--binary` to settle whether `--binary` suppresses it. |
+| `diff.external` config, and `GIT_EXTERNAL_DIFF` environment | The diff engine is replaced, so `git apply` receives output that is not a Git patch; transport fails or corrupts. |
 | `GIT_NAMESPACE` | The existence guard, branch creation, and `branch -D` disagree about `refs/heads/<branch>`; a fork collides with an invisible branch, or cleanup deletes the wrong ref. |
 | `GIT_OBJECT_DIRECTORY` | Objects written by `apply --index` land outside the repository; the fork's index references blobs that disappear with the variable, while verification passes because it runs under the same environment. |
 | `GIT_COMMON_DIR` | The `common-dir` verification rung is satisfied by a foreign path, or a correct fork is spuriously rolled back. |
