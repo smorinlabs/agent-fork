@@ -20,12 +20,11 @@ the reasoning are inlined below; the referenced files are depth, not payload.
 - **Uncommitted:** none. Working tree clean.
 - **Unpushed:** none. Branch is level with its remote.
 - **Stashes:** none.
-- ⚠ **The rewritten A2 entry is NOT on `main`.** It lives on branch
-  `worktree-p02-a2-register-rewrite` (commit `c3421ce`), pushed to origin.
-  **Its pull request was never created** — `gh pr create` returned HTTP 503
-  during a GitHub incident on 2026-08-17. A session that reads
-  `projects/P02-agent-fork-fault-remediation.md` on `main` will see the **old,
-  overstated** A2 entry. Create the PR first, or read the file from that branch.
+- ⚠ **The rewritten A2 entry may not be on `main` yet.** It lives on branch
+  `worktree-p02-a2-register-rewrite`, open as **PR #34**. Until that merges, a
+  session reading `projects/P02-agent-fork-fault-remediation.md` on `main` sees
+  the **old, overstated** A2 entry. Check `gh pr view 34`; if it is still open,
+  read the file from the branch or merge it first.
 - **Referenced docs:** `projects/P02-agent-fork-fault-remediation.md` (305
   lines) ✓ committed · substantive · no placeholders.
   `docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md` (288
@@ -164,17 +163,17 @@ refused / self-consistent / **wrong-repository mutation** / silent divergence.
 
 ## 👉 First action
 
-Create the pending PR for `worktree-p02-a2-register-rewrite` (GitHub was
-returning 503 when it was attempted), so the corrected A2 entry reaches `main`
+Land **PR #34** if it is still open, so the corrected A2 entry reaches `main`
 before anyone reads the old one:
 
 ```
-gh pr create --repo smorinlabs/agent-fork --head worktree-p02-a2-register-rewrite \
-  --title "docs(p02): rewrite the A2 entry to match evidence and adopt validation-first"
+gh pr merge 34 --merge --repo smorinlabs/agent-fork
 ```
 
-Then build the probe matrix above, starting with the highest-consequence
-untested cell: **cleanup under `GIT_DIR` alone.**
+Then build the probe matrix above in a fresh worktree off `origin/main`,
+starting with the highest-consequence untested cell: **cleanup under `GIT_DIR`
+alone** — cleanup deletes worktrees and branches, and the boundary check that
+refused the `GIT_DIR` fork guards discovery, not deletion.
 
 ## ℹ How this was made
 
