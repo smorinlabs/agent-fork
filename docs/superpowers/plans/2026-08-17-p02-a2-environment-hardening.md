@@ -374,3 +374,41 @@ commands: minimal, and it introduces no empty-repository hazard. `T-MAT-25`
 pins it, observed RED (`reported staged=1 but the inventory carries 2`).
 
 **Gates:** 414 passed, 1 skipped; lint, typecheck, matrix clean.
+
+## Canonical input inventory (authoritative)
+
+Earlier drafts listed different sets in three places and disagreed on the
+count, which undermines the exhaustiveness the matrix depends on. **This list
+is authoritative; the register entry and any handoff cite it rather than
+restating it.**
+
+**Resolved — do not re-probe:**
+
+| Input | Verdict | Where |
+|---|---|---|
+| `GIT_DIR` + `GIT_WORK_TREE` | refused (`config_error`, discovery boundary) | 2026-08-17 probe |
+| `GIT_INDEX_FILE` | self-consistent; correct content carried | 2026-08-17 probe |
+| textconv attribute (`.gitattributes` + `diff.<drv>.textconv`) | **defect, fixed** by plumbing transport | T1/T8, T-MAT-21/22 |
+| `diff.external` (config form) | **defect, fixed** by plumbing transport | T5, T-MAT-23 |
+
+**Untested — 13 inputs, grouped by mechanism:**
+
+| # | Input | Priority |
+|---|---|---|
+| 1 | `GIT_NAMESPACE` | 1 — refs relocate; cleanup deletes |
+| 2 | `GIT_OBJECT_DIRECTORY` | 1 — new objects land elsewhere |
+| 3 | `GIT_ALTERNATE_OBJECT_DIRECTORIES` | 1 — phantom object visibility |
+| 4 | `GIT_COMMON_DIR` | 1 — moves the `common-dir` verification rung |
+| 5 | `GIT_DIR` alone (no `GIT_WORK_TREE`) | 2 — expect refusal |
+| 6 | `GIT_CEILING_DIRECTORIES` | 2 — expect refusal |
+| 7 | `GIT_DISCOVERY_ACROSS_FILESYSTEM` | 2 — expect refusal |
+| 8 | `GIT_CONFIG_COUNT` / `KEY_<n>` / `VALUE_<n>` | 3 — sizes the pinning policy |
+| 9 | `GIT_CONFIG_GLOBAL` | 3 — whole-file substitution |
+| 10 | `GIT_CONFIG_SYSTEM` | 3 — whole-file substitution, system level |
+| 11 | `GIT_ATTR_NOSYSTEM` | 3 — suppresses system attributes |
+| 12 | `GIT_EXTERNAL_DIFF` | 3 — environment twin of `diff.external`; the plumbing fix should neutralize it, which is now an untested claim |
+| 13 | `GIT_INDEX_VERSION` | 4 — touches index writes performed by `apply --index` |
+
+**Excluded, with reason:** `GIT_DEFAULT_HASH` and `GIT_DEFAULT_REF_FORMAT`
+apply to repository creation, which agent-fork never performs.
+`GIT_CONFIG_NOSYSTEM` is hardening-only and already set by the test harness.

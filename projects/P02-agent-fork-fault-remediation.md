@@ -121,14 +121,16 @@ repository-controlled text raw).
   Impact: **medium** (was high). Type: robustness + test architecture.
   Not data loss on current evidence.
 
-  **Unverified surface — the gate must probe before any fix.** Two of roughly
-  eight variables were tested, on macOS only. Untested: `GIT_DIR` alone
-  (without `GIT_WORK_TREE`), `GIT_OBJECT_DIRECTORY`,
-  `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_CONFIG_COUNT`/
-  `KEY`/`VALUE`, `GIT_ATTR_NOSYSTEM`, `GIT_NAMESPACE`. Each must be probed
-  against each mutating operation — worktree creation, branch creation,
-  materialization, verification, and cleanup — because the boundary check that
-  caught `GIT_DIR` guards discovery, not every operation. **If any probe
+  **Unverified surface — the gate must probe before any fix.** Only two
+  environment variables have been tested, on macOS only. The **canonical inventory of
+  untested inputs — 13, with priorities and exclusions — lives in the A2 design
+  doc** (`docs/superpowers/plans/2026-08-17-p02-a2-environment-hardening.md`,
+  "Canonical input inventory"); it is authoritative and is not restated here,
+  because three divergent copies previously disagreed on both membership and
+  count. Each must be probed against each mutating operation — worktree
+  creation, branch creation, materialization, verification, and cleanup —
+  because the boundary check that caught `GIT_DIR` guards discovery, not every
+  operation. **If any probe
   produces a wrong-repository mutation, restore the high rating.**
 
   Proposed sequencing (reordered 2026-08-17): unsealed-configuration test tier

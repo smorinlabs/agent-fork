@@ -10,7 +10,7 @@ decide whether a fix is still warranted, and of what size.
 
 **Out of scope:** implementing any A2 fix before the matrix is complete;
 the other fault items (A3–A13); enhancements B1–B4 (project P03); issues
-#28–#31, which are already routed and tracked.
+#28–#32, which are already routed and tracked.
 
 **Self-contained:** ✓ stands alone. The probe evidence, the matrix design, and
 the reasoning are inlined below; the referenced files are depth, not payload.
@@ -34,10 +34,10 @@ the reasoning are inlined below; the referenced files are depth, not payload.
 
 - **Repo:** `agent-fork` · origin `https://github.com/smorinlabs/agent-fork.git`
   · default branch `main`
-- **Branch:** `worktree-p02-a2-register-rewrite` @ `c3421ce`
+- **Branch:** `worktree-p02-a2-register-rewrite` (PR #34)
 - **Repo root (this machine):** `/Users/stevemorin/c/agent-fork` ← will differ on yours
 - **Build/verify:** `make check` first, then `just all` (format, lint,
-  typecheck, test). Test suite is at 409 passed / 1 skipped / 9 deselected.
+  typecheck, test). Test suite is at 414 passed / 1 skipped / 9 deselected.
 - **House rule:** never work in the live checkout — create a worktree from
   `origin/main` before writing anything.
 
@@ -79,13 +79,14 @@ rewrite them from the descriptions above rather than hunting for them.
 
 ### The matrix to build
 
-**Axis 1 — inputs (six untested, listed in the register):** `GIT_DIR` *alone*
-(without `GIT_WORK_TREE` — untested and the most likely to behave differently),
-`GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`,
-`GIT_CONFIG_COUNT`/`KEY`/`VALUE`, `GIT_ATTR_NOSYSTEM`, `GIT_NAMESPACE`. Add
-correctness-relevant config keys: `core.autocrlf`, `core.symlinks`,
-`core.quotePath`, `core.fileMode`, `core.ignorecase`, clean/smudge filters,
-`status.showUntrackedFiles`.
+**Axis 1 — inputs:** use the **canonical inventory** in the A2 design doc
+(`docs/superpowers/plans/2026-08-17-p02-a2-environment-hardening.md`,
+"Canonical input inventory") — 13 untested inputs with priorities, plus the
+resolved ones and the exclusions with reasons. It is authoritative precisely
+because earlier drafts restated divergent lists here and disagreed on the
+count. Add the correctness-relevant config keys listed alongside it:
+`core.autocrlf`, `core.symlinks`, `core.quotePath`, `core.fileMode`,
+`core.ignorecase`, clean/smudge filters, `status.showUntrackedFiles`.
 
 **Axis 2 — operations (each must be probed separately):** worktree creation ·
 branch creation · materialization (staged, unstaged, intent-to-add, untracked,
@@ -113,12 +114,14 @@ refused / self-consistent / **wrong-repository mutation** / silent divergence.
 - **Done:** A1 merged (`68ce894`) — content-level fork verification. Issue #32
   merged (`aefcda0`) — repository-controlled text escaped in guard errors and
   hook notices. `main` is at `aefcda0`, clean.
-- **In flight:** the A2 register rewrite + validation-first process amendment,
-  committed as `c3421ce` on `worktree-p02-a2-register-rewrite`, pushed, **PR
-  not yet created** (GitHub 503).
+- **In flight:** branch `worktree-p02-a2-register-rewrite`, open as **PR #34**,
+  carrying the A2 register rewrite, the validation-first amendment, the research,
+  the transport fix (plumbing diff), and the porcelain audit. Until it merges,
+  `main` still shows the old A2 entry.
 - **Open issues:** #28 root-confined hashing and I/O error classification ·
   #29 intent-to-add raw pathspecs (registered as A13(e)) · #30 latency gate and
-  progress output · #31 coverage gaps including dirty submodules (A6).
+  progress output · #31 coverage gaps including dirty submodules (A6) ·
+  #32 guard-error and hook-output sinks rendering repository text raw.
 - **CI note:** a GitHub incident on 2026-08-17 made `casey/just` release
   listing return `[]`, which broke `extractions/setup-just@v4` with "no release
   matching version specifier" repo-wide, alongside 429/503 responses. It
