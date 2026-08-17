@@ -21,10 +21,17 @@ refuted, no fix).
 2. **Auto-proceed unless flagged** — a clean confirmed verdict flows
    straight into planning; only scope questions, refutations, and surprises
    come back to the owner (owner decision 2026-08-16).
-3. **Implementation plan**, then adversarial review of the plan (incl. Codex).
-4. **Implementation** — TDD (failing test first) and subagent-driven, in its
+3. **Design doc per item** (owner amendment 2026-08-16) — every gate
+   A1, A2, … gets its own design doc at
+   `docs/superpowers/plans/<date>-p02-a<NN>-<slug>.md` recording the
+   verification verdict and evidence, the chosen design, and the outcomes
+   of both adversarial reviews. The doc is created at plan time and
+   updated as the item's gates close; the item's task lines link to it.
+4. **Implementation plan** (inside that design doc), then adversarial
+   review of the plan (incl. Codex).
+5. **Implementation** — TDD (failing test first) and subagent-driven, in its
    own worktree per house discipline.
-5. **Adversarial review of the implementation** (incl. Codex); loop until clean.
+6. **Adversarial review of the implementation** (incl. Codex); loop until clean.
 
 **Out of Scope**
 - Enhancements B1–B4 (separate project: [P03](P03-agent-fork-core-enhancements.md))
