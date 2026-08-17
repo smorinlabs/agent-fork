@@ -288,6 +288,22 @@ When the name changes, report
 for another confirmation solely because of mechanical normalization. Preserve
 an explicit-name collision error; do not silently suffix a user-selected name.
 
+## Load the agent's output reference
+
+When a successful `agent-fork session --json` or fork run reports `"agent"`,
+read the matching example file from this skill's directory before presenting
+results:
+
+- `"claude"` -> `references/output-claude.md`
+- `"codex"` -> `references/output-codex.md`
+
+The file shows the presentation format for each route: the `--session`
+summary, the bare `--session-only` line, the fork confirmation plan, and the
+fork result. It changes formatting only; every validation, escaping, and
+character-for-character command rule in this file still governs, and its
+example values are never material to reconstruct a command from. When
+`agent` is null or the CLI is missing, no reference applies.
+
 ## Validate and present CLI results
 
 A missing CLI is handled by the preflight above, not here.
