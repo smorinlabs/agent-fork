@@ -13,11 +13,32 @@ when its adversarial verification refutes the hypothesis (recorded as
 refuted, no fix).
 
 **Process (applies to every item)**
-1. **Adversarial verification gate** — validate the hypothesis against the
-   real code before any fix. Includes a Codex pass as the independent
-   second-model lens. Outcomes: *confirmed in-scope* → proceed;
+1. **Adversarial verification gate — validation-first** (owner decision
+   2026-08-17, after A2's register entry proved overstated). Reading the code
+   is not verification. Before any fix, build an **exhaustive probe matrix**
+   for the item and run it: enumerate every input the hypothesis implicates
+   (each environment variable, each configuration key, each state shape) and
+   cross it with every operation that could be affected — worktree creation,
+   branch creation, materialization, verification, cleanup — then record what
+   each cell actually does. A cell is only "a problem" when a probe
+   demonstrates it, with captured output.
+
+   The register entry is then **rewritten to match the evidence** before any
+   implementation: claims that did not reproduce are struck, severity is
+   re-rated, and untested surface is listed explicitly as unverified. Only
+   then does design begin. A Codex pass reviews the matrix and the rewritten
+   claim as the independent second-model lens.
+
+   Outcomes: *confirmed, scoped to what reproduced* → proceed;
    *scope creep / divergence from core functionality* → pause and raise to
-   the owner with clear context; *refuted* → record and move on.
+   the owner with clear context; *refuted or overstated* → rewrite the entry,
+   record why, and re-decide whether it is still worth fixing.
+
+   Rationale: A2 was registered as high-impact wrong-repository mutation.
+   Probing showed an existing guard already refuses the headline case, and the
+   real defect is narrower. Implementing the original entry would have built
+   defenses against a threat that does not exist while missing the one that
+   does.
 2. **Auto-proceed unless flagged** — a clean confirmed verdict flows
    straight into planning; only scope questions, refutations, and surprises
    come back to the owner (owner decision 2026-08-16).
@@ -63,15 +84,67 @@ repository-controlled text raw).
   "copied and verified" promise. Proposed direction: content-hash rung in
   the ladder for staged/modified files + pin `apply.whitespace` on apply
   calls. Impact: high. Type: correctness fix. Spot-checked 2026-08-16.
-- **A2 — Raw environment and gitconfig passthrough.**
-  `cli.py:667` forwards `os.environ` verbatim to every git call; no `git -c`
-  hardening, no unsetting of `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`/
-  `GIT_CONFIG_*` anywhere in `src/`. Invoked from a git hook or a shell
-  exporting these, probes and mutations target the wrong repository. The
-  sealed test harness (`tests/conftest.py:809-863`) makes this class
-  untestable today. Root cause under A1. Impact: high. Type: robustness.
-  Sequenced immediately after A1; A1's review marks any overlap explicitly
-  rather than treating it as scope creep.
+- **A2 — [x] RESOLVED: environment claim refuted on the fork and cleanup
+  paths; four configuration defects found and fixed. Unprobed configuration
+  sources are recorded as coverage gaps in issue #38.** *(Second rewrite 2026-08-17, after probing all 13 canonical
+  inputs. Evidence: `docs/superpowers/plans/2026-08-17-p02-a2-environment-hardening.md`.)*
+
+  **Original claim, refuted.** The entry asserted that forwarding `os.environ`
+  to all 50 `run_git` call sites meant "probes and mutations target the wrong
+  repository", rated high. Twelve environment inputs were probed against full forks
+  **and against cleanup** with controls (one, `GIT_ATTR_NOSYSTEM`, is untestable
+  on this machine for lack of a system attributes file): **zero wrong-repository
+  mutations, zero wrong-target deletions, zero silent divergences attributable
+  to agent-fork.** Every refusal left both the intended
+  and the unintended repository untouched — checked for branches, worktrees,
+  status, and content. Where a variable did change behavior
+  (`GIT_CONFIG_SYSTEM` flattening a committed symlink), plain
+  `git worktree add` behaves identically, so agent-fork matches the command it
+  wraps rather than misbehaving.
+
+  **What was actually wrong: configuration reaching Git.** Three defects found,
+  all fixed:
+  1. *Transport used porcelain `git diff`*, whose display drivers produce
+     patches Git documents as unappliable. A repository shipping a textconv
+     driver in committed `.gitattributes` was **unforkable**; a lossy driver
+     emptied the patch instead. Fixed by moving transport to `diff-index` and
+     `diff-files` (T-MAT-21..24).
+  2. *`diff.external`* replaced the diff engine repository-wide. Same fix.
+  3. *Inline configuration injection* (`GIT_CONFIG_COUNT`/`KEY`/`VALUE`) flattened
+     a **committed** symlink in the child while the fork reported success —
+     verification is scoped to carried paths, and committed content arrives via
+     the checkout. Fixed by sanitizing the injection triple at the `run_git`
+     chokepoint (issue #35, T-GRD-17..20).
+
+  **The "untestable under the sealed harness" claim is narrowed, not refuted.**
+  T-GRD-17, T-GRD-18, and T-GRD-21 show targeted rows can opt into hostile
+  configuration without a new framework, so no test tier was needed. They do not
+  refute the narrower point that the *baseline* sealed environment masks ambient
+  passthrough, because they call the pipeline directly rather than through the
+  CLI boundary that copies `os.environ`.
+
+  **The pinning policy is not required by any observed defect**, though not
+  fully disproven: clean/smudge filters, `extensions.worktreeConfig`, and
+  conditional `includeIf` sources remain unprobed, and the setup hook runs after
+  verification with an inherited environment and can write shared repository
+  configuration — so "file-based configuration is user intent" is not a safe
+  categorical rule for a cloned repository.
+
+  Impact: was high → medium → **resolved**. Type: correctness fixes, not the
+  robustness/hardening the entry predicted.
+
+  **Closed with named coverage gaps (issue #38), not with a claim of
+  completeness.** Unprobed: clean/smudge filters under the new plumbing
+  transport (the most plausible of the group, since filters caused real
+  divergence in A1 and the transport layer changed beneath them),
+  `extensions.worktreeConfig`, conditional `includeIf`, and `GIT_ATTR_NOSYSTEM`
+  — the last untestable on this machine for lack of a system attributes file.
+  Observed but not demonstrated: the setup hook runs after verification with an
+  inherited environment and can write shared repository configuration, and the
+  Codex app-server and agent version probes inherit unfiltered environments.
+  None is a suspected defect; each is listed so the gap is visible rather than
+  implied.
+
 - **A3 — Global flat fork registry clobbers across repositories.**
   One machine-wide `forks.json`; `RegistryEntry` (`models.py:53-75`) has no
   repo field. `add_entry` (`registry.py:111`) silently deletes a same-named
@@ -128,6 +201,15 @@ repository-controlled text raw).
   case + `prune`/`cleanup --missing`. Impact: medium-high. Type:
   robustness. (The remedial verb is minimal-remediation here, not a P03
   feature.)
+  **Amended 2026-08-17 (A3 overlap, owner decision).** A3 ships **`prune`**
+  and the typed missing-worktree refusal, because A3's actionability
+  predicate makes a row that no longer matches disk permanently unusable and
+  therefore creates the need for the exit. A7 retains: `cleanup --missing`,
+  moved-worktree repair (`git worktree move` orphaning the stored path), and
+  the case A3's `prune` deliberately declines — a row whose recorded path
+  exists but hosts something other than the recorded fork, which `prune`
+  reports and leaves alone because it may be another repository's live
+  worktree. Re-scope A7 against A3's shipped surface before starting it.
 - **A8 — Confirmation TOCTOU family (extends P01-T51).**
   Beyond the tracked auto-name drift: date rollover in the derived name
   (`naming.py:35-36`, local midnight); third independent anchor resolution
@@ -207,10 +289,10 @@ A T task is skipped (flipped `[-]`) if its TS verdict is *refuted*.
 
 - [x] [P02-TS01] A1 adversarial verification (incl. Codex): reproduce status-preserving content divergence end to end — CONFIRMED-WITH-CORRECTIONS 2026-08-16: empirical repro (apply.whitespace=fix diverged child bytes, identical porcelain, `verification.passed: true`) + Codex pass confirming mechanism, repro fairness, in-scope verdict, and sibling vectors; see [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
 - [x] [P02-T01] A1 fix per process: plan + adversarial plan review (APPROVE-WITH-CHANGES), TDD implementation, adversarial post-review (REJECT → findings absorbed or routed to issues #28–#31 per the owner's gate-6 routing) — whitespace pinned at the transport site, carried-state inventory drives both transport and verification, `content-match`/`parent-content` rungs with structured `failed_checks`, escaped repository-controlled text; 22 A1 rows green, 405 passed; see the [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
-- [ ] [P02-TS02] A2 adversarial verification (incl. Codex): demonstrate wrong-repo/config-sensitive behavior with hostile env/gitconfig
-- [ ] [P02-T02] A2 fix per process
-- [x] [P02-TS03] A3 adversarial verification (incl. Codex): two-repo registry clobber and cross-repo cleanup resolution repro — CONFIRMED-WITH-CORRECTIONS 2026-08-17: four live-git probes reproduced the clobber, the cross-repo cleanup resolution, the same-name auto-derivation on the default path, and the destructive consequence (cleanup from repoE plans to delete repoF's worktree and branch); Codex confirmed the mechanism by source trace plus non-writing execution probes, corrected the root-cause framing and the stale `cli.py` citation, and found the missing repository-containment defense in `cleanup.py:331-356` — its sandbox blocked live-git repros, so that evidence is single-source; see [design doc](../docs/superpowers/plans/2026-08-17-p02-a3-registry-repo-scope.md)
-- [ ] [P02-T03] A3 fix per process (registry schema migration)
+- [x] [P02-TS02] A2 validation-first probe matrix (incl. Codex) — 12 canonical inputs probed against the fork path and the cleanup path with controls and bystander comparison (1, `GIT_ATTR_NOSYSTEM`, untestable here); environment claim refuted: no wrong-repository mutation, no wrong-target deletion, no silent divergence attributable to agent-fork. Register entry rewritten twice to match the evidence; remaining gaps recorded in issue #38
+- [x] [P02-T02] A2 fix — four configuration defects found and fixed: porcelain transport replaced with plumbing, closing both the unappliable-patch and empty-patch modes (T-MAT-21..24), and both inline injection channels sanitized — the `GIT_CONFIG_COUNT` triple and `GIT_CONFIG_PARAMETERS`, the latter missed by the first fix and caught in review (issue #35, T-GRD-17..21). `config.py`'s direct Git launch now uses the same filter. The pinning policy is **not required by any observed defect**, but is not disproven for the sources in issue #38.
+- [x] [P02-TS03] A3 adversarial verification (incl. Codex): two-repo registry clobber and cross-repo cleanup resolution repro — CONFIRMED-WITH-CORRECTIONS 2026-08-17: four live-git probes reproduced the clobber, the cross-repo cleanup resolution, the same-name auto-derivation on the default path, and the destructive consequence (cleanup from repoE plans to delete repoF's worktree and branch); Codex confirmed the mechanism by source trace plus non-writing execution probes, corrected the root-cause framing and the stale `cli.py` citation, and found the missing repository-containment defense in `cleanup.py:331-356` — its sandbox blocked live-git repros, so that evidence is single-source; see [design doc](../docs/superpowers/plans/2026-08-17-p02-a3-registry-repo-scope.md). **Gate-1 rule change 2026-08-17:** this gate predates the validation-first probe-matrix rule A2 introduced; see the coverage note in the design doc
+- [ ] [P02-T03] A3 fix per process — reshaped 2026-08-17 from "registry schema migration" to an actionability predicate: a row authorizes nothing unless its `(worktree, branch)` pair is live in the repository freshly identified from the invoking directory. Ships `prune`, which A7's entry is amended to reflect
 - [ ] [P02-TS04] A4 adversarial verification (incl. Codex): recipe-drift blindness and post-fork failure demonstration
 - [ ] [P02-T04] A4 fix per process
 - [ ] [P02-TS05] A5 adversarial verification (incl. Codex): socket/fifo, unreadable-file, and parent-race rollback repros
