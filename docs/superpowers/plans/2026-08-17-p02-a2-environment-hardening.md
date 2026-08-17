@@ -617,3 +617,63 @@ transport is defended independently of A1's per-call pin. `T-GRD-19` and
 honoured, repository-local configuration still applied.
 
 **Gates:** 418 passed, 1 skipped; lint, typecheck, matrix clean.
+
+## Final results — all 13 canonical inputs resolved (2026-08-17)
+
+| # | Input | Verdict |
+|---|---|---|
+| 1 | `GIT_NAMESPACE` | unaffected — no effect on local ref operations |
+| 2 | `GIT_OBJECT_DIRECTORY` | refused; nothing written outside the repository |
+| 3 | `GIT_ALTERNATE_OBJECT_DIRECTORIES` | unaffected; content verified on both layers |
+| 4 | `GIT_COMMON_DIR` (foreign repository) | refused |
+| 5 | `GIT_DIR` alone (foreign repository) | **refused** — `verify_failed: branch`; bystander repository untouched in branches, worktrees, status, and content; rolled back |
+| 6 | `GIT_CEILING_DIRECTORIES` | unaffected |
+| 7 | `GIT_DISCOVERY_ACROSS_FILESYSTEM` | unaffected |
+| 8 | `GIT_CONFIG_COUNT`/`KEY`/`VALUE` | **defect found (#35), fixed** by sanitization |
+| 9 | `GIT_CONFIG_GLOBAL` | overridden by `-c`; preserved deliberately |
+| 10 | `GIT_CONFIG_SYSTEM` | flattens a committed symlink — **but plain `git worktree add` does the same**, so agent-fork matches the command it wraps |
+| 11 | `GIT_ATTR_NOSYSTEM` | **not meaningfully testable here** — no system attributes file exists on this machine to suppress |
+| 12 | `GIT_EXTERNAL_DIFF` | unaffected — confirms the plumbing transport neutralizes it, previously an untested claim |
+| 13 | `GIT_INDEX_VERSION=4` | takes effect (child index v4 against parent v2) and is harmless: staged and working content both intact |
+
+### Three probes were redone because the first attempt proved nothing
+
+- `GIT_CONFIG_SYSTEM` was run with `GIT_CONFIG_NOSYSTEM=1` exported, which
+  suppresses system configuration outright. The original "ok" was vacuous.
+- `GIT_ATTR_NOSYSTEM` had no system attributes file to suppress. Its honest
+  verdict is *not applicable on this machine*, not *harmless*.
+- `GIT_INDEX_VERSION` was not checked for having taken effect. It had — the
+  child's index really is version 4 — which is what makes "harmless" meaningful.
+
+`GIT_DIR` was also re-run specifically to answer A2's founding claim, checking
+the bystander repository's branches, worktrees, status, and content before and
+after.
+
+## Conclusion — A2 is resolved
+
+**The environment-passthrough claim is refuted.** Thirteen inputs, zero
+wrong-repository mutations, zero silent divergences attributable to agent-fork.
+Every refusal left both repositories untouched.
+
+**The real defect class was configuration reaching Git**, and all three
+demonstrated instances are fixed:
+
+| Defect | Route | Fix |
+|---|---|---|
+| Unappliable / empty transport patches | `.gitattributes` textconv | plumbing transport |
+| Transport replaced wholesale | `diff.external` config | plumbing transport |
+| Committed symlink flattened | `GIT_CONFIG_*` injection | environment sanitization |
+
+**The "untestable under the sealed harness" claim is refuted by
+demonstration.** `T-GRD-17` through `T-GRD-20` test configuration injection
+inside the existing harness. No new test tier was required — which was the
+premise of the original "test tier first" sequencing.
+
+**No pinning policy is needed.** It was scoped at roughly a week. The evidence
+retired it: A1's existing pins hold under injection, injection is now stripped,
+and for file-based configuration agent-fork behaves exactly as plain Git does,
+so overriding it would substitute the tool's judgement for the user's.
+
+**Remaining, and deliberately not fixed:** `GIT_ATTR_NOSYSTEM` is unprobed
+because this machine has no system attributes file. That is a coverage gap, not
+a known defect, and it belongs with the other coverage items in issue #31.
