@@ -29,9 +29,10 @@ a session-continuation command, so the same tool covers plain Git workflows.
 From inside your agent session:
 
 ```text
-/agent-fork try-redis       # Claude Code — fork without leaving the conversation
-$agent-fork try-redis       # Codex — same skill, same behavior
+/agent-fork try-redis       # fork without leaving the conversation
 ```
+
+(Codex spells the same skill `$agent-fork`; everything else is identical.)
 
 The skill previews the fork — target branch, destination worktree, the files it
 would carry — and asks for confirmation before creating anything. It drives the
@@ -55,16 +56,15 @@ your uncommitted work already there.
 The full set of skill invocations:
 
 ```text
-/agent-fork try-redis       # Claude: explicit fork name
-$agent-fork try-redis       # Codex: explicit fork name
-/agent-fork try-redis --now  # Claude: fork immediately, no confirmation
-$agent-fork try-redis --now  # Codex: fork immediately, no confirmation
+/agent-fork try-redis       # explicit fork name
+/agent-fork try-redis --now # fork immediately, no confirmation
 /agent-fork                 # fork with context-aware naming
-/agent-fork --session       # Claude: inspect this agent session
-$agent-fork --session       # Codex: inspect this agent session
-/agent-fork --session-only  # Claude: print only the native session-fork command
-$agent-fork --session-only  # Codex: print only the native session-fork command
+/agent-fork --session       # inspect this agent session
+/agent-fork --session-only  # print only the native session-fork command
 ```
+
+Codex invokes the same skill as `$agent-fork`; every form above is otherwise
+identical.
 
 The skill calls the installed CLI directly. When that CLI is missing, it prints
 the source install command and, if it can confirm a local checkout of this
