@@ -1,6 +1,8 @@
 # agent-fork
 
-**Fork your repo and your agent session in one command.**
+**Forking a session is easy; forking your files isn't. This Claude Code /
+Codex skill gives the forked session its own branch and worktree with every
+uncommitted file copied and verified.**
 
 [![CI](https://github.com/smorinlabs/agent-fork/actions/workflows/ci.yml/badge.svg)](https://github.com/smorinlabs/agent-fork/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
@@ -11,16 +13,34 @@ want to rebuild, and your working tree is full of uncommitted work. Now you want
 to try a *second* approach — without stashing, without losing the first one, and
 without starting the conversation over.
 
-`agent-fork` does that in one command. It creates a new branch and a linked Git
-worktree, copies your current staged, unstaged, and untracked files into it,
-verifies the copy matched, and prints the exact command that continues *this
-conversation* in that new worktree. Your original worktree and session are never
-touched.
+The `agent-fork` skill does that without leaving the conversation. Type
+`/agent-fork try-redis` (Claude Code) or `$agent-fork try-redis` (Codex) and it
+creates a new branch and a linked Git worktree, copies your current staged,
+unstaged, and untracked files into it, verifies the copy matched, and prints
+the exact command that continues *this conversation* in that new worktree. Your
+original worktree and session are never touched.
 
-Outside an agent session it does the same branch-and-worktree work and prints a
-`cd` command instead, so the same tool works in a plain terminal.
+Underneath the skill is a standalone `agent-fork` CLI that does the same work
+from any terminal. Outside an agent session it prints a `cd` command instead of
+a session-continuation command, so the same tool covers plain Git workflows.
 
 ## Demo
+
+From inside your Claude Code or Codex session:
+
+```text
+/agent-fork try-redis       # fork without leaving the conversation
+```
+
+Don't have the skill yet? One command installs it for both agents:
+
+```bash
+npx skills@latest add smorinlabs/agent-fork
+```
+
+The skill previews the fork — target branch, destination worktree, the files it
+would carry — and asks for confirmation before creating anything. It drives the
+CLI below, which works directly from a terminal too:
 
 ```console
 $ agent-fork fork try-redis --dry-run
@@ -35,52 +55,156 @@ Drop `--dry-run` and the fork is created. Paste the final line into a fresh
 terminal and the agent picks up where it left off — same context, new branch,
 your uncommitted work already there.
 
+## The skill
+
+The full set of skill invocations:
+
+```text
+/agent-fork try-redis       # explicit fork name
+/agent-fork try-redis --now # fork immediately, no confirmation
+/agent-fork                 # fork with context-aware naming
+/agent-fork --session       # inspect this agent session
+/agent-fork --session-only  # print only the native session-fork command
+```
+
+Codex invokes the same skill as `$agent-fork`; every form above is otherwise
+identical.
+
+The skill is a thin front end over the installed CLI — each form maps to one
+CLI call:
+
+| Skill form | CLI call | Result |
+|---|---|---|
+| The fork forms | `agent-fork fork ... --require-agent --json` | The branch, the worktree, and the paste command |
+| `--session` | `agent-fork session --json` | The session inspection plus its native fork command |
+| `--session-only` | `agent-fork session --json` | Only that native fork command |
+
+The fork's name comes from one of three places:
+
+- A name hint you typed is normalized to lowercase kebab-case
+  (`"Review Auth"` becomes `review-auth`).
+- With no hint on a topic branch — an ordinary feature branch — the CLI
+  derives the name automatically (dated, with a suffix if it collides).
+- With no hint on the default branch, a detached HEAD, or an unclassifiable
+  branch, the skill proposes a name from the conversation.
+
+Every fork is confirmed before it exists: the skill runs a dry run, shows you
+the target branch, the destination worktree, and the files it would carry,
+and creates the fork only after you approve. `--now` skips that confirmation;
+the name is still chosen the same way.
+
+When the `agent-fork` CLI is not installed, the skill walks you through the
+fix step by step. It checks for `uv`: if `uv` is present it offers a one-off
+`uvx` run or a permanent install, and if not it points at the `uv` installer
+or a direct `pip` install. If it can confirm a local checkout of this
+repository, it also offers — after asking — to run from that checkout with
+`uv run --directory`.
+
+Two limits are deliberate: the skill accepts no CLI flags beyond the forms
+above (advanced flags are for direct CLI use), and the two inspection forms
+always use the active session's directory (there is no directory option).
+
+The skill ships as one copy: the Agent Skills artifact at
+`.agents/skills/agent-fork` in this repository. Codex discovers it there as
+`$agent-fork`; Claude Code discovers the same files through the repository's
+`.claude/skills/agent-fork` symlink as `/agent-fork`. The user-level installs
+above create the same two links under your home directory. The plugin manifests (`.claude-plugin/` for Claude
+Code, `.codex-plugin/` for Codex) and the repo-root `skills/` directory all
+point at that same artifact.
+
 ## Install
+
+The skill installs with one command, for Claude Code and Codex at once:
+
+```bash
+npx skills@latest add smorinlabs/agent-fork
+```
+
+Claude Code can install it as a plugin instead — this repository is its own
+marketplace:
+
+```text
+/plugin marketplace add smorinlabs/agent-fork
+/plugin install agent-fork@agent-fork
+```
+
+### Optional: install the CLI
+
+The skill runs the `agent-fork` CLI and helps you set it up on first use, so
+installing the CLI yourself is optional. Doing so makes it available in any
+terminal:
 
 ```bash
 uv tool install git+https://github.com/smorinlabs/agent-fork
 ```
 
-Or run it without installing:
+Or run it once without installing:
 
 ```bash
 uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
 ```
 
-> PyPI and Homebrew releases land with v1.0.0.
+> PyPI and Homebrew releases land with v1.0.0; after PyPI publication the
+> no-install command becomes simply `uvx agent-fork`.
 
 **Requirements:** Python 3.11+ and Git 2.19+. Forking an agent session
 additionally needs Claude Code 2.0.73+ or Codex 0.95+ (Codex's native `fork`
 itself requires 0.81+). Run `agent-fork doctor` to check all of this at once.
 
-### Local development installation
+### Alternative: local skill install
 
-Run these commands from the repository root before registry publication. The
-editable `uv` tool install keeps the command connected to this checkout. The
-two `skillsmith dev` commands create user-level development symlinks for Claude
-Code and Codex, so both agents discover the same canonical skill.
+If you would rather not use the npx installer or the plugin, clone the
+repository and symlink the canonical artifact into the user-level skill
+directories for both agents:
+
+```bash
+git clone https://github.com/smorinlabs/agent-fork
+cd agent-fork
+mkdir -p ~/.claude/skills ~/.agents/skills
+ln -sfn "$PWD/.agents/skills/agent-fork" ~/.claude/skills/agent-fork
+ln -sfn "$PWD/.agents/skills/agent-fork" ~/.agents/skills/agent-fork
+```
+
+Claude Code then discovers it as `/agent-fork` and Codex as `$agent-fork`.
+
+### Dev mode
+
+Run these commands from the repository root. The editable `uv` tool install
+keeps the command connected to this checkout; skill placement uses the same
+two symlinks shown above.
 
 ```bash
 uv tool install --editable --force .
-skillsmith dev agent-fork --tool claude-code \
-  --source "$PWD/.agents/skills/agent-fork"
-skillsmith dev agent-fork --tool codex \
-  --source "$PWD/.agents/skills/agent-fork"
+mkdir -p ~/.claude/skills ~/.agents/skills
+ln -sfn "$PWD/.agents/skills/agent-fork" ~/.claude/skills/agent-fork
+ln -sfn "$PWD/.agents/skills/agent-fork" ~/.agents/skills/agent-fork
 ```
 
 Verify the installed version and both placements:
 
 ```bash
 agent-fork --version
-skillsmith list agent-fork --long
+readlink ~/.claude/skills/agent-fork ~/.agents/skills/agent-fork
 ```
 
-The version command must print `agent-fork 1.0.0`. The placement list must show
-`~/.claude/skills/agent-fork` for Claude Code and
-`~/.agents/skills/agent-fork` for Codex, both resolving to this repository's
-`.agents/skills/agent-fork` directory.
+The version command must print `agent-fork 1.0.0`. Both symlinks must resolve
+to this repository's `.agents/skills/agent-fork` directory.
+
+### Uninstall
+
+```bash
+uv tool uninstall agent-fork
+npx skills@latest remove agent-fork
+```
+
+A symlink install is removed with
+`rm ~/.claude/skills/agent-fork ~/.agents/skills/agent-fork`; a plugin install
+with `/plugin uninstall agent-fork`.
 
 ## Quickstart
+
+Inside a session, just type `/agent-fork` — the commands below are the
+direct-CLI equivalents:
 
 ```bash
 agent-fork doctor              # confirm Git, agent CLIs, config, and XDG paths
@@ -89,48 +213,6 @@ agent-fork session             # inspect context and print a native fork command
 agent-fork list                # see the forks you have created
 agent-fork cleanup try-redis --yes   # remove one when you are done
 ```
-
-## From inside your agent session
-
-You do not need to leave the conversation. This repository ships a companion
-skill — just type:
-
-```text
-/agent-fork --session       # Claude: inspect this agent session
-$agent-fork --session       # Codex: inspect this agent session
-/agent-fork --session-only  # Claude: print only the native session-fork command
-$agent-fork --session-only  # Codex: print only the native session-fork command
-/agent-fork try-redis --now  # Claude: fork immediately, no confirmation
-$agent-fork try-redis --now  # Codex: fork immediately, no confirmation
-/agent-fork try-redis       # Claude: explicit fork name
-$agent-fork try-redis       # Codex: explicit fork name
-/agent-fork                 # fork with context-aware naming
-```
-
-The skill calls the installed CLI directly. When that CLI is missing, it prints
-the source install command and, if it can confirm a local checkout of this
-repository, offers to run the same route from it under `uv run --directory`
-after asking first. Both inspection forms use
-`agent-fork session --json`; `--session` includes the returned native fork
-command with the inspection, while `--session-only` prints only that exact
-command. Forking uses
-`agent-fork fork ... --require-agent --json`. An explicit name hint is
-normalized to lowercase kebab case. With no
-name, a topic branch uses the CLI's date-bearing automatic name and collision
-suffixes, and a default, detached, or unclassified branch gets a name proposed
-from the conversation. Every fork is then confirmed against a dry run — showing
-the target branch, the destination worktree, and the files it would carry —
-before anything is created. `--now` skips that confirmation without changing
-how the name is chosen. Advanced CLI flags are intentionally direct-CLI use
-cases rather than skill arguments. The two inspection forms infer the base
-directory from the active agent session; they do not accept a directory option.
-
-The skill lives at one canonical Agent Skills artifact,
-`.agents/skills/agent-fork`. Codex discovers it there as `$agent-fork`; Claude
-Code discovers the same artifact through `.claude/skills/agent-fork` as
-`/agent-fork`. It calls `agent-fork` on `PATH`; when that is missing it prints
-the source install command and, if it can confirm a local checkout, offers to
-run from it instead.
 
 ## How it works
 
@@ -188,93 +270,30 @@ Use the same interface inside Claude Code or Codex:
 agent-fork session
 agent-fork session -o json
 agent-fork session validate --agent codex --has-parent
-agent-fork session validate \
-  --session-id "$EXPECTED_CHILD" \
-  --parent-session-id "$EXPECTED_PARENT" -o json
 ```
 
-Inspection reports sourced evidence, the resolved invocation directory, and
-nullable Git repository context. Repository context includes the worktree root,
-branch or detached state, remote/default-branch candidates, default membership,
-linked/bare topology, and clean/staged/unstaged/untracked/unmerged/operation
-status. A bare repository has null working-tree status. Outside Git—or when Git
-context is unavailable—the session evidence remains usable and `repository` is
-null. Inspection also reports `fork_command`: one detected Claude Code or Codex
-identity produces a shell-quoted native command using the resolved invocation
-directory. Claude receives a fresh, single-use child UUID. No identity,
-ambiguous identity, or terminal-unsafe identity/path data produces an explicit
-unavailable status and a null command. Inspection succeeds with `not_detected`
-in an ordinary terminal.
-
-The native session commands have these shapes:
+Inspection reports sourced evidence, the resolved invocation directory,
+nullable Git repository context, and `fork_command` — a shell-quoted native
+command for the one detected agent identity:
 
 ```text
 cd '<resolved-directory>' && claude --session-id '<fresh-child-uuid>' --resume '<current-session-id>' --fork-session
 codex fork '<current-thread-id>' -C '<resolved-directory>'
 ```
 
-`available` means the command was constructible from ambient identity; it does
-not run native CLI preflight. Use `agent-fork fork` when you need the supported
-version and Codex-rollout checks before repository mutation. The ordinary
-session command and both skill inspection forms never execute the returned
-command, create a branch or worktree, copy files, write registry or lineage
-state, or touch the clipboard. There is no direct CLI `--session-only` flag;
-that spelling is a companion-skill presentation shortcut over the JSON field.
-
-Validation without constraints requires any unambiguous supported current
-session. Optional `--agent`, `--session-id`, `--parent-session-id`, and
-`--has-parent`/`--no-parent` assertions compose with AND semantics.
-
-Parent means parent evidence, not proof that a transcript still exists. Codex
-name and parent evidence comes from its bounded local app-server. Agent
-Fork-created Claude children retain a prompt-free XDG provenance claim because
-Claude transcripts do not preserve the source session UUID. Missing evidence
-is not proof that a session was never forked. Inspection makes no network calls
-and does not modify agent or repository state.
-
-### Claude parent inference
+Inspection never executes the returned command, mutates agent or repository
+state, or makes a network call; in an ordinary terminal it succeeds with
+`not_detected`. Validation asserts expected identity and lineage: optional
+`--agent`, `--session-id`, `--parent-session-id`, and
+`--has-parent`/`--no-parent` constraints compose with AND semantics.
 
 Claude does not expose an authoritative historical parent ID for ordinary
-forks. An explicit, potentially expensive structural analysis can infer likely
-relationships from copied message UUID/`parentUuid` ancestry:
-
-```bash
-agent-fork session claude-parent infer --current
-agent-fork session claude-parent infer --session-id UUID -o json
-agent-fork session claude-parent infer --session-id UUID --record
-agent-fork session claude-parent infer --all
-agent-fork session claude-parent infer --all --record-all
-agent-fork session claude-parent list
-agent-fork session claude-parent show --session-id UUID
-agent-fork session claude-parent delete --session-id UUID --source inferred --yes
-```
-
-Exactly one of `--current`, `--session-id`, or `--all` is required. Preview is
-read-only. `--record` is single-target only; bulk persistence requires the
-deliberate `--record-all` spelling. Delete removes only Agent Fork metadata,
-never Claude transcripts, history, sessions, Git branches, or worktrees. It
-prompts only in interactive human mode; use `--yes` for automation, while
-`--no-input` makes missing consent fail immediately. Bulk JSON remains one
-document and uses bounded per-target candidate projections.
-
-Analysis uses a bounded manifest, superficial streaming UUID screens, exact
-candidate parsing, and bounded graph comparison. Cache shards live under
-`$XDG_CACHE_HOME/agent-fork/claude-lineage-index-v2/`; unchanged unrelated
-transcripts are not reread on warm lookup. Inferred records live separately at
-`$XDG_STATE_HOME/agent-fork/session-lineage-inferences.json`. Neither cache nor
-state stores prompt/response content, although session IDs and UUID correlation
-remain sensitive local metadata.
-
-`inferred` and `strongly_inferred` are evidence labels, not proof of immediate
-parentage. Same-boundary siblings remain ambiguous regardless of timestamps.
-Recorded freshness means `current_at_last_analysis`: the analyzed source files,
-algorithm version, index generation, and target-specific candidate-universe
-digest are retained, but ordinary `session`, `list`, and `show` never rescan the
-Claude corpus and therefore do not claim global currentness. A later explicit
-inference refresh can detect relevant candidate-universe changes. Stale records
-remain manageable with `list`/`show` but are not used as parent evidence. This
-heuristic relies on observed Claude transcript structure, not a documented
-Anthropic lineage API.
+forks; the explicit `agent-fork session claude-parent infer` analysis can infer
+likely relationships from transcript structure and record them as local
+evidence. The complete semantics — repository-context fields, availability
+rules, parent-evidence caveats, and the inference commands, caching, and
+evidence labels — are documented in
+[docs/session-inspection.md](docs/session-inspection.md).
 
 ## `cleanup` options
 
@@ -478,8 +497,7 @@ with `REPO_ROOT` and `WORKTREE_PATH` set.
 - **Interrupts are handled.** SIGINT and SIGTERM exit 130 and 143 after rollback
   where applicable.
 - **No network, no telemetry.** `agent-fork` makes no runtime network calls and
-  collects no data. Git operations against already-configured local repository
-  metadata remain local; package managers own installation and updates.
+  collects no data ([details](#telemetry-and-networking)).
 
 ## Compatibility policy
 
@@ -564,6 +582,23 @@ operations against already configured local repository metadata remain local;
 package managers own installation and updates. The explicit `just test-live`
 development gate is separate from the product runtime and calls the installed
 Claude and Codex CLIs after its network/authentication preflight.
+
+## Contributing
+
+Contributions are welcome — the loop is short:
+
+1. Fork the repository and create a topic branch. A Git worktree keeps your
+   main checkout clean; `agent-fork fork` can create it for you.
+2. Install [dev mode](#dev-mode) and run the gate before pushing: `make check`,
+   then `flox activate` and `just all` (format, lint, typecheck, tests).
+3. Write [Conventional Commits](https://www.conventionalcommits.org)
+   (`feat:`, `fix:`, `docs:`, …).
+4. Open a pull request; CI runs the same hermetic gate.
+
+The design and evidence corpus — [DESIGN-DECISIONS.md](DESIGN-DECISIONS.md),
+[REQUIREMENTS.md](REQUIREMENTS.md), [EXPERIMENTS.md](EXPERIMENTS.md), and
+[CONFORMANCE.md](CONFORMANCE.md) — explains why things work the way they do;
+check it before proposing behavior changes.
 
 ## License
 

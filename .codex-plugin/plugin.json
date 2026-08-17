@@ -1,0 +1,21 @@
+{
+  "name": "agent-fork",
+  "version": "1.0.0",
+  "description": "Fork a Claude Code or Codex session into its own branch and Git worktree with every uncommitted file copied and verified; the $agent-fork skill drives the agent-fork CLI.",
+  "license": "MIT",
+  "keywords": [
+    "fork",
+    "worktree",
+    "session",
+    "claude-code",
+    "codex",
+    "git"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent Fork",
+    "shortDescription": "Fork your agent session into its own branch and worktree with every uncommitted file copied and verified.",
+    "longDescription": "Fork a Claude Code or Codex session into its own branch and Git worktree with every uncommitted file copied and verified; the $agent-fork skill drives the agent-fork CLI.",
+    "category": "Developer Tools"
+  }
+}

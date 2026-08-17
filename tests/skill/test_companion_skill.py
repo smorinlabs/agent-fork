@@ -90,6 +90,16 @@ def test_frontmatter_declares_argument_and_tool_hints() -> None:
     assert text.count("\n---\n") == 1
 
 
+def test_missing_cli_probes_uv_and_covers_its_absence() -> None:
+    text = _text()
+    assert "command -v uv" in text
+    assert "With `uv` present" in text
+    assert "Without `uv`" in text
+    assert "https://docs.astral.sh/uv/getting-started/installation/" in text
+    assert "python3 -m pip install git+https://github.com/smorinlabs/agent-fork" in text
+    assert text.index("command -v uv") < text.index("uvx --from")
+
+
 def test_missing_cli_preflight_precedes_every_route() -> None:
     text = _text()
     assert "exit `127`" in text

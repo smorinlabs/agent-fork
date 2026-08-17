@@ -41,7 +41,21 @@ Every route below calls `agent-fork`. An absent CLI is not a CLI refusal:
 shell exit `127` or a `command not found` message means Agent Fork never ran.
 Never present that as CLI output, and never substitute hand-written Git for it.
 
-When the CLI is missing, always show the durable fix:
+When the CLI is missing, disclose the fix progressively: probe what exists
+before prescribing anything. `command -v agent-fork` has already failed, so
+test the installer next:
+
+```bash
+command -v uv
+```
+
+With `uv` present, offer both forms and let the user pick. The no-install run:
+
+```bash
+uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
+```
+
+And the durable fix:
 
 ```bash
 uv tool install git+https://github.com/smorinlabs/agent-fork
@@ -50,10 +64,14 @@ uv tool install git+https://github.com/smorinlabs/agent-fork
 Install from the source repository. The bare package name is not installable:
 the PyPI entry is a placeholder until the first published release.
 
-You may also offer the no-install form as text for the user to run:
+Without `uv`, say plainly that `uv` is missing and that every route above —
+including the checkout fallback below — needs it. Offer two ways forward:
+install `uv` first
+(https://docs.astral.sh/uv/getting-started/installation/), or install the
+repository directly with the interpreter already present:
 
 ```bash
-uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
+python3 -m pip install git+https://github.com/smorinlabs/agent-fork
 ```
 
 Never run a network-fetched command on the user's behalf. Print it and let the
