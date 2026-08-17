@@ -139,7 +139,7 @@ highest consequence) · registry write.
 
 | Input | Hypothesis to falsify |
 |---|---|
-| textconv driver via committed `.gitattributes` + `diff.<driver>.textconv` | The transport patch is unappliable or lossy, because `git diff` enables textconv by default and Git documents that its output "cannot be applied". **Repository-controlled — no hostile environment needed.** Probe with and without `--binary` to settle whether `--binary` suppresses it. |
+| textconv driver via committed `.gitattributes` + `diff.<driver>.textconv` | The transport patch is unappliable or lossy, because `git diff` enables textconv by default and Git documents that its output "cannot be applied". **Repository-controlled — no hostile environment needed.** Run the T1 matrix below; a single binary file is not sufficient coverage. |
 | `diff.external` config, and `GIT_EXTERNAL_DIFF` environment | The diff engine is replaced, so `git apply` receives output that is not a Git patch; transport fails or corrupts. |
 | `GIT_NAMESPACE` | The existence guard, branch creation, and `branch -D` disagree about `refs/heads/<branch>`; a fork collides with an invisible branch, or cleanup deletes the wrong ref. |
 | `GIT_OBJECT_DIRECTORY` | Objects written by `apply --index` land outside the repository; the fork's index references blobs that disappear with the variable, while verification passes because it runs under the same environment. |
@@ -170,3 +170,47 @@ Sequencing stands: unsealed-configuration test tier first, then whatever
 sanitization the matrix justifies, then the pinning policy. The research
 already narrows the third piece: pin through `-c`, which outranks environment
 injection, rather than enumerating variables to strip.
+
+## T1 matrix — textconv and binary treatment
+
+A single NUL-containing file is **not** sufficient coverage, because Git's
+binary decision is not purely content-based. `gitattributes(5)`: Git "usually
+guesses correctly … by examining the beginning of the contents," but a file may
+be marked binary "because the content, **while technically composed of text
+characters**, is opaque to a human reader" — their example is PostScript, which
+is pure ASCII. A text file can therefore be binary for diff purposes.
+
+The same page documents a third configuration that `-diff` alone cannot
+express: `-diff` and `diff=<driver>` are mutually exclusive, so combining
+textconv with binary treatment requires `diff.<driver>.binary = true`. That
+combination is the most likely to interact badly with `--binary`.
+
+**Content axis:** C1 NUL bytes (content-detected binary) · C2 high bytes, no
+NUL (likely detected as text) · C3 pure ASCII text.
+
+**Attribute axis:** A1 none (control) · A2 `diff=drv` with
+`diff.drv.textconv` · A3 `-diff` (marked binary, no driver) · A4 `diff=drv`
+with `textconv` plus `diff.drv.binary = true`.
+
+**Procedure.**
+1. *Observe (12 cells, cheap).* For each content × attribute pair, modify the
+   file unstaged and run `git diff --binary --no-color`. Record only the output
+   kind: binary patch · textconv text · `Binary files differ` · ordinary text
+   diff.
+2. *Fork the suspicious cells.* Any cell whose output is not an applyable patch
+   gets a full `agent-fork fork`; record whether transport fails loudly or
+   diverges silently.
+3. *Isolate `--binary`.* Repeat step 1 without `--binary` for cells that
+   differed.
+
+**Decision table.**
+
+| Observation | Conclusion |
+|---|---|
+| C3 with A3 or A4 yields textconv output | Exposure includes ordinary text files; any repository with a diff driver is affected. Largest scope. |
+| Only C1 affected | Exposure limited to genuinely binary content. Narrower, still real. |
+| `--binary` suppresses textconv in every cell | Latent only; drops to hardening and the environment variables resume priority. |
+| A4 differs from A2 | The fix must handle `diff.<driver>.binary` specifically, not just `--no-textconv`. |
+
+**Deferred:** `core.bigFileThreshold` is a fourth route to binary treatment.
+Add it to the matrix only if the attribute axis shows the mechanism bites.
