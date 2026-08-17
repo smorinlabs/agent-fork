@@ -412,3 +412,73 @@ restating it.**
 **Excluded, with reason:** `GIT_DEFAULT_HASH` and `GIT_DEFAULT_REF_FORMAT`
 apply to repository creation, which agent-fork never performs.
 `GIT_CONFIG_NOSYSTEM` is hardening-only and already set by the test harness.
+
+## Group 2–4 results — run 2026-08-17
+
+Four priority-1 inputs probed against a full fork. **No defect found. The
+mechanism-based prioritization that put these first was wrong.**
+
+| Input | Verdict | Evidence |
+|---|---|---|
+| `GIT_NAMESPACE` | **unaffected** | Has no effect on the local ref operations agent-fork performs |
+| `GIT_OBJECT_DIRECTORY` | **refused** | `fatal: Needed a single revision`; zero objects written to the foreign directory, no partial fork |
+| `GIT_ALTERNATE_OBJECT_DIRECTORIES` | **unaffected** | Fork succeeded and content verified correct on both layers |
+| `GIT_COMMON_DIR` (foreign repository) | **refused** | Same refusal as `GIT_OBJECT_DIRECTORY` |
+
+### `GIT_NAMESPACE` — hypothesis refuted
+
+It was the highest-suspicion input in the matrix, on the reasoning that
+relocating refs would make the existence guard, `worktree add -b`, and
+`branch -D` disagree. Probed directly:
+
+- `GIT_NAMESPACE=ns git branch alpha` creates `refs/heads/alpha`. **No
+  `refs/namespaces/` directory is created at all.**
+- `rev-parse alpha` resolves identically with and without the namespace.
+- `GIT_NAMESPACE=ns git branch -D target` deletes the **real** `refs/heads/target`
+  — the intended ref, not a namespaced one.
+
+The namespace does apply, but at the **transport layer**: `ls-remote` shows 0
+refs under the namespace against 3 without it. That matches
+`gitnamespaces(7)`'s framing — namespaces exist to "expose each namespace as an
+independent repository to pull from and push to". The local ref commands
+agent-fork uses do not honor it, so the predicted disagreement cannot occur.
+
+**Correction to record:** the design reasoning treated "refs are relocated" as
+applying to all ref access. It applies to the remote protocol. Reading
+`gitnamespaces(7)` more carefully would have caught this before the probe —
+though the probe is what settled it, which is the point of the gate.
+
+### Content verification mattered
+
+`GIT_ALTERNATE_OBJECT_DIRECTORIES` initially looked like "fork succeeded", which
+is not a verdict. Re-probed asserting both layers of the three-way split: parent
+and child both `WORKING alt` in the working tree and `STAGED alt` in the index.
+Only then is "unaffected" supportable.
+
+Likewise `GIT_COMMON_DIR` was first probed pointed at the repository's own
+`.git`, which is benign by construction and proves nothing. Re-probed against a
+*different* repository, it refuses.
+
+### The one real observation
+
+Both refusals surface as **`runtime_error: fatal: Needed a single revision`** —
+uncategorized, with raw Git text that names neither the variable nor the cause.
+Safety holds (nothing is created, nothing is written outside the repository),
+but a user hitting this has no path to diagnosis. This is the same error-typing
+weakness seen in the T1 transport failure, now observed from a second
+independent direction, which strengthens the case that issue #28's typed-error
+work has a live trigger.
+
+### Running tally
+
+| Status | Inputs |
+|---|---|
+| Resolved, defect fixed | textconv attribute · `diff.external` |
+| Resolved, no defect | `GIT_DIR`+`GIT_WORK_TREE` · `GIT_INDEX_FILE` · `GIT_NAMESPACE` · `GIT_OBJECT_DIRECTORY` · `GIT_ALTERNATE_OBJECT_DIRECTORIES` · `GIT_COMMON_DIR` |
+| Remaining untested | 9 of the canonical 13 — priorities 2 and 3: `GIT_DIR` alone, `GIT_CEILING_DIRECTORIES`, `GIT_DISCOVERY_ACROSS_FILESYSTEM`, `GIT_CONFIG_COUNT`/`KEY`/`VALUE`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_ATTR_NOSYSTEM`, `GIT_EXTERNAL_DIFF`, `GIT_INDEX_VERSION` |
+
+**Interim read:** every environment variable probed so far is either refused or
+harmless. The only confirmed A2-adjacent defects came from *configuration and
+attributes* (textconv, `diff.external`), not from the environment. If the
+remaining configuration-injection cells behave the same way, A2's severity
+should drop again and its fix should be scoped to the pinning policy alone.
