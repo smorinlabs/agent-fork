@@ -318,3 +318,59 @@ churn without evidence.
 **Gates:** T-MAT-21..24 observed RED, then green. A1's 22 verification cells
 pass unchanged — the condition for preferring plumbing. Full suite 413 passed,
 1 skipped; lint, typecheck, and matrix clean.
+
+## Stage 2 — porcelain audit across the whole codebase
+
+Inventory of every Git subcommand, with a verdict per family.
+
+| Subcommand | Calls | Verdict |
+|---|---|---|
+| `status --porcelain=v1 -z` | 15 | **Keep.** `--porcelain` *is* Git's documented stable machine format; it is the plumbing contract for status, not a human format. |
+| `worktree … --porcelain` | 11 | **Keep.** Same reasoning; the porcelain flag selects the machine format. |
+| `ls-files` | 10 | **Keep.** Already plumbing. |
+| `diff --name-only` | 10 | **Keep as porcelain** — see below. |
+| `rev-parse`, `show-ref`, `symbolic-ref`, `rev-list`, `check-ref-format` | 17 | **Keep.** Already plumbing. |
+| `branch` | 8 | **Keep for now.** Porcelain, with plumbing equivalents (`for-each-ref`, `update-ref -d`). No evidence of a defect; revisit only if the `GIT_NAMESPACE` probe implicates ref handling. |
+| `apply`, `add` | 3 | **Keep.** No display-driver surface. |
+
+### Why the `--name-only` enumeration calls stay porcelain
+
+Swapping them was the obvious next step and the evidence argued against it:
+
+1. **They are provably unaffected** by both mechanisms. Probed directly: with a
+   textconv driver active and with `diff.external` set repository-wide, the
+   `--name-only` output listed paths correctly and exited 0 in both cases.
+   These calls never render content, so no driver touches them.
+2. **Swapping would introduce a new failure.** `diff-index` requires a tree
+   argument, and `git diff-index --cached HEAD` fails on a repository with no
+   commits — `fatal: ambiguous argument 'HEAD'` — where porcelain succeeds.
+   `inspect_working_tree_status` runs outside the fork guards, serving
+   `agent-fork session` on any repository, so the swap would break session
+   inspection on a fresh repository. Trading a proven-absent problem for a real
+   one is a bad trade.
+
+The transport calls do not share this hazard: `validate_fork_guards`
+(`pipeline.py:95`) refuses `repo_no_commits` before `materialize`
+(`pipeline.py:132`) ever runs, and T-GRD-10/11 cover it.
+
+### The audit's own finding — rename counts disagreed
+
+`content.py` passes `--no-renames` when building the inventory; `cli.py` and
+`repository.py` did not when counting for display. Porcelain enables rename
+detection by default, so one staged rename produced:
+
+| Caller | Paths |
+|---|---|
+| reported count (dry run, session status) | **1** — `new_name.txt` |
+| carried inventory | **2** — both endpoints |
+
+The user confirmed a fork carrying "1 staged file" while transport carried two
+paths. Cosmetic rather than data-affecting — the patch reproduces the rename
+correctly either way — but it contradicts the principle A1 established, that
+reported numbers match reality.
+
+Fixed by adding `--no-renames` at the two reporting sites rather than swapping
+commands: minimal, and it introduces no empty-repository hazard. `T-MAT-25`
+pins it, observed RED (`reported staged=1 but the inventory carries 2`).
+
+**Gates:** 414 passed, 1 skipped; lint, typecheck, matrix clean.

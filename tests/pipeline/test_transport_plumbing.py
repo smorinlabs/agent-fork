@@ -156,3 +156,37 @@ def test_staged_and_unstaged_split_survives_a_diff_driver(repo_scenario):
         check=True,
     ).stdout
     assert staged == b"STAGED VERSION\n"
+
+
+@pytest.mark.matrix("T-MAT-25")
+def test_reported_counts_match_the_carried_inventory_for_renames(repo_scenario):
+    """The count a user confirms must match what the fork actually carries.
+
+    Porcelain `git diff --name-only` enables rename detection by default, so a
+    staged rename reports ONE path. The carried inventory passes
+    `--no-renames`, so it holds TWO — both endpoints, which is what transport
+    needs to reproduce the rename. The reported count was therefore lower than
+    reality.
+    """
+    from agent_fork.content import collect_inventory
+    from agent_fork.repository import inspect_repository, inspect_working_tree_status
+
+    world = repo_scenario()
+    (world.parent_path / "old_name.txt").write_bytes(
+        b"content long enough to be detected as a rename by similarity\n"
+    )
+    _git(world, "add", "old_name.txt")
+    _git(world, "commit", "-m", "add a file to rename")
+    _git(world, "mv", "old_name.txt", "new_name.txt")
+
+    info = inspect_repository(world.parent_path, env=world.env)
+    status = inspect_working_tree_status(info, env=world.env)
+    inventory = collect_inventory(
+        world.parent_path, with_state=True, with_ignored=False, env=world.env
+    )
+
+    assert status is not None
+    assert status.staged == len(inventory.staged), (
+        f"reported staged={status.staged} but the inventory carries "
+        f"{len(inventory.staged)}: {inventory.staged}"
+    )
