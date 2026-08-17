@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 226 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 231 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -233,6 +233,11 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-18 | mode=exact full-materialize — staged+unstaged+untracked copied, ignored excluded | mode=exact | F | live | REQ-21 |
 | T-MAT-19 | mode=exact+ignored full-materialize — staged+unstaged+untracked+ignored all copied | mode=exact+ignored | F | live | REQ-21 |
 | T-MAT-20 | mode=no-state full-materialize — worktree at parent HEAD, no materialization, child status clean | mode=no-state | F | live | REQ-21; RESEARCH §4 |
+| T-MAT-21 | A2 transport — a repository shipping a textconv diff driver in committed `.gitattributes` stays forkable; porcelain `git diff` produced an unappliable patch | baseline | F | live | A2 design doc §T1; git-diff(1) |
+| T-MAT-22 | A2 transport — a lossy textconv driver that renders every revision alike must not empty the patch and drop the change; porcelain produced 0 bytes | baseline | F | live | A2 design doc §T8 |
+| T-MAT-23 | A2 transport — `diff.external` replaces the diff engine repository-wide; transport must be immune | baseline | F | live | A2 design doc §T5 |
+| T-MAT-24 | A2 transport — the committed/staged/working-tree split survives transport while a diff driver is active (the reason patches exist rather than file copies) | baseline | F | live | REQ-21; A2 design doc |
+| T-MAT-25 | A2 audit — reported staged/unstaged counts match the carried inventory for a staged rename; porcelain rename detection reported one path where transport carries both endpoints | baseline | F | live | A2 design doc §T9 |
 
 ---
 

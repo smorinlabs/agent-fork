@@ -210,8 +210,14 @@ def inspect_working_tree_status(
         record.split(b"\t", 1)[1] for record in unmerged.split(b"\0") if b"\t" in record
     }
     return WorkingTreeStatus(
-        staged=count_paths(parent, ["diff", "--cached", "--name-only", "-z"], env=env),
-        unstaged=count_paths(parent, ["diff", "--name-only", "-z"], env=env),
+        staged=count_paths(
+            parent,
+            ["diff", "--cached", "--name-only", "-z", "--no-renames"],
+            env=env,
+        ),
+        unstaged=count_paths(
+            parent, ["diff", "--name-only", "-z", "--no-renames"], env=env
+        ),
         untracked=count_paths(
             parent,
             ["ls-files", "--others", "--exclude-standard", "-z"],
