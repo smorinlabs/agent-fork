@@ -66,7 +66,13 @@ CLAUDE_FORK_MIN = (2, 0, 73)
 CLAUDE_RELIABLE_MIN = (2, 1, 100)
 CODEX_FORK_MIN = (0, 81, 0)
 CODEX_ENV_MIN = (0, 95, 0)
-_VERSION = re.compile(r"(?<!\d)(\d+)\.(\d+)(?:\.(\d+))?")
+# A4: the flag tokens each rendered recipe emits. Version floors prove a flag
+# arrived; they cannot prove it has since been removed, and neither vendor
+# publishes a deprecation policy to reason from — so probe the installed help
+# for these instead. T-PRE-26 keeps the lists in step with the renderer.
+CLAUDE_RECIPE_FLAGS = ("--session-id", "--resume", "--fork-session", "-n")
+CODEX_RECIPE_FLAGS = ("-C",)
+_VERSION = re.compile(r"(?<![\d.])(\d+)\.(\d+)(?:\.(\d+))?")
 _BIDI_CONTROLS = frozenset(
     {
         "\u061c",
@@ -91,6 +97,48 @@ def parse_version(output: str) -> tuple[int, int, int]:
         raise ValueError(f"unable to parse version from {output!r}")
     major, minor, patch = match.groups()
     return int(major), int(minor), int(patch or 0)
+
+
+def version_tokens(output: str) -> tuple[tuple[int, int, int], ...]:
+    """Every distinct version-like token in `output`, in order of appearance."""
+    seen: list[tuple[int, int, int]] = []
+    for match in _VERSION.finditer(output):
+        major, minor, patch = match.groups()
+        value = (int(major), int(minor), int(patch or 0))
+        if value not in seen:
+            seen.append(value)
+    return tuple(seen)
+
+
+def recipe_flags(agent: AgentName) -> tuple[str, ...]:
+    return CLAUDE_RECIPE_FLAGS if agent == "claude" else CODEX_RECIPE_FLAGS
+
+
+def missing_recipe_flags(agent: AgentName, help_output: str) -> tuple[str, ...]:
+    """Recipe flags absent from `help_output`, in declared order."""
+    return tuple(
+        flag
+        for flag in recipe_flags(agent)
+        if re.search(rf"(?<![\w-]){re.escape(flag)}(?![\w-])", help_output) is None
+    )
+
+
+def _read_help(agent: AgentName, binary: str, env: Mapping[str, str]) -> str | None:
+    """Installed help text, or None when it cannot be read.
+
+    Unreadable help is not evidence that a flag is gone, so callers stay
+    silent on None rather than warning on a transient failure.
+    """
+    argv = [binary, "--help"] if agent == "claude" else [binary, "fork", "--help"]
+    try:
+        completed = subprocess.run(
+            argv, env=dict(env), capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout or None
 
 
 def _render(version: tuple[int, int, int]) -> str:
@@ -119,6 +167,7 @@ def preflight_agent(
     *,
     executable: str | None = None,
     version_output: str | None = None,
+    help_output: str | None = None,
     codex_session_name_resolution: bool = True,
 ) -> PreflightResult:
     """Refuse unsupported native forks before any repository mutation."""
@@ -149,6 +198,13 @@ def preflight_agent(
         ) from error
 
     notices: list[str] = []
+    tokens = version_tokens(version_output)
+    if len(tokens) > 1:
+        notices.append(
+            f"{context.agent} version output carried {len(tokens)} version-like "
+            f"tokens and was ambiguous; read as {_render(version)} — run "
+            "agent-fork doctor if that is not the installed version"
+        )
     resolved_context = context
     resolved_name: str | None = None
     if context.agent == "claude":
@@ -220,6 +276,19 @@ def preflight_agent(
                 f"detected Codex {_render(version)}, but parent rollout "
                 f"{resolved_context.parent_session_id} is not flushed under "
                 f"{_codex_home(env)}"
+            )
+    help_text = (
+        help_output
+        if help_output is not None
+        else _read_help(context.agent, binary, env)
+    )
+    if help_text:
+        absent = missing_recipe_flags(context.agent, help_text)
+        if absent:
+            notices.append(
+                f"installed {context.agent} CLI no longer documents "
+                f"{', '.join(absent)}; the paste command may fail — run "
+                "agent-fork doctor"
             )
     return PreflightResult(
         context.agent,

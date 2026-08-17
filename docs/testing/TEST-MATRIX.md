@@ -100,6 +100,12 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 | T-PRE-08 | A14 — below-2.19.0 `fork` refusal, exit 5, remedy names installed version/floor/upgrade path | baseline | F | live | REQ-19 (A14); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-09 | A14 — `fork --force` overrides the git-floor refusal only, stderr warning emitted, verify ladder still runs | baseline | F | live | REQUIREMENTS §3.3 (A14); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-10 | D14 — nothing is created (no worktree, no branch) on any preflight refusal | baseline | F | live | DESIGN-DECISIONS D14; REQ-29 |
+| T-PRE-21 | A4(a) — version output carrying two version-like tokens warns as ambiguous and names the tuple it read | agent=claude | U | live | P02 A4; REQ-27 |
+| T-PRE-22 | A4(a) — a single version token emits no ambiguity notice | agent=claude | U | live | P02 A4; REQ-27 |
+| T-PRE-23 | A4(b) — help lacking a recipe flag warns before mutation and proceeds, never refuses | agent=claude | U | live | P02 A4; REQ-28 |
+| T-PRE-24 | A4(b) — recipe-flag probe is case-sensitive: `-c, --config` does not satisfy `-C` | agent=codex | U | live | P02 A4; REQ-28 |
+| T-PRE-25 | A4(b) — unreadable help emits no notice (absence of evidence is not evidence of removal) | agent=claude | U | live | P02 A4; REQ-28 |
+| T-PRE-26 | A4(b) — every flag the renderer emits is declared in the probe's flag list (guards list-vs-recipe drift) | baseline | U | live | P02 A4; REQ-28 |
 
 ---
 

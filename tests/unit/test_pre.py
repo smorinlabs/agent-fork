@@ -50,3 +50,93 @@ def test_codex_below_fork_subcommand_floor_refuses(repo_scenario):
             executable="/fake/codex",
             version_output="codex-cli 0.80.9",
         )
+
+
+@pytest.mark.matrix("T-PRE-21")
+def test_ambiguous_version_output_warns_and_names_the_parse(repo_scenario):
+    """A4(a): banner-polluted output must not misparse silently."""
+    from agent_fork.agents import preflight_agent
+
+    world = repo_scenario()
+    result = preflight_agent(
+        _context(),
+        world.env,
+        executable="/fake/claude",
+        version_output="notice: new version 10.2.3 available\n2.1.233 (Claude Code)",
+    )
+    assert result.version == (10, 2, 3)
+    assert any("ambiguous" in notice for notice in result.notices)
+
+
+@pytest.mark.matrix("T-PRE-22")
+def test_single_version_token_emits_no_ambiguity_notice(repo_scenario):
+    from agent_fork.agents import preflight_agent
+
+    world = repo_scenario()
+    result = preflight_agent(
+        _context(),
+        world.env,
+        executable="/fake/claude",
+        version_output="2.1.233 (Claude Code)",
+    )
+    assert result.version == (2, 1, 233)
+    assert not any("ambiguous" in notice for notice in result.notices)
+
+
+@pytest.mark.matrix("T-PRE-23")
+def test_absent_recipe_flag_warns_and_proceeds(repo_scenario):
+    """A4(b): a dropped recipe flag warns before mutation, never refuses."""
+    from agent_fork.agents import preflight_agent
+
+    world = repo_scenario()
+    result = preflight_agent(
+        _context(),
+        world.env,
+        executable="/fake/claude",
+        version_output="2.1.233 (Claude Code)",
+        help_output="  -r, --resume [value]\n  --session-id <uuid>\n  -n, --name <x>",
+    )
+    assert result.verify is True
+    assert any("--fork-session" in notice for notice in result.notices)
+
+
+@pytest.mark.matrix("T-PRE-24")
+def test_codex_recipe_flag_probe_detects_absent_cd_flag():
+    from agent_fork.agents import missing_recipe_flags
+
+    assert missing_recipe_flags("codex", "  -c, --config <key=value>\n") == ("-C",)
+    assert missing_recipe_flags("codex", "  -C, --cd <DIR>\n") == ()
+
+
+@pytest.mark.matrix("T-PRE-25")
+def test_unreadable_help_output_stays_silent(repo_scenario):
+    """Unreadable help is not evidence either way — no notice."""
+    from agent_fork.agents import preflight_agent
+
+    world = repo_scenario()
+    result = preflight_agent(
+        _context(),
+        world.env,
+        executable="/fake/claude",
+        version_output="2.1.233 (Claude Code)",
+        help_output="",
+    )
+    assert not any("--fork-session" in notice for notice in result.notices)
+
+
+@pytest.mark.matrix("T-PRE-26")
+def test_declared_recipe_flags_cover_every_rendered_flag():
+    """Guards the flag list against drift in the rendered recipe itself."""
+    import re
+    from pathlib import Path
+
+    from agent_fork.agents import build_launch_command, recipe_flags
+
+    for agent in ("claude", "codex"):
+        launch = build_launch_command(
+            _context(agent), worktree=Path("/tmp/wt"), name="demo"
+        )
+        rendered = set(re.findall(r"(?<!\S)-{1,2}[A-Za-z][\w-]*", launch.command))
+        declared = set(recipe_flags(agent))
+        assert rendered, f"no flags rendered for {agent}"
+        assert rendered <= declared, f"{agent}: {rendered - declared} not declared"

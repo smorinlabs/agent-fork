@@ -58,7 +58,20 @@ def _agent_env(world, agent="claude", *, isolated_path=False):
     directory.mkdir()
     script = directory / agent
     version = "2.1.220 (Claude Code)" if agent == "claude" else "codex-cli 0.147.0"
-    script.write_text(f"#!/bin/sh\necho '{version}'\n")
+    # The stub must answer --help with the recipe flags it claims to support,
+    # or the A4 recipe-flag probe reports the stub's own missing flags.
+    help_text = (
+        "--session-id <uuid> -r, --resume [value] --fork-session -n, --name <x>"
+        if agent == "claude"
+        else "-C, --cd <DIR>"
+    )
+    script.write_text(
+        "#!/bin/sh\n"
+        'for arg in "$@"; do\n'
+        '  [ "$arg" = "--help" ] && { echo ' + f"'{help_text}'" + "; exit 0; }\n"
+        "done\n"
+        f"echo '{version}'\n"
+    )
     script.chmod(0o755)
     if isolated_path:
         script.unlink()
