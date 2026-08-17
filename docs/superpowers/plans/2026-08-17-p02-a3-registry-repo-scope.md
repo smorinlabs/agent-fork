@@ -113,6 +113,18 @@ worktree's live common directory to equal its stored identity before a plan
 is built. Ordering gains repository and worktree tie-breakers
 (`registry.py:41-42`).
 
+**Null-identity rows must stay cleanable.** A legacy row migrated with
+`repository: null` would fail a naive live-versus-stored equality check, which
+would make it uncleanable even by explicit path — recreating A7's dead-end
+inside A3's own fix. The rule is therefore stated positively: a null-identity
+row is unreachable by name or branch (that lookup requires a repository
+identity to match, and null matches nothing), so it is reachable **only** by
+explicit worktree path. For that path the containment check does not apply —
+an explicit registered path is itself sufficient authorization, since a path
+is globally unambiguous — and the identity is backfilled from the live probe
+on the write that follows. Two null rows can never collide, because null is
+never compared for equality.
+
 **Two serialization contracts, deliberately separated.** `to_dict()`
 (`models.py:77-85`) currently feeds both the on-disk registry and the public
 `list --json` payload. The registry file moves to version 2; the public
@@ -163,18 +175,26 @@ The publishable-tier error catalog (REQ-38 / R7.12) is updated with it.
 Failing tests land before each behavior change. Steps 2–6 are sequential —
 each depends on the previous type or signature.
 
-1. **Failing tests first.** New `tests/pipeline/test_reg_scope.py` carrying
-   the four live-git repros as two-repository rows under a shared
-   `XDG_STATE_HOME`, following the existing `world.env` fixture shape in
-   `tests/pipeline/test_reg.py`. Adds the coverage Codex identified as
-   missing: a **non-dry-run** assertion that cleanup invoked from repoE
-   cannot remove repoF; exact-path cross-repository cleanup still permitted;
-   linked-worktree identity (two worktrees of one repository share an
-   identity); v1 rows with a live worktree migrate, v1 rows with a missing
-   worktree survive as `repository: null`, v2 rewrite occurs on the next
-   mutation, unknown versions still rejected; lineage-write failure proves
-   repoA's same-named row survives repoB's compensation; `list` shows
-   duplicate names with public JSON version unchanged.
+1. **Failing tests first — but only the ones that can exist yet.** Step 1 is
+   split, because "all tests first" is not literally achievable here: the
+   behavioral tests drive the CLI through a subprocess and depend on no
+   internal signature, so they can be written and watched fail before any
+   source change; the unit tests import types and signatures that do not
+   exist until steps 2 and 3.
+   - **1a (before step 2):** new `tests/pipeline/test_reg_scope.py` carrying
+     the four live-git repros as two-repository rows under a shared
+     `XDG_STATE_HOME`, following the `world.env` fixture shape in
+     `tests/pipeline/test_reg.py`; plus the coverage Codex identified as
+     missing — a **non-dry-run** assertion that cleanup invoked from repoE
+     cannot remove repoF, exact-path cross-repository cleanup still
+     permitted, linked-worktree identity (two worktrees of one repository
+     share an identity), null-identity rows cleanable by path, and `list`
+     showing duplicate names with the public JSON version unchanged.
+   - **1b (with the step that introduces each signature):** unit tests for
+     v1 rows with a live worktree migrating, v1 rows with a missing worktree
+     surviving as `repository: null`, v2 rewrite on the next mutation,
+     unknown versions still rejected, and lineage-write failure proving
+     repoA's same-named row survives repoB's compensation.
 2. **`models.py`** — append `repository: str | None = None` **last**, so
    existing positional construction is not silently rebound. Split
    registry-file serialization from the public result serialization that
@@ -193,8 +213,9 @@ each depends on the previous type or signature.
    name and branch lookup; keep explicit worktree-path targeting global;
    before building a plan, require the selected worktree's **live** common
    directory to equal its stored identity, raising
-   `cleanup_foreign_repository` otherwise; remove `plan.entry` exactly at
-   `cleanup.py:394`.
+   `cleanup_foreign_repository` otherwise — except for a null-identity row
+   targeted by explicit path, per the design rule above; remove `plan.entry`
+   exactly at `cleanup.py:394`.
 6. **`cli.py`** — no behavior change. Verify only that the public `list`
    payload still emits `"version": 1` after the registry constant moves to 2.
 7. **Docs and matrix** — `errors.py` catalog entry; `REQUIREMENTS.md` and
