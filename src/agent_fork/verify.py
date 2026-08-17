@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 
 from agent_fork.content import (
     CarriedState,
+    Difference,
     capture_state,
     collect_inventory,
     compare_states,
@@ -13,6 +14,7 @@ from agent_fork.content import (
 from agent_fork.errors import VerificationError
 from agent_fork.git import run_git
 from agent_fork.repository import WorktreeCreation
+from agent_fork.text import escape_terminal_text
 
 DETAIL_LIMIT = 5
 
@@ -21,11 +23,38 @@ def _text(value: bytes) -> str:
     return value.decode(errors="surrogateescape").strip()
 
 
-def _labelled(label: str, differences: Sequence[str]) -> str:
-    shown = list(differences[:DETAIL_LIMIT])
+def _labelled(label: str, differences: Sequence[Difference]) -> str:
+    shown = [
+        f"{escape_terminal_text(item.path)}: {item.detail}"
+        for item in differences[:DETAIL_LIMIT]
+    ]
     if len(differences) > DETAIL_LIMIT:
         shown.append(f"and {len(differences) - DETAIL_LIMIT} more")
     return f"{label} ({'; '.join(shown)})"
+
+
+def _failed_check(
+    label: str, differences: Sequence[Difference], *, primary: bool
+) -> dict[str, object]:
+    """Structured record for ``error.details.failed_checks``.
+
+    Paths are escaped here as well as in the message: a filename may contain
+    bytes that are not valid UTF-8, which would otherwise raise on encoding
+    when the machine document is written.
+    """
+    return {
+        "check": label,
+        "primary": primary,
+        "total": len(differences),
+        "differences": [
+            {
+                "path": escape_terminal_text(item.path),
+                "kind": item.check,
+                "detail": item.detail,
+            }
+            for item in differences[:DETAIL_LIMIT]
+        ],
+    }
 
 
 def _worktree_pairs(creation: WorktreeCreation, *, env: Mapping[str, str] | None):
@@ -60,6 +89,7 @@ def verify_fork(
     the topology ladder need not build one.
     """
     failures: list[str] = []
+    failed_checks: list[dict[str, object]] = []
     head = _text(
         run_git(creation.path, ["rev-parse", "--verify", "HEAD"], env=env).stdout
     )
@@ -109,8 +139,12 @@ def verify_fork(
         content = compare_states(parent_state_before, child_state)
         if drift:
             failures.append(_labelled("parent-content", drift))
+            failed_checks.append(_failed_check("parent-content", drift, primary=True))
         if content:
             failures.append(_labelled("content-match", content))
+            failed_checks.append(
+                _failed_check("content-match", content, primary=not drift)
+            )
 
     parent_status_after = run_git(
         creation.parent_path, ["status", "--porcelain=v1", "-z"], env=env
@@ -139,4 +173,7 @@ def verify_fork(
         if creation.parent_branch is not None or symbolic.returncode == 0:
             failures.append("detached-record")
     if failures:
-        raise VerificationError("verification failed: " + ", ".join(failures))
+        raise VerificationError(
+            "verification failed: " + ", ".join(failures),
+            details={"failed_checks": failed_checks} if failed_checks else None,
+        )

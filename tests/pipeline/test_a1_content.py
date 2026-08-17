@@ -29,6 +29,7 @@ repro hermetic; it reaches the same code path ambient global config would.
 from __future__ import annotations
 
 import subprocess
+from typing import cast
 
 import pytest
 
@@ -653,3 +654,41 @@ def test_negative_child_carries_a_path_the_parent_does_not(repo_scenario):
     (world.child_path / "smuggled.txt").write_bytes(b"not from the parent\n")
 
     _assert_rolls_back(world, creation, before, match="content-match")
+
+
+@pytest.mark.matrix("T-VER-33")
+def test_failure_detail_is_structured_and_terminal_safe(repo_scenario):
+    """(i) — a hostile filename must not reach the terminal or break machine output.
+
+    A filename may legally contain control bytes, including ESC and newline. Put
+    verbatim into a message they can drive the reader's terminal, and put into a
+    machine document without escaping they can break encoding. The rung detail is
+    therefore escaped in both surfaces, and carried structurally in
+    `error.details.failed_checks` rather than only in prose.
+    """
+    import json
+
+    from agent_fork.errors import VerificationError
+    from agent_fork.output import render_error
+
+    hostile = "bad\x1b[2J\nforged.txt"
+    world, creation, before = _fork(repo_scenario, "hostile")
+    (world.child_path / hostile).write_bytes(b"smuggled\n")
+    _git(world, world.parent_path, "config", "status.showUntrackedFiles", "no")
+    _git(world, world.child_path, "config", "status.showUntrackedFiles", "no")
+
+    with pytest.raises(VerificationError) as raised:
+        _verify(world, creation, before)
+    error = raised.value
+
+    assert "\x1b" not in str(error) and "\n" not in str(error).split("verification")[-1]
+    assert error.details is not None
+    checks = cast("list[dict[str, object]]", error.details["failed_checks"])
+    assert any(check["check"] == "content-match" for check in checks)
+    assert all(isinstance(check["total"], int) for check in checks)
+    assert sum(1 for check in checks if check["primary"]) == 1
+
+    machine = render_error(error, machine=True)
+    machine.encode("utf-8")
+    payload = json.loads(machine)["error"]["details"]["failed_checks"]
+    assert "\x1b" not in json.dumps(payload)

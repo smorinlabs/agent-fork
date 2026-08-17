@@ -96,6 +96,10 @@ class VerificationError(AgentForkError):
     code = "verify_failed"
     exit_code = 1
 
+    def __init__(self, message: str, *, details: dict[str, object] | None = None):
+        super().__init__(message)
+        self.details = details
+
 
 class RegistryBusyError(AgentForkError):
     """The XDG registry lock could not be acquired within its bounded wait."""

@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_fork.content import Inventory, collect_inventory
 from agent_fork.git import GitCommandError, run_git
 
 
@@ -110,16 +111,28 @@ def materialize(
     *,
     with_state: bool = True,
     with_ignored: bool = False,
+    inventory: Inventory | None = None,
     env: Mapping[str, str] | None = None,
 ) -> MaterializeResult:
-    """Transport staged → ITA/unstaged → untracked → optional ignored state."""
+    """Transport staged → ITA/unstaged → untracked → optional ignored state.
+
+    ``inventory`` is the carried-state resolution taken before the worktree
+    existed. Supplying it is what makes transport and verification operate on
+    one fixed set of paths: without it this function re-resolves the paths now,
+    and a file that appeared or vanished since the snapshot would be carried
+    without being checked. The pipeline always supplies it; the parameter stays
+    optional for callers transporting a tree they resolved themselves.
+    """
     if with_ignored and not with_state:
         raise ValueError("with_ignored requires with_state")
     if not with_state:
         return MaterializeResult(False, False, 0, 0, (), ())
-
     try:
-        ita_paths = _intent_to_add_paths(parent, env=env)
+        if inventory is None:
+            inventory = collect_inventory(
+                parent, with_state=with_state, with_ignored=with_ignored, env=env
+            )
+        ita_paths = list(inventory.intent_to_add)
         staged = run_git(
             parent,
             ["diff", "--binary", "--no-color", "--cached", "--ita-invisible-in-index"],
@@ -151,33 +164,16 @@ def materialize(
         unstaged = run_git(parent, unstaged_args, env=env).stdout
         unstaged_applied = _apply_patch(child, unstaged, [], env=env)
 
-        untracked = _nul_paths(
-            run_git(
-                parent,
-                ["ls-files", "--others", "-z", "--exclude-standard"],
-                env=env,
-            ).stdout
-        )
+        untracked = list(inventory.untracked)
         for path in untracked:
             _copy_entry(parent, child, path)
 
         ignored: list[str] = []
         if with_ignored:
-            ignored = _nul_paths(
-                run_git(
-                    parent,
-                    [
-                        "ls-files",
-                        "--others",
-                        "-z",
-                        "--ignored",
-                        "--exclude-standard",
-                    ],
-                    env=env,
-                ).stdout
-            )
+            ignored = list(inventory.ignored)
+            untracked_set = set(untracked)
             for path in ignored:
-                if path not in untracked:
+                if path not in untracked_set:
                     _copy_entry(parent, child, path)
     except (GitCommandError, OSError) as error:
         raise MaterializeError(str(error)) from error

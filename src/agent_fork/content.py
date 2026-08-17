@@ -44,6 +44,44 @@ class ManifestEntry:
 
 
 @dataclass(frozen=True)
+class Inventory:
+    """The paths a fork carries, kept by facet so transport can act on each.
+
+    ``paths`` is the flat union used for comparison; the facets are what
+    materialization consumes, so both steps are driven by one resolution.
+    """
+
+    staged: tuple[str, ...] = ()
+    unstaged: tuple[str, ...] = ()
+    intent_to_add: tuple[str, ...] = ()
+    untracked: tuple[str, ...] = ()
+    ignored: tuple[str, ...] = ()
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    *self.staged,
+                    *self.unstaged,
+                    *self.intent_to_add,
+                    *self.untracked,
+                    *self.ignored,
+                }
+            )
+        )
+
+
+@dataclass(frozen=True)
+class Difference:
+    """One way two carried states disagree, as structured data."""
+
+    path: str
+    check: str
+    detail: str
+
+
+@dataclass(frozen=True)
 class CarriedState:
     paths: tuple[str, ...]
     index: tuple[IndexEntry, ...]
@@ -69,40 +107,59 @@ def _index_records(root: Path, *, env: Mapping[str, str] | None) -> list[IndexEn
     return entries
 
 
+def intent_to_add_paths(
+    root: Path, *, env: Mapping[str, str] | None = None
+) -> list[str]:
+    """Paths added with ``--intent-to-add``: visible in the index, content unstaged."""
+    visible = run_git(
+        root,
+        ["diff", "--cached", "--ita-visible-in-index", "--name-only", "-z"],
+        env=env,
+    )
+    hidden = run_git(
+        root,
+        ["diff", "--cached", "--ita-invisible-in-index", "--name-only", "-z"],
+        env=env,
+    )
+    return sorted(set(_nul_paths(visible.stdout)) - set(_nul_paths(hidden.stdout)))
+
+
 def collect_inventory(
     root: Path,
     *,
     with_state: bool,
     with_ignored: bool,
     env: Mapping[str, str] | None = None,
-) -> tuple[str, ...]:
-    """Resolve every path a fork of ``root`` carries, as sorted literal paths.
+) -> Inventory:
+    """Resolve every path a fork of ``root`` carries, by facet.
 
     Renames are recorded at both endpoints and deletions are kept as members so
     the child can be checked for the file's absence; ``--no-renames`` reports a
     rename as a delete of the old path plus an add of the new one, which yields
     both endpoints without rename-detection heuristics.
+
+    The result is the single domain shared by transport and verification. It is
+    resolved once, before the worktree exists, so a file that appears or
+    disappears mid-fork cannot change what either step operates on.
     """
     if not with_state:
-        return ()
-    paths: set[str] = set()
-    for arguments in (
-        ["diff", "--cached", "--name-only", "-z", "--no-renames"],
-        ["diff", "--name-only", "-z", "--no-renames"],
-        ["ls-files", "--others", "-z", "--exclude-standard"],
-    ):
-        paths.update(_nul_paths(run_git(root, arguments, env=env).stdout))
+        return Inventory()
+
+    def listing(arguments: list[str]) -> tuple[str, ...]:
+        return tuple(_nul_paths(run_git(root, arguments, env=env).stdout))
+
+    ignored: tuple[str, ...] = ()
     if with_ignored:
-        paths.update(
-            _nul_paths(
-                run_git(
-                    root,
-                    ["ls-files", "--others", "-z", "--ignored", "--exclude-standard"],
-                    env=env,
-                ).stdout
-            )
+        ignored = listing(
+            ["ls-files", "--others", "-z", "--ignored", "--exclude-standard"]
         )
-    return tuple(sorted(paths))
+    return Inventory(
+        staged=listing(["diff", "--cached", "--name-only", "-z", "--no-renames"]),
+        unstaged=listing(["diff", "--name-only", "-z", "--no-renames"]),
+        intent_to_add=tuple(intent_to_add_paths(root, env=env)),
+        untracked=listing(["ls-files", "--others", "-z", "--exclude-standard"]),
+        ignored=ignored,
+    )
 
 
 def _digest(path: Path) -> str:
@@ -131,12 +188,12 @@ def _manifest_entry(root: Path, relative: str, *, tracked: bool) -> ManifestEntr
 
 def capture_state(
     root: Path,
-    inventory: Iterable[str],
+    inventory: Inventory | Iterable[str],
     *,
     env: Mapping[str, str] | None = None,
 ) -> CarriedState:
     """Snapshot index and working-tree facts for ``inventory`` inside ``root``."""
-    paths = tuple(inventory)
+    paths = tuple(inventory.paths if isinstance(inventory, Inventory) else inventory)
     carried = set(paths)
     index = tuple(
         entry for entry in _index_records(root, env=env) if entry.path in carried
@@ -159,35 +216,43 @@ def _manifest_map(state: CarriedState) -> dict[str, ManifestEntry]:
     return {entry.path: entry for entry in state.manifest}
 
 
-def _manifest_difference(expected: ManifestEntry, actual: ManifestEntry) -> str | None:
+def _manifest_difference(
+    expected: ManifestEntry, actual: ManifestEntry
+) -> Difference | None:
     if expected.kind != actual.kind:
-        return f"{expected.path}: {expected.kind} became {actual.kind}"
-    if expected.kind == "symlink" and expected.target != actual.target:
-        return f"{expected.path}: symlink target differs"
-    if expected.kind == "file" and expected.digest != actual.digest:
-        return f"{expected.path}: content differs"
+        return Difference(
+            expected.path, "type", f"{expected.kind} became {actual.kind}"
+        )
     if expected.kind == "symlink":
+        if expected.target != actual.target:
+            return Difference(expected.path, "symlink-target", "symlink target differs")
         return None
+    if expected.kind == "file" and expected.digest != actual.digest:
+        return Difference(expected.path, "content", "content differs")
     if expected.tracked:
         if bool(expected.mode & stat.S_IXUSR) != bool(actual.mode & stat.S_IXUSR):
-            return f"{expected.path}: executable bit differs"
+            return Difference(expected.path, "mode", "executable bit differs")
     elif expected.mode != actual.mode:
-        return f"{expected.path}: mode differs"
+        return Difference(expected.path, "mode", "mode differs")
     return None
 
 
-def compare_states(expected: CarriedState, actual: CarriedState) -> tuple[str, ...]:
-    """Describe every way ``actual`` departs from ``expected``, most specific first."""
-    differences: list[str] = []
+def compare_states(
+    expected: CarriedState, actual: CarriedState
+) -> tuple[Difference, ...]:
+    """Describe every way ``actual`` departs from ``expected``."""
+    differences: list[Difference] = []
     expected_paths = set(expected.paths)
     actual_paths = set(actual.paths)
     differences.extend(
-        f"{path}: no longer carried"
+        Difference(path, "membership", "no longer carried")
         for path in expected.paths
         if path not in actual_paths
     )
     differences.extend(
-        f"{path}: newly carried" for path in actual.paths if path not in expected_paths
+        Difference(path, "membership", "newly carried")
+        for path in actual.paths
+        if path not in expected_paths
     )
 
     expected_index = _index_map(expected)
@@ -195,24 +260,32 @@ def compare_states(expected: CarriedState, actual: CarriedState) -> tuple[str, .
     for key, entry in expected_index.items():
         other = actual_index.get(key)
         if other is None:
-            differences.append(f"{entry.path}: staged entry missing")
+            differences.append(Difference(entry.path, "staged", "staged entry missing"))
         elif (entry.mode, entry.oid) != (other.mode, other.oid):
-            differences.append(f"{entry.path}: staged content differs")
+            differences.append(
+                Difference(entry.path, "staged", "staged content differs")
+            )
     for key, entry in actual_index.items():
         if key not in expected_index:
-            differences.append(f"{entry.path}: unexpected staged entry")
+            differences.append(
+                Difference(entry.path, "staged", "unexpected staged entry")
+            )
 
-    actual_manifest = _manifest_map(actual)
     expected_manifest = _manifest_map(expected)
+    actual_manifest = _manifest_map(actual)
     for path, entry in expected_manifest.items():
         other = actual_manifest.get(path)
         if other is None:
-            differences.append(f"{path}: working-tree entry missing")
+            differences.append(
+                Difference(path, "working-tree", "working-tree entry missing")
+            )
             continue
         difference = _manifest_difference(entry, other)
         if difference is not None:
             differences.append(difference)
     for path in actual_manifest:
         if path not in expected_manifest:
-            differences.append(f"{path}: unexpected working-tree entry")
+            differences.append(
+                Difference(path, "working-tree", "unexpected working-tree entry")
+            )
     return tuple(differences)
