@@ -147,8 +147,22 @@ These were raised by the TS04 review, are real, and are **not** fixed here:
 4. Bound version tokens on the right if four-component versions are
    unsupported; `release 2.1.234.5` currently reads as `2.1.234`.
 5. Both new `subprocess.run` call sites pass the caller environment
-   unsanitized — the surface A2 exists to harden, now merged and to be swept
-   across these sites.
+   unsanitized via `env=dict(env)`. A2 has since merged (`ba34a74`) and
+   **closed**, shipping `without_config_injection()` in `git.py`, which
+   strips `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*` /
+   `GIT_CONFIG_PARAMETERS`. It is applied at the `run_git` chokepoint only,
+   so the agent-CLI spawns here (`claude --version`, `claude --help`,
+   `codex fork --help`) do not go through it.
+
+   This needs its own routing rather than waiting on A2's sweep, because
+   A2 is closed. Assessment: **low priority.** Injected Git configuration
+   cannot change `--version` or `--help` output, so the probe's own
+   correctness is unaffected; the exposure is only that an agent CLI
+   spawned by agent-fork inherits injection that would reach any git it
+   runs internally — which is the agent's own environment concern, not
+   agent-fork's transport correctness. Applying the helper here is three
+   lines of defense-in-depth, deliberately not taken inside A4 under the
+   minimal-remediation rule.
 6. Ambiguity is untested at the subprocess boundary. Production now counts
    tokens across stdout and stderr, but T-PRE-21 still injects a
    pre-combined string, so no test proves the split-stream case the fix was
