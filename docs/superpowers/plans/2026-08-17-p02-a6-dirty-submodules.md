@@ -270,9 +270,9 @@ cloned.
   `matrix2-results.json` captured**, because `cleanup_probe` in `a6_probe2.py`
   force-removes the worktree before invoking `agent-fork cleanup`, so the JSON
   records `agent_fork_cleanup_rc: 1` and a missing directory for every cell. The
-  probe must be corrected to give raw removal, refusal, and override-success
-  their own child worlds, and to assert registry removal plus no residue under
-  `.git/worktrees/<child>/modules`. **Documented behaviour change:** forks whose
+  probe cells that replace it (plan step 1) must give raw removal, refusal, and
+  override-success their own child worlds, and assert registry removal plus no
+  residue under `.git/worktrees/<child>/modules`. **Documented behaviour change:** forks whose
   submodules were dirty now require those overrides at cleanup time, where
   previously the state did not exist to object to.
 - **Cost.** Each carried submodule is cloned into the child. A local clone from
@@ -338,9 +338,11 @@ cloned.
   `.gitmodules` URL; a configured `submodule.<name>.update` policy; depth-2 dirt;
   ambient ignore configuration; ignored-file state inside a submodule; and the
   deterministic mixed-time race from finding 3.
-- `a6_probe2.py` must be corrected per finding 6 (separate worlds for raw
-  removal, refusal, and override success) and extended to call the production
-  helper and `verify_fork` once they exist.
+- The gate's probe scripts are session scaffolding, not repository artifacts;
+  their permanent encoding is the test rows in plan step 1. Those rows must
+  carry finding 6's correction (separate child worlds for raw removal, refusal,
+  and override success) and must call the production helper and `verify_fork`
+  rather than comparing status strings by hand.
 - Clone cost measured on a large submodule, not just reasoned.
 - Gate-4 targeted checks that produced no finding, recorded so they are not
   re-probed: name-keyed override initialized offline against an unreachable
