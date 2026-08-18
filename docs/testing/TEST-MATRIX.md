@@ -7,11 +7,11 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Row IDs `T-<GRP>-NN`, never renumbered. Retired/tombstoned IDs keep their numbers forever.
 - `row_status`: live | n/a | tombstone (no stub may ever exist) | retired (exempt skip stub, returns at the named milestone) | blocked (named unblock gate).
 - Group `Status:` field: pending | tdd | done — the single source of truth for the stub lifecycle (spec §7.2).
-- Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · backend = git (jj reserved, no v1 values).
+- Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · agent-signal = absent | incomplete-marker | incomplete-id | detected-claude | detected-codex | ambiguous-partial-marker | ambiguous-partial-id | ambiguous-complete · agent-mode = auto | strict | git-only · backend = git (jj reserved, no v1 values).
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 236 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 398 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -68,6 +68,20 @@ Varying axes: agent (claude/codex, must vary per §4); otherwise baseline pinned
 | T-DET-10 | auto mode with exactly one session signal selects that agent | agent=claude | U | live | REQ-45; D16 |
 | T-DET-11 | strict mode with no session signal refuses with exit 3 | baseline | U | live | REQ-45; D16 |
 | T-DET-12 | auto mode with both session signals refuses as ambiguous | baseline | U | live | REQ-45; D16 |
+| T-DET-13 | no supported signal assesses as `absent` with empty detail | agent-signal=absent | U | live | P02 A9; REQ-26 |
+| T-DET-14 | Claude marker without its session ID assesses as `incomplete` and names the missing ID | agent-signal=incomplete-marker | U | live | P02 A9; REQ-26 |
+| T-DET-15 | Claude session ID without its marker assesses as `incomplete` and names the missing marker | agent-signal=incomplete-id | U | live | P02 A9; REQ-26 |
+| T-DET-16 | complete Claude signals assess as `detected` with Claude context | agent-signal=detected-claude | U | live | P02 A9; REQ-26 |
+| T-DET-17 | Codex thread ID assesses as `detected` with Codex context | agent-signal=detected-codex | U | live | P02 A9; REQ-26 |
+| T-DET-18 | partial Claude marker plus Codex assesses as `ambiguous` and retains missing-ID detail | agent-signal=ambiguous-partial-marker | U | live | P02 A9; REQ-26 |
+| T-DET-19 | partial Claude ID plus Codex assesses as `ambiguous` and retains missing-marker detail | agent-signal=ambiguous-partial-id | U | live | P02 A9; REQ-26 |
+| T-DET-20 | complete Claude plus Codex assesses as `ambiguous` | agent-signal=ambiguous-complete | U | live | P02 A9; REQ-26 |
+| T-DET-21 | automatic and strict resolution raise typed `agent_signal_incomplete` for either partial-Claude shape | agent-signal=incomplete-marker; agent-mode=auto/strict | U | live | P02 A9; REQ-45 |
+| T-DET-22 | a complete explicit identity overrides incomplete or ambiguous ambient signals | agent-mode=auto/strict | U | live | P02 A9; REQ-03; REQ-45 |
+| T-DET-23 | explicit Git-only mode ignores incomplete or ambiguous ambient signals | agent-mode=git-only | U | live | P02 A9; REQ-45 |
+| T-DET-24 | complete single-agent signals retain automatic and strict resolution | agent-signal=detected-claude/detected-codex; agent-mode=auto/strict | U | live | P02 A9; REQ-45 |
+| T-DET-25 | explicit agent without a parent flag retains its matching environment-ID fallback | agent=claude/codex | U | live | P02 A9; REQ-03; REQ-26 |
+| T-DET-26 | both partial-Claude-plus-Codex shapes refuse as ambiguous in automatic and strict modes | agent-signal=ambiguous-partial-marker/ambiguous-partial-id; agent-mode=auto/strict | U | live | P02 A9; REQ-45 |
 
 ---
 
@@ -449,6 +463,7 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-19 | renamed Codex JSON preserves canonical `parent_session_id` and additively reports `parent_session_name` | agent=codex | C | live | REQ-46; D17 |
 | T-OUT-20 | renamed Codex dry-run reports the resolution notice and UUID-based paste command | agent=codex | C | live | REQ-46; D17 |
 | T-OUT-21 | `fork --dry-run -o json` and `fork --dry-run --json` emit the same parseable preview object with every planned mutation and perform no mutation | baseline | C | live | REQ-17; REQ-18; issue #14; R4.2; R8.6 |
+| T-OUT-22 | `agent_signal_incomplete` is cataloged at exit 3 and emits exact non-secret `status`, `present`, and `missing` machine details | agent-signal=incomplete-marker | C | live | P02 A9; REQ-17; R7.8; R7.12 |
 
 ---
 
@@ -487,6 +502,11 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-24 | help, positive/negative flag spelling, and dotted config set/get expose the Codex-specific control | agent=codex | C | live | REQ-46; D17 |
 | T-CLI-25 | A4 — `doctor` reports recipe-flag coverage for both installed CLIs, the destination both preflight notices name | baseline | C | live | P02 A4; REQ-28 |
 | T-CLI-26 | A4 — recipe drift fails `doctor` only for the selected agent; an unselected CLI's drift is reported without changing exit status | baseline | C | live | P02 A4; TS04 Codex review 3.4 |
+| T-CLI-27 | automatic and strict doctor diagnostics classify both incomplete and both partial-plus-Codex shapes consistently, with exact CLI optionality and recipe semantics | agent-signal=incomplete-marker/incomplete-id/ambiguous-partial-marker/ambiguous-partial-id; agent-mode=auto/strict | C | live | P02 A9; REQ-38; REQ-45 |
+| T-CLI-28 | explicit Git-only doctor mode reports incomplete or ambiguous observations while both agent CLIs and recipe drift remain informational | agent-signal=incomplete-marker/ambiguous-partial-marker; agent-mode=git-only | C | live | P02 A9; REQ-38; REQ-45 |
+| T-CLI-29 | automatic real fork refuses incomplete Claude input with exit 3 and exact JSON details | agent-signal=incomplete-marker; agent-mode=auto | C | live | P02 A9; REQ-17; REQ-45 |
+| T-CLI-30 | strict real fork refuses incomplete Claude input with exit 3 and exact JSON details | agent-signal=incomplete-id; agent-mode=strict | C | live | P02 A9; REQ-17; REQ-45 |
+| T-CLI-31 | automatic incomplete dry-run refusal emits one stderr JSON error and creates no Git or Agent Fork artifact | agent-signal=incomplete-marker; agent-mode=auto | C | live | P02 A9; REQ-18; REQ-29; R8.6 |
 
 ---
 
@@ -531,6 +551,9 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 | T-SES-30 | JSON reports the additive status/command object and human output prints an exact safe command or explicit unavailable status | baseline | C | live | REQ-50; D21; CLI R7.2 |
 | T-SES-31 | session command construction performs no Git mutation, write, registry/lineage change, clipboard access, preflight, or command execution | baseline | C | live | REQ-50; D21 |
 | T-SES-32 | session help makes human and JSON command inspection discoverable and labels availability as constructible, not preflighted | baseline | C | live | REQ-50; D21; CLI R7.5 |
+| T-SES-33 | session inspection consumes both incomplete and both partial-plus-Codex assessments without creating identity or a command | agent-signal=incomplete-marker/incomplete-id/ambiguous-partial-marker/ambiguous-partial-id | U | live | P02 A9; REQ-47; REQ-50 |
+| T-SES-34 | session human/JSON output emits exact additive assessment state for absent, incomplete, detected, and ambiguous input while incomplete inspection remains observational and write-free | agent-signal=absent/incomplete-marker/detected-claude/ambiguous-partial-marker | C | live | P02 A9; REQ-47; REQ-50; R7.2 |
+| T-SES-35 | validation preserves existing assertions and embeds the detected `agent_signal` document | agent-signal=detected-claude | U | live | P02 A9; REQ-47 |
 
 ---
 
@@ -578,6 +601,7 @@ Varying axes: relationship (parent/child/sibling/unrelated), cache (cold/warm), 
 | T-CPI-33 | partial bulk recording commits successes but emits one stderr error document | CLI+bulk+persistence | C | live | REQ-48; D19 |
 | T-CPI-34 | bulk projection caps candidate detail, notices, and scalar lengths explicitly | output+memory | U | live | REQ-48; D19 |
 | T-CPI-35 | deferred bulk spool uses restrictive private permissions | output+privacy | U | live | REQ-48; D19 |
+| T-CPI-36 | `infer --current` preserves absent/Codex-only behavior, refuses incomplete and ambiguous signals before discovery, and uses complete Claude context | agent-signal=absent/detected-codex/incomplete-marker/incomplete-id/ambiguous-partial-marker/ambiguous-partial-id/ambiguous-complete/detected-claude | C | live | P02 A9; REQ-48 |
 
 ---
 

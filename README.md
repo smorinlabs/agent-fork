@@ -285,6 +285,14 @@ cd '<resolved-directory>' && claude --session-id '<fresh-child-uuid>' --resume '
 codex fork '<current-thread-id>' -C '<resolved-directory>'
 ```
 
+JSON inspection also reports `agent_signal`, an additive object with
+`status`, `present`, and `missing`. Its status is `absent`, `incomplete`,
+`detected`, or `ambiguous`. The detail lists contain supported environment
+variable names, never session or thread values. An incomplete Claude signal
+remains observational in `session`: it reports no current session, retains
+`lineage.status: not_detected` and `fork_command.status: not_detected`, and
+names the missing value in `notices`.
+
 Inspection never executes the returned command, mutates agent or repository
 state, or makes a network call; in an ordinary terminal it succeeds with
 `not_detected`. Validation asserts expected identity and lineage: optional
@@ -534,7 +542,7 @@ cleanup guard refusals use the cleanup schema shown above.
 | 0 | Success | — |
 | 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy` |
 | 2 | Usage error or required prompt disabled | `config_error` |
-| 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown` |
+| 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown` |
 | 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits` |
 | 130 / 143 | Interrupted by SIGINT / SIGTERM | — |
 

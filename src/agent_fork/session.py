@@ -6,13 +6,15 @@ import json
 import re
 import shutil
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 from agent_fork.agents import (
     AgentContext,
+    AgentSignalAssessment,
     UnsafeCommandInputError,
+    assess_agent_signals,
     build_session_fork_command,
 )
 from agent_fork.errors import PreconditionError, SessionValidationError
@@ -120,10 +122,14 @@ class SessionInspection:
     repository: SessionRepository | None
     fork_command: SessionForkCommand
     notices: tuple[str, ...] = ()
+    agent_signal: AgentSignalAssessment = field(
+        default_factory=lambda: assess_agent_signals({})
+    )
 
     def document(self) -> dict[str, object]:
         return {
             "agent": self.agent,
+            "agent_signal": self.agent_signal.document(),
             "current_session": (
                 self.current_session.document() if self.current_session else None
             ),
@@ -239,14 +245,11 @@ def inspect_session(
 ) -> SessionInspection:
     """Inspect ambient identity and bounded local evidence without mutation."""
     directory = (Path.cwd() if cwd is None else cwd).resolve()
+    assessment = assess_agent_signals(env)
     repository, repository_notices = _session_repository(directory, env)
     notices = list(repository_notices)
-    claude_id = env.get("CLAUDE_CODE_SESSION_ID")
-    claude = env.get("CLAUDECODE") == "1" and bool(claude_id)
-    codex_id = env.get("CODEX_THREAD_ID")
-    codex = bool(codex_id)
-    if claude and codex:
-        notices.append("both Claude and Codex session signals are present")
+    if assessment.status == "ambiguous":
+        notices.append(assessment.diagnosis())
         return SessionInspection(
             agent=None,
             current_session=None,
@@ -256,8 +259,11 @@ def inspect_session(
             repository=repository,
             fork_command=SessionForkCommand("ambiguous", None),
             notices=tuple(notices),
+            agent_signal=assessment,
         )
-    if not claude and not codex:
+    if assessment.status in {"absent", "incomplete"}:
+        if assessment.status == "incomplete":
+            notices.append(assessment.diagnosis())
         return SessionInspection(
             agent=None,
             current_session=None,
@@ -267,11 +273,13 @@ def inspect_session(
             repository=repository,
             fork_command=SessionForkCommand("not_detected", None),
             notices=tuple(notices),
+            agent_signal=assessment,
         )
 
-    agent = "claude" if claude else "codex"
-    current_id = claude_id if claude else codex_id
-    assert current_id is not None
+    context = assessment.context
+    assert context is not None
+    agent = context.agent
+    current_id = context.parent_session_id
     try:
         built = build_session_fork_command(
             AgentContext(agent, current_id),
@@ -284,8 +292,8 @@ def inspect_session(
     except UnsafeCommandInputError:
         fork_command = SessionForkCommand("unsafe_input", None)
 
-    if claude:
-        assert claude_id is not None
+    if agent == "claude":
+        claude_id = current_id
         name, name_status = _claude_name(env, directory, claude_id)
         try:
             claim = find_lineage("claude", claude_id, env=env)
@@ -358,9 +366,10 @@ def inspect_session(
             repository=repository,
             fork_command=fork_command,
             notices=tuple(notices),
+            agent_signal=assessment,
         )
 
-    assert codex_id is not None
+    codex_id = current_id
     binary = shutil.which("codex", path=env.get("PATH"))
     if binary is None:
         notices.append("Codex CLI is unavailable; name and lineage were not looked up")
@@ -376,6 +385,7 @@ def inspect_session(
             repository=repository,
             fork_command=fork_command,
             notices=tuple(notices),
+            agent_signal=assessment,
         )
     try:
         from agent_fork.codex_app_server import read_thread
@@ -395,6 +405,7 @@ def inspect_session(
             repository=repository,
             fork_command=fork_command,
             notices=tuple(notices),
+            agent_signal=assessment,
         )
     if thread is None:
         current = SessionEvidence(codex_id, "CODEX_THREAD_ID", name_status="not_found")
@@ -407,6 +418,7 @@ def inspect_session(
             repository=repository,
             fork_command=fork_command,
             notices=tuple(notices),
+            agent_signal=assessment,
         )
     current = SessionEvidence(
         codex_id,
@@ -444,6 +456,7 @@ def inspect_session(
         repository=repository,
         fork_command=fork_command,
         notices=tuple(notices),
+        agent_signal=assessment,
     )
 
 

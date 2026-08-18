@@ -17,6 +17,7 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
     "registry_busy": ErrorSpec(1, "registry lock wait expired"),
     "config_error": ErrorSpec(2, "configuration is invalid or unsupported"),
     "agent_not_detected": ErrorSpec(3, "agent identity is missing or ambiguous"),
+    "agent_signal_incomplete": ErrorSpec(3, "agent environment signals are incomplete"),
     "session_not_found": ErrorSpec(3, "agent session or rollout is unavailable"),
     "session_name_ambiguous": ErrorSpec(3, "session name matches multiple sessions"),
     "session_resolution_unavailable": ErrorSpec(
@@ -60,6 +61,31 @@ class AgentDetectionError(AgentForkError):
 
     code = "agent_not_detected"
     exit_code = 3
+
+
+class AgentSignalIncompleteError(AgentForkError):
+    """A supported agent signal is present but lacks its required pair."""
+
+    code = "agent_signal_incomplete"
+    exit_code = 3
+
+    def __init__(
+        self,
+        present: tuple[str, ...],
+        missing: tuple[str, ...],
+        *,
+        allow_git_only: bool = False,
+    ):
+        missing_text = ", ".join(missing)
+        recovery = "restore the missing value before retrying"
+        if allow_git_only:
+            recovery = "restore the missing value or choose --no-agent intentionally"
+        super().__init__(f"incomplete agent signal; missing {missing_text}; {recovery}")
+        self.details = {
+            "status": "incomplete",
+            "present": list(present),
+            "missing": list(missing),
+        }
 
 
 class ConflictError(AgentForkError):
