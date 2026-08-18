@@ -345,7 +345,12 @@ repository-controlled text raw).
     A write that changes a path's *status class* trips `parent-untouched`
     (`verify.py:149-153`); a write that only changes bytes in an
     already-modified path trips `parent-content` (`verify.py:140-147`), the
-    rung A1 added. That is not a regression from A1: before A1 this exact
+    rung A1 added. When the write lands *before* transport reads the path,
+    `content-match` (`verify.py:143-147`) fires alongside it — re-validated
+    2026-08-17 against `722e1fd`:
+    `parent-content (f1.txt: content differs), content-match (f1.txt: content
+    differs)`. That second rung is the torn copy made visible: the child holds
+    post-write bytes the snapshot never saw. That is not a regression from A1: before A1 this exact
     race passed silently and produced a child whose relationship to the
     snapshot was never checked. Failing is right — a write inside the window
     can tear the copy, leaving the child matching no single moment of the
