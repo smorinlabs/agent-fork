@@ -155,7 +155,12 @@ repository-controlled text raw).
   scope uniqueness and cleanup resolution per-repo (registry has a version
   field for migration). Impact: high. Type: data-safety fix. Spot-checked
   2026-08-16.
-- **A4 — Agent-CLI recipe drift is undetectable; failure lands post-fork.**
+- **A4 — [x] RESOLVED: Agent-CLI recipe drift is undetectable; failure lands
+  post-fork. Headline drift scenario partially refuted — unreproducible by
+  construction, impact downgraded high → medium; the one today-testable
+  defect fixed (`parse_version` read a banner's version, not the CLI's), plus
+  two warn-level detectors: version ambiguity and a three-state `--help`
+  recipe-flag probe. Merged in PR #37.**
   Emitted recipes live in `agents.py:286-301` guarded only by version
   floors (`agents.py:65-68`) — a future CLI that drops `--fork-session`
   passes every check and fails in the user's fresh terminal after branch,
