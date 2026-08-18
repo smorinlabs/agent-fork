@@ -18,7 +18,7 @@ from agent_fork.agents import (
     preflight_git,
 )
 from agent_fork.content import capture_state, collect_inventory
-from agent_fork.errors import PreconditionError
+from agent_fork.errors import PreconditionError, RegistryBusyError
 from agent_fork.git import run_git
 from agent_fork.include import copy_worktree_includes, run_setup_hook
 from agent_fork.lineage import LineageClaim, add_lineage
@@ -162,7 +162,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             mode="agent" if resolved_agent is not None else "git-only",
             repository=creation.common_dir,
         )
-        add_entry(
+        displaced = add_entry(
             entry,
             live=live_worktree_pairs(request.parent, env=env),
             env=env,
@@ -185,12 +185,16 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                     env=env,
                 )
             except Exception:
-                # Compensate by removing the row just written, identified
+                # Compensate by removing the record just written, identified
                 # exactly. A bare name would also delete another repository's
-                # same-named fork. A compensation that cannot find its own row
-                # must not mask the failure that triggered it.
-                with suppress(PreconditionError):
+                # same-named fork. Any record this call displaced is restored,
+                # so a failed fork does not leave the user's earlier fork
+                # unregistered. Compensation that cannot complete must not mask
+                # the failure that triggered it.
+                with suppress(PreconditionError, RegistryBusyError):
                     remove_entry(entry.token(), env=env)
+                    for previous in displaced:
+                        add_entry(previous, env=env)
                 raise
         return included.copied, hook_notices
 

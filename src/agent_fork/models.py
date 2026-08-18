@@ -108,18 +108,19 @@ class RegistryEntry:
         """Serialize for the on-disk registry, which records `repository`."""
         return {**self.to_dict(), "repository": self.repository}
 
-    def token(self) -> tuple[str, ...]:
+    def token(self) -> tuple[object, ...]:
         """Identity for compare-and-swap removal.
 
         Built from persisted fields only, never from `repository`, which a
-        migration may fill in between the moment a row is selected and the
-        moment it is removed.
+        backfill may fill in between the moment a record is selected and the
+        moment it is removed. `agent` is carried as-is rather than coerced to a
+        string, so a recorded absence stays distinct from an empty name.
         """
         return (
             self.name,
             self.branch,
             self.worktree,
-            self.agent or "",
+            self.agent,
             self.created_at,
             self.mode,
         )

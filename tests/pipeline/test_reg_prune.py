@@ -121,6 +121,38 @@ def test_prune_keeps_a_record_whose_path_another_repository_occupies(repo_scenar
     assert len(_rows(shared)) == 1, "the record must survive"
 
 
+@pytest.mark.matrix("T-REG-23")
+def test_prune_reports_path_reuse_even_on_a_matching_branch_name(repo_scenario):
+    """The dangerous variant: same path AND same branch, other repository."""
+    from conftest import run_cli
+
+    first = repo_scenario()
+    second = repo_scenario()
+    shared = {**second.env, "XDG_STATE_HOME": first.env["XDG_STATE_HOME"]}
+
+    created = _fork(first.env, first.parent_path, "twin")
+    assert created.returncode == 0
+    worktree = _worktree_of(created.stdout)
+    branch = next(
+        line.split(": ", 1)[1]
+        for line in created.stdout.decode().splitlines()
+        if line.startswith("branch: ")
+    )
+    shutil.rmtree(worktree)
+    subprocess.run(
+        ["git", "worktree", "add", worktree, "-b", branch],
+        cwd=second.parent_path,
+        env=shared,
+        check=True,
+        capture_output=True,
+    )
+
+    result = run_cli(["prune", "--yes"], shared, second.parent_path)
+    assert result.returncode == 0, result.stderr
+    assert b"path occupied by something else" in result.stdout, result.stdout
+    assert len(_rows(shared)) == 1
+
+
 @pytest.mark.matrix("T-REG-18")
 def test_v1_record_without_a_repository_is_still_cleanable(repo_scenario):
     """Migration keeps pre-1.1 records usable: liveness, not identity, decides."""

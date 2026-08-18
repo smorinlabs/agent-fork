@@ -139,15 +139,20 @@ def add_entry(
     live: LivePairs = frozenset(),
     env: Mapping[str, str] | None = None,
     timeout: float = DEFAULT_LOCK_TIMEOUT,
-) -> None:
-    """Record a fork, replacing only rows this repository provably owns.
+) -> list[RegistryEntry]:
+    """Record a fork, replacing only records this repository provably owns.
 
-    `live` is the invoking repository's worktree list. A same-named row is
+    `live` is the invoking repository's worktree list. A same-named record is
     replaced when it carries this repository's identity, or when the predicate
-    confirms it; a row that merely stores a matching path string is left alone,
-    because that path may since have been taken by an unrelated repository.
+    confirms it; a record that merely stores a matching path string is left
+    alone, because that path may since have been taken by another repository.
+
+    Returns the records this call displaced, so a caller that has to undo the
+    fork can put them back rather than leaving the user's earlier fork
+    unregistered.
     """
     path = registry_path(env)
+    displaced: list[RegistryEntry] = []
     with registry_lock(path, timeout=timeout):
         kept: list[RegistryEntry] = []
         for item in _decode(path):
@@ -158,6 +163,7 @@ def add_entry(
             )
             confirmed = is_live(item, live)
             if item.name == entry.name and (same_repository or confirmed):
+                displaced.append(item)
                 continue
             # Backfill an identity onto a row this repository demonstrably
             # owns. The evidence is the live list, not the row's own path.
@@ -166,35 +172,41 @@ def add_entry(
             kept.append(item)
         kept.append(entry)
         _atomic_write(path, kept)
+    return displaced
+
+
+def require_single(token: tuple[object, ...], *, env: Mapping[str, str] | None) -> None:
+    """Assert the registry still holds exactly one record with this token.
+
+    Call inside a held registry lock. Advisory locks are per open file
+    description, so a helper that took the lock itself would contend with its
+    own caller and fail after the bounded wait.
+    """
+    matches = [item for item in _decode(registry_path(env)) if item.token() == token]
+    if len(matches) != 1:
+        raise PreconditionError(
+            "cleanup_registry_stale" if not matches else "cleanup_registry_ambiguous",
+            f"registry holds {len(matches)} records matching the selected fork; "
+            "expected exactly one",
+        )
+
+
+def remove_locked(token: tuple[object, ...], *, env: Mapping[str, str] | None) -> None:
+    """Remove exactly one record. Call inside a held registry lock."""
+    path = registry_path(env)
+    require_single(token, env=env)
+    _atomic_write(path, [item for item in _decode(path) if item.token() != token])
 
 
 def remove_entry(
-    token: tuple[str, ...],
+    token: tuple[object, ...],
     *,
     env: Mapping[str, str] | None = None,
     timeout: float = DEFAULT_LOCK_TIMEOUT,
 ) -> None:
-    """Compare-and-swap removal: delete exactly the row that was selected.
-
-    Refuses rather than removing when the registry no longer holds exactly one
-    row matching the token, which means it changed after the caller chose.
-    """
-    path = registry_path(env)
-    with registry_lock(path, timeout=timeout):
-        entries = _decode(path)
-        matches = [item for item in entries if item.token() == token]
-        if len(matches) != 1:
-            code = (
-                "cleanup_registry_stale"
-                if not matches
-                else ("cleanup_registry_ambiguous")
-            )
-            raise PreconditionError(
-                code,
-                f"registry holds {len(matches)} records matching the selected "
-                f"fork; expected exactly one",
-            )
-        _atomic_write(path, [item for item in entries if item.token() != token])
+    """Compare-and-swap removal for callers not already holding the lock."""
+    with registry_lock(registry_path(env), timeout=timeout):
+        remove_locked(token, env=env)
 
 
 def find_candidates(

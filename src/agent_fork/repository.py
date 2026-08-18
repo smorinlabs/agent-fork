@@ -143,32 +143,64 @@ def live_worktree_pairs(
     - detached entries, which have no branch. A fork always has one, so a row
       matching nothing here is not one of this repository's forks.
     """
-    result = run_git(parent, ["worktree", "list", "--porcelain"], env=env)
+    own_common_dir = inspect_repository(parent, env=env).common_dir
+    # -z, because Git emits the worktree path raw and a path may contain a
+    # newline; that is precisely what this option exists for.
+    result = run_git(parent, ["worktree", "list", "--porcelain", "-z"], env=env)
     pairs: set[tuple[str, str]] = set()
     path: Path | None = None
-    branch: str | None = None
     prunable = False
 
-    def flush() -> None:
-        if path is not None and branch is not None and not prunable:
+    def confirm() -> None:
+        if path is None or prunable:
+            return
+        current = _current_worktree_identity(path, env=env)
+        if current is None:
+            return
+        common_dir, branch = current
+        # Being listed is not enough. Git keeps listing a path whose directory
+        # was replaced, so ask the directory itself which repository it now
+        # belongs to and which branch it is now on.
+        if common_dir == own_common_dir:
             pairs.add((str(path), branch))
 
-    for line in result.stdout.decode(errors="surrogateescape").splitlines() + [""]:
-        if line.startswith("worktree "):
-            flush()
-            path = Path(line.removeprefix("worktree ")).resolve()
-            branch = None
+    for token in result.stdout.split(b"\0"):
+        field = token.decode(errors="surrogateescape")
+        if field.startswith("worktree "):
+            confirm()
+            path = Path(field.removeprefix("worktree ")).resolve()
             prunable = False
-        elif line.startswith("branch refs/heads/"):
-            branch = line.removeprefix("branch refs/heads/")
-        elif line.startswith("prunable"):
+        elif field.startswith("prunable"):
             prunable = True
-        elif not line:
-            flush()
+        elif not field:
+            confirm()
             path = None
-            branch = None
             prunable = False
+    confirm()
     return frozenset(pairs)
+
+
+def _current_worktree_identity(
+    path: Path, *, env: Mapping[str, str] | None
+) -> tuple[Path, str] | None:
+    """The repository and branch a directory belongs to right now.
+
+    Returns None when the path is not a usable worktree or has no branch: a
+    fork always has one, so a detached or broken directory can never confirm a
+    registry record.
+    """
+    probe = run_git(
+        path,
+        ["rev-parse", "--git-common-dir", "--abbrev-ref", "HEAD"],
+        env=env,
+        check=False,
+    )
+    if probe.returncode != 0:
+        return None
+    lines = probe.stdout.decode(errors="surrogateescape").splitlines()
+    if len(lines) != 2 or lines[1] == "HEAD":
+        return None
+    return _resolve_git_path(path, lines[0]), lines[1]
 
 
 _OPERATION_SENTINELS = {

@@ -21,7 +21,7 @@ from agent_fork.registry import (
     registry_lock,
     registry_path,
 )
-from agent_fork.repository import live_worktree_pairs
+from agent_fork.repository import inspect_repository, live_worktree_pairs
 
 
 @dataclass(frozen=True)
@@ -56,13 +56,18 @@ def _classify(
             continue
         try:
             live = live_worktree_pairs(worktree, env=env)
+            occupant = inspect_repository(worktree, env=env).common_dir
         except Exception:
             # The path exists but is not a usable repository. Report rather
             # than remove: the row may still describe real work.
             displaced.append(entry)
             kept.append(entry)
             continue
-        if not is_live(entry, live):
+        # A record naming a repository is displaced when a different one now
+        # holds its path, even if the branch name happens to match — which it
+        # will whenever two repositories derived the same default fork name.
+        moved_in = entry.repository is not None and str(occupant) != entry.repository
+        if moved_in or not is_live(entry, live):
             # Something else occupies the path. It may be another repository's
             # live worktree, so this row is reported and left alone.
             displaced.append(entry)

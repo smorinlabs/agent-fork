@@ -339,6 +339,10 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-17 | `prune` on a healthy registry reports nothing to remove and changes nothing | baseline | F | live | REQ-31 (A3) |
 | T-REG-18 | a v1 record carrying no repository is read, not rejected, and stays cleanable from its own repository — liveness decides, not the recorded identity | baseline | F | live | REQ-41 (A3); migration |
 | T-REG-19 | forking backfills a repository onto a live legacy record and rewrites the file as v2; the evidence is live enumeration, never the record's stored path | baseline | F | live | REQ-41 (A3); migration |
+| T-REG-20 | path reuse on the same branch by another repository → cleanup refuses; that repository's worktree and branch both survive. Anchors the destructive commands to the invoking repository, not the record's stored path | baseline | F | live | REQ-31 (A3); gate-6 P0 |
+| T-REG-21 | `--force` does not override the stale refusal — it extends targeting and overrides dirty/unpushed only, never ownership | baseline | F | live | REQ-31 (A3); gate-6 P0 |
+| T-REG-22 | a registered fork is cleanable by absolute path from outside any repository; an explicit path is fresh input and anchors the repository | baseline | F | live | REQ-31 (A3); gate-6 P1 |
+| T-REG-23 | `prune` reports path reuse as displaced even when the occupying worktree carries the same branch name | baseline | F | live | REQ-31a (A3); gate-6 P2 |
 
 ---
 

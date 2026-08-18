@@ -9,8 +9,15 @@ from pathlib import Path
 from agent_fork.errors import AgentForkError, PreconditionError
 from agent_fork.git import run_git
 from agent_fork.models import RegistryEntry
-from agent_fork.registry import find_candidates, is_live, remove_entry
-from agent_fork.repository import live_worktree_pairs
+from agent_fork.registry import (
+    find_candidates,
+    is_live,
+    registry_lock,
+    registry_path,
+    remove_locked,
+    require_single,
+)
+from agent_fork.repository import inspect_repository, live_worktree_pairs
 from agent_fork.text import escape_terminal_text as _escape_terminal_text
 
 DETAIL_LIMIT = 10
@@ -28,6 +35,10 @@ class CleanupPlan:
     branch: str
     git_root: Path
     owned: bool
+    # Working directory the repository was identified from, kept so the plan
+    # can be revalidated against the same repository it was built against.
+    # `git_root` is a Git common directory and cannot enumerate worktrees.
+    anchor: Path | None = None
 
     def render(self, *, keep_branch: bool = False) -> str:
         branch = (
@@ -143,6 +154,28 @@ def _worktrees(cwd: Path, *, env: Mapping[str, str]) -> list[tuple[Path, str | N
     return records
 
 
+def _anchor(
+    target: str, *, cwd: Path, env: Mapping[str, str]
+) -> tuple[Path | None, Path | None]:
+    """The repository every command in this cleanup will be aimed at.
+
+    Taken from the invoking directory. Failing that, from the target when the
+    user typed an existing path: an argument is fresh input, unlike a path read
+    back out of a registry record. The repository is never taken from a
+    record's stored path, which may since have been reused by another
+    repository — aiming the deletions there would destroy that repository's
+    work.
+    """
+    for source in (cwd, Path(target).expanduser()):
+        try:
+            if not source.exists():
+                continue
+            return source, inspect_repository(source, env=env).common_dir
+        except Exception:
+            continue
+    return None, None
+
+
 def resolve_cleanup_target(
     target: str,
     *,
@@ -158,13 +191,10 @@ def resolve_cleanup_target(
     belongs to another repository or to a fork that no longer exists.
     """
     candidates = find_candidates(target, env=env)
+    anchor_path, anchor_common_dir = _anchor(target, cwd=cwd, env=env)
     live: frozenset[tuple[str, str]] = frozenset()
-    try:
-        live = live_worktree_pairs(cwd, env=env)
-    except Exception:
-        # Not invoked inside a repository. Registry rows then confirm against
-        # nothing, so every one of them is refused below.
-        pass
+    if anchor_path is not None:
+        live = live_worktree_pairs(anchor_path, env=env)
     actionable = [entry for entry in candidates if is_live(entry, live)]
     if len(actionable) > 1:
         paths = ", ".join(_escape_terminal_text(entry.worktree) for entry in actionable)
@@ -175,10 +205,15 @@ def resolve_cleanup_target(
     if actionable:
         owned = actionable[0]
         worktree = Path(owned.worktree).resolve()
+        # The mutation root is the anchor, never the record's stored path.
+        assert anchor_common_dir is not None
         return CleanupPlan(
-            owned, worktree, owned.branch, _git_root(worktree, env=env), True
+            owned, worktree, owned.branch, anchor_common_dir, True, anchor_path
         )
-    if candidates and not force:
+    if candidates:
+        # Not overridable by --force: this is the only evidence that the
+        # worktree still belongs to the repository its record names, and
+        # --force is routinely passed for the unrelated dirty/unpushed guards.
         stale = candidates[0]
         raise PreconditionError(
             "cleanup_registry_stale",
@@ -413,14 +448,37 @@ def cleanup(
     )
     if dry_run:
         return CleanupResult(plan, False, notices, details)
-    run_git(
-        plan.git_root,
-        ["worktree", "remove", "--force", str(plan.worktree)],
-        env=env,
-    )
-    run_git(plan.git_root, ["worktree", "prune"], env=env)
-    if not keep_branch:
-        run_git(plan.git_root, ["branch", "-D", plan.branch], env=env)
-    if plan.owned:
-        remove_entry(plan.entry.token(), env=env)
+
+    def destroy() -> None:
+        run_git(
+            plan.git_root,
+            ["worktree", "remove", "--force", str(plan.worktree)],
+            env=env,
+        )
+        run_git(plan.git_root, ["worktree", "prune"], env=env)
+        if not keep_branch:
+            run_git(plan.git_root, ["branch", "-D", plan.branch], env=env)
+
+    if not plan.owned:
+        destroy()
+        return CleanupResult(plan, True, notices, details)
+
+    # The plan was built before consent, which has no time bound. Hold the
+    # registry lock across revalidation, destruction, and removal so a record
+    # that changed while the user was deciding refuses here, with nothing
+    # destroyed, rather than after the worktree is already gone.
+    token = plan.entry.token()
+    with registry_lock(registry_path(env)):
+        require_single(token, env=env)
+        # Revalidate against the same repository the plan was anchored to, not
+        # the invoking directory, which need not be inside one.
+        anchor = plan.anchor or cwd
+        if not is_live(plan.entry, live_worktree_pairs(anchor, env=env)):
+            raise PreconditionError(
+                "cleanup_registry_stale",
+                "the fork changed while the removal was awaiting confirmation; "
+                "nothing was removed",
+            )
+        destroy()
+        remove_locked(token, env=env)
     return CleanupResult(plan, True, notices, details)
