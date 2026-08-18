@@ -120,9 +120,26 @@ def _doctor_env(world, *, agents=True, git_version="2.43.0"):
     )
     git.chmod(0o755)
     if agents:
-        for name, version in (("claude", "2.1.220"), ("codex", "codex-cli 0.147.0")):
+        # Each stub answers --help with the recipe flags it claims to support,
+        # so the A4 recipe-flag check sees a faithful CLI, not a bare stub.
+        for name, version, help_text in (
+            (
+                "claude",
+                "2.1.220",
+                "--session-id <uuid> -r, --resume [value] --fork-session -n, --name",
+            ),
+            ("codex", "codex-cli 0.147.0", "-C, --cd <DIR>"),
+        ):
             path = directory / name
-            path.write_text(f"#!/bin/sh\necho '{version}'\n")
+            path.write_text(
+                "#!/bin/sh\n"
+                'for arg in "$@"; do\n'
+                '  [ "$arg" = "--help" ] && { echo '
+                + f"'{help_text}'"
+                + "; exit 0; }\n"
+                "done\n"
+                f"echo '{version}'\n"
+            )
             path.chmod(0o755)
     return {
         **world.env,
@@ -146,6 +163,9 @@ def _doctor_env(world, *, agents=True, git_version="2.43.0"):
             "config-validity", id="T-CLI-09", marks=pytest.mark.matrix("T-CLI-09")
         ),
         pytest.param("xdg-paths", id="T-CLI-10", marks=pytest.mark.matrix("T-CLI-10")),
+        pytest.param(
+            "recipe-flags", id="T-CLI-25", marks=pytest.mark.matrix("T-CLI-25")
+        ),
     ],
 )
 def test_doctor_content_reports_each_subject(repo_scenario, subject):
@@ -162,8 +182,11 @@ def test_doctor_content_reports_each_subject(repo_scenario, subject):
         "env-signals": "environment signals: CLAUDECODE=1",
         "config-validity": "config validity: valid",
         "xdg-paths": "XDG paths:",
+        "recipe-flags": "agent recipe flags: claude: 4 documented",
     }[subject]
     assert expected in output
+    if subject == "recipe-flags":
+        assert "codex: 1 documented" in output
     if subject == "agent-clis":
         assert "Codex CLI: 0.147.0" in output
     if subject == "config-validity":
@@ -173,6 +196,30 @@ def test_doctor_content_reports_each_subject(repo_scenario, subject):
         failed = run_cli(["doctor"], environment, world.parent_path)
         assert failed.returncode != 0
         assert b"FAIL config validity" in failed.stdout
+
+
+@pytest.mark.matrix("T-CLI-26")
+def test_doctor_recipe_drift_fails_only_for_the_selected_agent(repo_scenario):
+    """An unused CLI's drift must not fail an otherwise healthy diagnosis."""
+    from conftest import run_cli
+
+    world = repo_scenario()
+    environment = _doctor_env(world)
+    drifted = Path(environment["PATH"].split(os.pathsep)[0]) / "codex"
+    drifted.write_text("#!/bin/sh\necho 'codex-cli 0.147.0'\n")
+    drifted.chmod(0o755)
+
+    # CLAUDECODE is set by _doctor_env, so Claude is the selected agent.
+    completed = run_cli(["doctor"], environment, world.parent_path)
+    assert completed.returncode == 0
+    assert b"undocumented -C (unselected)" in completed.stdout
+
+    claude = Path(environment["PATH"].split(os.pathsep)[0]) / "claude"
+    claude.write_text("#!/bin/sh\necho '2.1.220'\n")
+    claude.chmod(0o755)
+    failed = run_cli(["doctor"], environment, world.parent_path)
+    assert failed.returncode != 0
+    assert b"FAIL agent recipe flags" in failed.stdout
 
 
 @pytest.mark.matrix("T-CLI-11")

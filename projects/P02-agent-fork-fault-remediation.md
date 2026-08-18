@@ -171,10 +171,99 @@ repository-controlled text raw).
   passes every check and fails in the user's fresh terminal after branch,
   worktree, registry, and lineage were created. `parse_version`
   (`agents.py:88-93`) grabs the first `\d+.\d+` anywhere in output. Recipe
-  duplicated as prose in four docs with no drift check. Proposed direction:
-  doctor recipe-probe against installed `--help`, recorded
-  verified-against-version fingerprint, above-ceiling preflight warning.
-  Impact: high. Type: robustness.
+  duplicated as prose in four docs with no drift check.
+  **Re-scoped and downgraded 2026-08-17** (owner-directed, and pulled ahead
+  of A2/A3 in the same session — see the order note under Tests & Tasks).
+
+  *Why semantic versioning cannot carry this.* The natural remedy — treat a
+  dropped flag as a breaking change and detect the major bump — cannot work
+  for either dependency. (Narrowed after the TS04 review, which correctly
+  objected that "structurally vacuous" overstated it: a tested-range upper
+  bound such as `>=0.95.0,<0.148.0` *would* function as an unknown-version
+  detector. It cannot identify *which* capability changed, and it warns on
+  every unreviewed release — so it is rejected for precision and noise, not
+  for impossibility.) Codex is `0.147.0` against
+  the `CODEX_ENV_MIN = (0, 95, 0)` floor: 52 minor releases, zero major
+  bumps, and semver §4 gives `0.x` no stability guarantee at all, so the
+  major is a constant that never moves. Claude Code is `2.1.233` against
+  `CLAUDE_FORK_MIN = (2, 0, 73)`; `CLAUDE_RELIABLE_MIN = (2, 1, 100)` is
+  this repo's own evidence that behavior `agent-fork` depends on changed
+  inside a minor. Neither vendor publishes a flag-deprecation policy.
+  A floor answers "has the feature arrived?" (testable); a ceiling asks
+  "has it since been removed?" — unanswerable by version arithmetic,
+  because it is a claim about releases that do not exist yet.
+
+  *Prior art routes this to feature detection.* Declared-range mechanisms
+  (Terraform `required_version`, npm `engines`, Cargo `rust-version`) and
+  skew policies (`kubectl` ±1 minor) work only where the dependency
+  publishes a compatibility contract. Where none exists, mature tools probe
+  or negotiate capabilities instead: autoconf ("test for features, not
+  versions"), browser feature detection replacing UA sniffing, Docker
+  client/daemon API negotiation, LSP `initialize` capability exchange.
+
+  *Revised remedy — two warn-level mechanisms, both cheap:*
+  (a) detect *ambiguous* version output rather than trying to out-guess it.
+  Demonstrated during implementation: given
+  `"notice: new version 10.2.3 available\n2.1.233 (Claude Code)"`,
+  `parse_version` returns `(10, 2, 3)` — the banner's version, not the
+  CLI's — which then silently passes or fails a floor. Restricting the scan
+  to the first non-empty line was tried and rejected: leftmost-match already
+  wins within a line, so it adds no detection power while breaking the
+  tolerated `"warning…\ncodex-cli 0.147.0"` shape. Instead `version_tokens`
+  counts distinct version-like tokens and preflight warns when more than one
+  is present, naming the tuple it read, so a wrong parse is visible in the
+  refusal message rather than silent. The regex also gains a `.` guard
+  (`(?<![\d.])`) so a mid-version fragment cannot match;
+  (b) probe the installed CLI's `--help` in `preflight_agent` for the flag
+  tokens the recipe emits, appending a `PreflightResult.notices` entry when
+  one is absent. Only *option declarations* count — the leading part of a
+  help line that starts with `-`, description stripped — because prose such
+  as "this replaces `--fork-session`" would otherwise prove the flag still
+  exists. Warn-and-proceed, never refuse: the fault being fixed is
+  recoverable, so a blocking probe would convert it into a new pre-fork
+  failure firing on a mere help-text reorganization. The probe is
+  three-state — supported, absent, or **unverified** — because silence on
+  unreadable help would make "no evidence" indistinguishable from verified
+  support, and would hide removal of the Codex `fork` subcommand entirely.
+  A rendered-command/flag-list equality test keeps (b) honest in both
+  directions, since the flag list is the same drift problem one level in.
+
+  *Timing, stated precisely (corrected after the TS04 review).* Detection is
+  pre-mutation — `preflight_agent` runs before any branch, worktree,
+  registry, or lineage write. The **notice is not**: `cli.py` renders
+  `result.notices` only after `fork(...)` returns, so the user reads the
+  warning attached to a completed fork, not while deciding. The warning
+  therefore tells them to expect the paste command to fail and to run
+  `cleanup`; it does not spare them the residue. Surfacing it before
+  mutation would need a CLI-level change and is deliberately not in A4.
+
+  *Prose duplication — no action, by disposition.* The recipe is repeated in
+  four docs, but T-EMT-01/02 already pin the rendered template byte-exact, so
+  the executable copy is drift-tested; the prose copies are display-only and
+  a doc-drift checker would gate more than it protects.
+
+  *Dropped from the original direction:* the recorded
+  verified-against-version fingerprint (re-encodes the floor problem; the
+  probe subsumes it) and the above-ceiling preflight warning (on `0.x`
+  Codex it fires on essentially every run, training users past the
+  warnings that matter).
+
+  *Known limits (sharpened by the TS04 review).* The probe detects the
+  **absence of an exact token from a readable option declaration** — which
+  is narrower than "detects removal". It does not catch semantic change (a
+  flag still listed but with a new precondition), and it cannot distinguish
+  removal of the Codex `fork` subcommand from any other unreadable help;
+  that case reports unverified rather than absent. A second spawn against
+  `codex --help` would separate them and was judged not worth it at warn
+  level. Ambiguity counting now spans stdout and stderr, but only one
+  stream is parsed for the version itself.
+
+  Impact: medium (downgraded from high — the failure is loud, non-
+  destructive, and recoverable: the worktree materializes correctly and
+  the paste command fails visibly with the CLI's own error, unlike the
+  silent-and-destructive A1 and A3. Residue is non-zero: registry and
+  lineage records reference a child session that never ran). Type:
+  robustness.
 - **A5 — One bad untracked filesystem entry destroys the whole fork.**
   Socket/fifo raises at `materialize.py:58-59`; unreadable or mid-copy
   deleted file raises at `materialize.py:156-157`; both roll back the whole
@@ -287,14 +376,27 @@ repository-controlled text raw).
 Order is A1 → A13; each item's TS gate precedes its T fix (TDD bias).
 A T task is skipped (flipped `[-]`) if its TS verdict is *refuted*.
 
+**Order exception (owner-directed 2026-08-17):** A4 was pulled ahead of A2
+and A3, which remain open with worktrees in flight. Reason: the A4 review
+found one sub-item that is testable today and cheap, while the rest of the
+item was speculative. A4's remedy touches `agents.py` preflight and
+`doctor.py`, and adds no registry surface, so it does not collide with the
+A3 (registry scoping) worktree. It is **not** environment-neutral, contrary
+to this note's first version: both probe call sites pass the caller
+environment to an agent subprocess via `env=dict(env)`, which is the same
+unsanitized passthrough A2 exists to harden. A2 has since merged
+(`1f8e038`); when its hardening lands over this, the two new `subprocess.run`
+call sites in `agents.py` and the one reached from `doctor.py` must be
+swept with the rest.
+
 - [x] [P02-TS01] A1 adversarial verification (incl. Codex): reproduce status-preserving content divergence end to end — CONFIRMED-WITH-CORRECTIONS 2026-08-16: empirical repro (apply.whitespace=fix diverged child bytes, identical porcelain, `verification.passed: true`) + Codex pass confirming mechanism, repro fairness, in-scope verdict, and sibling vectors; see [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
 - [x] [P02-T01] A1 fix per process: plan + adversarial plan review (APPROVE-WITH-CHANGES), TDD implementation, adversarial post-review (REJECT → findings absorbed or routed to issues #28–#31 per the owner's gate-6 routing) — whitespace pinned at the transport site, carried-state inventory drives both transport and verification, `content-match`/`parent-content` rungs with structured `failed_checks`, escaped repository-controlled text; 22 A1 rows green, 405 passed; see the [design doc](../docs/superpowers/plans/2026-08-16-p02-a1-content-verification.md)
 - [x] [P02-TS02] A2 validation-first probe matrix (incl. Codex) — 12 canonical inputs probed against the fork path and the cleanup path with controls and bystander comparison (1, `GIT_ATTR_NOSYSTEM`, untestable here); environment claim refuted: no wrong-repository mutation, no wrong-target deletion, no silent divergence attributable to agent-fork. Register entry rewritten twice to match the evidence; remaining gaps recorded in issue #38
 - [x] [P02-T02] A2 fix — four configuration defects found and fixed: porcelain transport replaced with plumbing, closing both the unappliable-patch and empty-patch modes (T-MAT-21..24), and both inline injection channels sanitized — the `GIT_CONFIG_COUNT` triple and `GIT_CONFIG_PARAMETERS`, the latter missed by the first fix and caught in review (issue #35, T-GRD-17..21). `config.py`'s direct Git launch now uses the same filter. The pinning policy is **not required by any observed defect**, but is not disproven for the sources in issue #38.
 - [x] [P02-TS03] A3 adversarial verification (incl. Codex): two-repo registry clobber and cross-repo cleanup resolution repro — CONFIRMED-WITH-CORRECTIONS 2026-08-17: four live-git probes reproduced the clobber, the cross-repo cleanup resolution, the same-name auto-derivation on the default path, and the destructive consequence (cleanup from repoE plans to delete repoF's worktree and branch); Codex confirmed the mechanism by source trace plus non-writing execution probes, corrected the root-cause framing and the stale `cli.py` citation, and found the missing repository-containment defense in `cleanup.py:331-356` — its sandbox blocked live-git repros, so that evidence is single-source; see [design doc](../docs/superpowers/plans/2026-08-17-p02-a3-registry-repo-scope.md). **Gate-1 rule change 2026-08-17:** this gate predates the validation-first probe-matrix rule A2 introduced; see the coverage note in the design doc
 - [ ] [P02-T03] A3 fix per process — reshaped 2026-08-17 from "registry schema migration" to an actionability predicate: a row authorizes nothing unless its `(worktree, branch)` pair is live in the repository freshly identified from the invoking directory. Ships `prune`, which A7's entry is amended to reflect
-- [ ] [P02-TS04] A4 adversarial verification (incl. Codex): recipe-drift blindness and post-fork failure demonstration
-- [ ] [P02-T04] A4 fix per process
+- [x] [P02-TS04] A4 adversarial verification: **inline adversarial review 2026-08-17 — PARTIALLY REFUTED.** Findings: (a) impact inflated relative to A1/A3, downgraded high → medium (loud, non-destructive, recoverable failure); (b) the headline drift scenario is unreproducible by construction — it requires a CLI release that does not exist, so any repro fabricates a stub, making A4 the item's strongest partial-refutation candidate; (c) `--help` grepping is itself a drift surface (detects removal, not semantic change), which forces the remedy to warn rather than refuse; (d) only `parse_version` is a today-testable defect. Remedy re-scoped from three mechanisms to two. **Codex second lens RUN 2026-08-17** against the implemented diff (`aefcda0..HEAD`) — verdicts: claim 1 (semver) PARTIALLY REFUTED, claim 2 (warn-vs-refuse) PARTIALLY REFUTED, claim 3 (implementation) REFUTED, claim 4 (tests) REFUTED, claim 5 (misses) CONFIRMED. Two defects reproduced independently before acting: `UnicodeDecodeError` escaping `read_help` (breaking the never-refuse guarantee) and notices rendering after mutation. Full report: [TS04 Codex review](../docs/reviews/2026-08-17-p02-a4-codex-review.md). Reviewing the diff rather than the design proved the better target — every finding cited a line. **Process deviation recorded:** A4 predates the validation-first gate that landed with A2 (`1f8e038`); it ran review → rewrite → implement → Codex-on-diff rather than probe-matrix-first, and built no exhaustive input matrix. See the [A4 design doc](../docs/superpowers/plans/2026-08-17-p02-a4-recipe-flag-probe.md)
+- [x] [P02-T04] A4 fix per process (revised scope) — TDD, RED first: the ambiguity row demonstrated the real defect (`parse_version` returned the banner's `(10, 2, 3)` instead of the CLI's `2.1.233`). Shipped: `version_tokens` + ambiguity notice, `recipe_flags`/`missing_recipe_flags`/`read_help` with a warn-level probe in `preflight_agent` (detection pre-mutation; notice rendered with the fork result), `.`-guard on `_VERSION`, and T-PRE-21..26. Test-stub fidelity fix in `tests/cli/test_out.py` — the fake CLI answered `--help` with its version string, so the probe correctly reported the *stub's* missing flags; the stub now serves real help (the TS04 review independently confirmed this as fidelity repair, not evidence suppression). Post-review fixes: `UnicodeDecodeError` caught in `read_help`; option-declaration parsing so deprecation prose cannot prove a flag survives; three-state unverified notice; ambiguity counted across stdout and stderr; `doctor` drift scoped to the selected agent so an unused CLI cannot change the exit contract; T-PRE-26 tightened to equality; T-PRE-27/28 and T-CLI-26 added. PR #37 review added T-PRE-29 (the unverified notice named `codex --help` while the probe ran `codex fork --help`). Final state at merge: `just all` green, 430 passed, 1 skipped; `just check-matrix` clean (earlier snapshots in this item's history recorded 415/419/424 as the suite grew — the merge figure is the one to trust)
 - [ ] [P02-TS05] A5 adversarial verification (incl. Codex): socket/fifo, unreadable-file, and parent-race rollback repros
 - [ ] [P02-T05] A5 fix per process
 - [ ] [P02-TS06] A6 adversarial verification (incl. Codex): dirty-submodule fork repro (currently reasoned, not reproduced)
