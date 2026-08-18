@@ -12,6 +12,7 @@ from pathlib import Path
 from agent_fork.agents import (
     CLAUDE_FORK_MIN,
     CODEX_ENV_MIN,
+    assess_agent_signals,
     missing_recipe_flags,
     parse_version,
     read_help,
@@ -115,39 +116,40 @@ def run_doctor(
     except ConfigError as error:
         selected_mode = agent_mode or "auto"
         config = DoctorCheck("config validity", False, str(error))
-    claude_signal = env.get("CLAUDECODE") == "1" and bool(
-        env.get("CLAUDE_CODE_SESSION_ID")
-    )
-    codex_signal = bool(env.get("CODEX_THREAD_ID"))
-    ambiguous = claude_signal and codex_signal
-    missing_strict = selected_mode == "strict" and not (claude_signal or codex_signal)
-    signals_ok = selected_mode == "git-only" or not (ambiguous or missing_strict)
-    selected = (
-        "git-only"
-        if selected_mode == "git-only" or not (claude_signal or codex_signal)
-        else "ambiguous"
-        if ambiguous
-        else "claude"
-        if claude_signal
-        else "codex"
-    )
+    assessment = assess_agent_signals(env)
+    if selected_mode == "git-only":
+        selected = "git-only"
+        signals_ok = True
+    elif assessment.status == "incomplete":
+        selected = "claude"
+        signals_ok = False
+    elif assessment.status == "ambiguous":
+        selected = "ambiguous"
+        signals_ok = False
+    elif assessment.status == "absent":
+        selected = "git-only"
+        signals_ok = selected_mode == "auto"
+    else:
+        assert assessment.context is not None
+        selected = assessment.context.agent
+        signals_ok = True
     recipes = _recipe_flag_check(env, selected)
+    present = ", ".join(assessment.present)
+    missing = ", ".join(assessment.missing)
     signals = DoctorCheck(
         "environment signals",
         signals_ok,
-        f"CLAUDECODE={env.get('CLAUDECODE', '<absent>')}, CLAUDE_CODE_SESSION_ID="
-        f"{'present' if env.get('CLAUDE_CODE_SESSION_ID') else 'absent'}, "
-        f"CODEX_THREAD_ID={'present' if env.get('CODEX_THREAD_ID') else 'absent'}, "
+        f"status={assessment.status}, present=[{present}], missing=[{missing}], "
         f"mode={selected_mode}, selected={selected}",
     )
 
     def optional(check: DoctorCheck) -> DoctorCheck:
         return DoctorCheck(check.name, True, f"{check.detail} (optional)")
 
-    if selected_mode == "git-only" or not (claude_signal or codex_signal):
+    if selected_mode == "git-only" or assessment.status == "absent":
         claude, codex = optional(claude), optional(codex)
-    elif not ambiguous:
-        if claude_signal:
+    elif assessment.status != "ambiguous":
+        if selected == "claude":
             codex = optional(codex)
         else:
             claude = optional(claude)

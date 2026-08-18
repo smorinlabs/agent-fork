@@ -507,3 +507,122 @@ def test_claude_child_uuid_lives_once_per_inspection(repo_scenario):
     assert first_child != second_child
     assert uuid.UUID(first_child).version == 4
     assert uuid.UUID(second_child).version == 4
+
+
+@pytest.mark.matrix("T-SES-33")
+def test_partial_claude_signal_is_shared_without_session_identity(repo_scenario):
+    from agent_fork.session import inspect_session
+
+    cases = (
+        (
+            {"CLAUDECODE": "1"},
+            {
+                "status": "incomplete",
+                "present": ["CLAUDECODE=1"],
+                "missing": ["CLAUDE_CODE_SESSION_ID"],
+            },
+            "not_detected",
+        ),
+        (
+            {"CLAUDE_CODE_SESSION_ID": "claude-child"},
+            {
+                "status": "incomplete",
+                "present": ["CLAUDE_CODE_SESSION_ID"],
+                "missing": ["CLAUDECODE=1"],
+            },
+            "not_detected",
+        ),
+        (
+            {"CLAUDECODE": "1", "CODEX_THREAD_ID": "codex-thread"},
+            {
+                "status": "ambiguous",
+                "present": ["CLAUDECODE=1", "CODEX_THREAD_ID"],
+                "missing": ["CLAUDE_CODE_SESSION_ID"],
+            },
+            "ambiguous",
+        ),
+        (
+            {
+                "CLAUDE_CODE_SESSION_ID": "claude-child",
+                "CODEX_THREAD_ID": "codex-thread",
+            },
+            {
+                "status": "ambiguous",
+                "present": ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"],
+                "missing": ["CLAUDECODE=1"],
+            },
+            "ambiguous",
+        ),
+    )
+
+    for signals, expected_signal, expected_status in cases:
+        world = repo_scenario()
+        result = inspect_session({**world.env, **signals}, cwd=world.parent_path)
+        document = result.document()
+
+        assert document["agent_signal"] == expected_signal
+        assert result.agent is None
+        assert result.current_session is None
+        assert result.parent_session is None
+        assert result.lineage_status == expected_status
+        assert result.fork_command.status == expected_status
+        assert result.fork_command.command is None
+
+
+@pytest.mark.matrix("T-SES-35")
+def test_validation_embeds_detected_agent_signal(repo_scenario):
+    from agent_fork.session import SessionAssertions, inspect_session, validate_session
+
+    world = repo_scenario()
+    inspection = inspect_session(
+        {
+            **world.env,
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_SESSION_ID": "claude-child",
+        },
+        cwd=world.parent_path,
+        child_session_id="33333333-3333-4333-8333-333333333333",
+    )
+
+    result = validate_session(
+        inspection,
+        SessionAssertions(
+            agent="claude",
+            session_id="claude-child",
+            has_parent=False,
+        ),
+    )
+
+    assert result["valid"] is True
+    assert result["assertions"] == [
+        {
+            "name": "session_detected",
+            "expected": True,
+            "actual": True,
+            "passed": True,
+        },
+        {
+            "name": "agent",
+            "expected": "claude",
+            "actual": "claude",
+            "passed": True,
+        },
+        {
+            "name": "session_id",
+            "expected": "claude-child",
+            "actual": "claude-child",
+            "passed": True,
+        },
+        {
+            "name": "has_parent",
+            "expected": False,
+            "actual": False,
+            "passed": True,
+        },
+    ]
+    session = cast(dict[str, object], result["session"])
+    assert session["agent_signal"] == {
+        "status": "detected",
+        "present": ["CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID"],
+        "missing": [],
+    }

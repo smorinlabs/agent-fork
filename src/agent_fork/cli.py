@@ -744,6 +744,7 @@ def main(argv: list[str] | None = None) -> int:
                     to_record,
                 )
                 from agent_fork.errors import (
+                    AgentSignalIncompleteError,
                     ClaudeParentError,
                     ClaudeParentNotRecordableError,
                     ClaudeParentPartialRecordError,
@@ -868,17 +869,31 @@ def main(argv: list[str] | None = None) -> int:
                         }
                     )
                     return 0
-                corpus = ClaudeLineageCorpus(environment)
                 ids = []
                 if args.current:
-                    if environment.get("CLAUDECODE") != "1" or not environment.get(
-                        "CLAUDE_CODE_SESSION_ID"
+                    from agent_fork.agents import assess_agent_signals
+
+                    assessment = assess_agent_signals(environment)
+                    if assessment.status == "incomplete":
+                        raise AgentSignalIncompleteError(
+                            assessment.present, assessment.missing
+                        )
+                    if assessment.status == "ambiguous":
+                        raise ClaudeParentError(
+                            "current agent signals are ambiguous: "
+                            f"{assessment.diagnosis()}",
+                            details=assessment.document(),
+                        )
+                    if (
+                        assessment.context is None
+                        or assessment.context.agent != "claude"
                     ):
                         raise ClaudeParentError("no current Claude session detected")
-                    ids = [environment["CLAUDE_CODE_SESSION_ID"]]
+                    ids = [assessment.context.parent_session_id]
                 elif args.session_id:
                     ids = [args.session_id]
-                else:
+                corpus = ClaudeLineageCorpus(environment)
+                if args.all:
                     ids = [
                         p.stem
                         for p in corpus.paths
@@ -1014,6 +1029,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(json_line(inspection.document()))
                 return 0
             if inspection.current_session is None:
+                if inspection.agent_signal.status == "incomplete":
+                    print("agent signal: incomplete")
                 print(f"session: {inspection.lineage_status}")
             else:
                 current = inspection.current_session
