@@ -165,8 +165,16 @@ repository-controlled text raw).
   **Owner decision 2026-08-17:** the auto-name bullet is recorded as
   over-broad, not unfixed — once uniqueness is `(repo, name)`, equal names in
   different repos are legal, so auto-naming is left untouched.
-- **A4 — Agent-CLI recipe drift is undetectable; failure lands post-fork.**
-  Emitted recipes live in `agents.py:286-301` guarded only by version
+- **A4 — [x] RESOLVED: partially refuted — the headline drift scenario is
+  unreproducible by construction and the impact was downgraded high →
+  medium; the one testable defect (`parse_version` reading a banner's
+  version instead of the CLI's) is fixed, and recipe drift is now a
+  warn-level `--help` probe rather than a refusal.** *(Re-scoped and
+  downgraded 2026-08-17, merged in PR #37. Evidence: T-PRE-21..26 and the
+  entry below.)*
+
+  Original claim as registered:
+  emitted recipes live in `agents.py:286-301` guarded only by version
   floors (`agents.py:65-68`) — a future CLI that drops `--fork-session`
   passes every check and fails in the user's fresh terminal after branch,
   worktree, registry, and lineage were created. `parse_version`
