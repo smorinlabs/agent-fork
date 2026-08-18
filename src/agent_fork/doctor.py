@@ -12,7 +12,10 @@ from pathlib import Path
 from agent_fork.agents import (
     CLAUDE_FORK_MIN,
     CODEX_ENV_MIN,
+    missing_recipe_flags,
     parse_version,
+    read_help,
+    recipe_flags,
 )
 from agent_fork.config import ConfigError, resolve_discovered_config
 from agent_fork.git import PRODUCT_GIT_MIN
@@ -23,6 +26,39 @@ class DoctorCheck:
     name: str
     ok: bool
     detail: str
+
+
+def _recipe_flag_check(env: Mapping[str, str], selected: str) -> DoctorCheck:
+    """A4: report recipe flags the installed CLIs no longer document.
+
+    This is where both preflight notices send the user, so it must actually
+    answer the question they were warned about. An absent CLI or unreadable
+    help is not evidence of drift and is reported as unverified, not failure.
+
+    Only the selected agent's drift can fail the check. An unused CLI that
+    happens to be installed must not fail an otherwise healthy diagnosis,
+    matching how the version checks are made optional below.
+    """
+    name = "agent recipe flags"
+    details: list[str] = []
+    drifted = False
+    for agent in ("claude", "codex"):
+        binary = shutil.which(agent, path=env.get("PATH"))
+        if binary is None:
+            details.append(f"{agent}: not installed (skipped)")
+            continue
+        help_output = read_help(agent, binary, env)
+        if help_output is None:
+            details.append(f"{agent}: help unreadable (unverified)")
+            continue
+        absent = missing_recipe_flags(agent, help_output)
+        if not absent:
+            details.append(f"{agent}: {len(recipe_flags(agent))} documented")
+            continue
+        scope = "" if agent == selected else " (unselected)"
+        drifted = drifted or agent == selected
+        details.append(f"{agent}: undocumented {', '.join(absent)}{scope}")
+    return DoctorCheck(name, not drifted, "; ".join(details))
 
 
 def _version_check(
@@ -95,6 +131,7 @@ def run_doctor(
         if claude_signal
         else "codex"
     )
+    recipes = _recipe_flag_check(env, selected)
     signals = DoctorCheck(
         "environment signals",
         signals_ok,
@@ -137,4 +174,4 @@ def run_doctor(
         paths_ok &= ok
         details.append(f"{label}={path} ({'writable' if ok else 'not writable'})")
     xdg = DoctorCheck("XDG paths", paths_ok, ", ".join(details))
-    return git, claude, codex, signals, config, xdg
+    return git, claude, codex, recipes, signals, config, xdg

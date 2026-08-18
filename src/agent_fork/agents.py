@@ -66,7 +66,21 @@ CLAUDE_FORK_MIN = (2, 0, 73)
 CLAUDE_RELIABLE_MIN = (2, 1, 100)
 CODEX_FORK_MIN = (0, 81, 0)
 CODEX_ENV_MIN = (0, 95, 0)
-_VERSION = re.compile(r"(?<!\d)(\d+)\.(\d+)(?:\.(\d+))?")
+# A4: the flag tokens each rendered recipe emits. Version floors prove a flag
+# arrived; they cannot prove it has since been removed, and neither vendor
+# publishes a deprecation policy to reason from — so probe the installed help
+# for these instead. T-PRE-26 keeps the lists in step with the renderer.
+CLAUDE_RECIPE_FLAGS = ("--session-id", "--resume", "--fork-session", "-n")
+CODEX_RECIPE_FLAGS = ("-C",)
+# Codex declares the recipe's flags on the `fork` subcommand, not the root, so
+# the two agents are probed with different argument tails. Diagnostics name the
+# tail that actually ran: for Codex, `codex --help` succeeds even when `fork`
+# is gone, so reporting it would point the reader at a working command.
+_HELP_ARGS: dict[str, tuple[str, ...]] = {
+    "claude": ("--help",),
+    "codex": ("fork", "--help"),
+}
+_VERSION = re.compile(r"(?<![\d.])(\d+)\.(\d+)(?:\.(\d+))?")
 _BIDI_CONTROLS = frozenset(
     {
         "\u061c",
@@ -91,6 +105,75 @@ def parse_version(output: str) -> tuple[int, int, int]:
         raise ValueError(f"unable to parse version from {output!r}")
     major, minor, patch = match.groups()
     return int(major), int(minor), int(patch or 0)
+
+
+def version_tokens(output: str) -> tuple[tuple[int, int, int], ...]:
+    """Every distinct version-like token in `output`, in order of appearance."""
+    seen: list[tuple[int, int, int]] = []
+    for match in _VERSION.finditer(output):
+        major, minor, patch = match.groups()
+        value = (int(major), int(minor), int(patch or 0))
+        if value not in seen:
+            seen.append(value)
+    return tuple(seen)
+
+
+def recipe_flags(agent: AgentName) -> tuple[str, ...]:
+    return CLAUDE_RECIPE_FLAGS if agent == "claude" else CODEX_RECIPE_FLAGS
+
+
+def option_declarations(help_output: str) -> str:
+    """The option-declaration part of each help line, description stripped.
+
+    A bare token search treats prose as evidence: "this replaces
+    --fork-session" would prove the flag still exists. Both CLIs declare
+    options at the start of a line and separate the description with two or
+    more spaces, so only that leading part counts.
+    """
+    declarations = []
+    for line in help_output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("-"):
+            declarations.append(re.split(r"\s{2,}", stripped, maxsplit=1)[0])
+    return "\n".join(declarations)
+
+
+def missing_recipe_flags(agent: AgentName, help_output: str) -> tuple[str, ...]:
+    """Recipe flags absent from `help_output`, in declared order."""
+    declared = option_declarations(help_output)
+    return tuple(
+        flag
+        for flag in recipe_flags(agent)
+        if re.search(rf"(?<![\w-]){re.escape(flag)}(?![\w-])", declared) is None
+    )
+
+
+def help_invocation(agent: AgentName) -> str:
+    """The help command as a reader would type it, for diagnostics."""
+    return " ".join((agent, *_HELP_ARGS[agent]))
+
+
+def read_help(agent: AgentName, binary: str, env: Mapping[str, str]) -> str | None:
+    """Installed help text, or None when the capability is unverifiable.
+
+    None is a third state, distinct from "flag present" and "flag absent":
+    it means no evidence either way, which callers report rather than
+    silently treat as success. Undecodable bytes land in that state too:
+    `text=True` decodes inside `subprocess.run`, so UnicodeDecodeError must
+    be caught here or it escapes a mechanism that promises never to refuse.
+    Replacing the bad bytes instead would be worse — unreadable output would
+    then be probed as if it were help, and report every flag as removed.
+    """
+    argv = [binary, *_HELP_ARGS[agent]]
+    try:
+        completed = subprocess.run(
+            argv, env=dict(env), capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout or None
 
 
 def _render(version: tuple[int, int, int]) -> str:
@@ -119,6 +202,7 @@ def preflight_agent(
     *,
     executable: str | None = None,
     version_output: str | None = None,
+    help_output: str | None = None,
     codex_session_name_resolution: bool = True,
 ) -> PreflightResult:
     """Refuse unsupported native forks before any repository mutation."""
@@ -141,6 +225,12 @@ def preflight_agent(
                 f"detected {context.agent} CLI at {binary}, but --version failed"
             )
         version_output = completed.stdout or completed.stderr
+        # Ambiguity can straddle the streams: a CLI may print its version on
+        # stdout and an updater banner on stderr, so count tokens across both
+        # even though only one stream is parsed.
+        token_source = f"{completed.stdout}\n{completed.stderr}"
+    else:
+        token_source = version_output
     try:
         version = parse_version(version_output)
     except ValueError as error:
@@ -149,13 +239,25 @@ def preflight_agent(
         ) from error
 
     notices: list[str] = []
+    tokens = version_tokens(token_source)
+    # A misparse is most damaging when it causes a floor refusal, and an
+    # exception discards `notices` — so the refusals carry the hint too.
+    hint = (
+        f" (ambiguous version output: {len(tokens)} tokens)" if len(tokens) > 1 else ""
+    )
+    if len(tokens) > 1:
+        notices.append(
+            f"{context.agent} version output carried {len(tokens)} version-like "
+            f"tokens and was ambiguous; read as {_render(version)} — run "
+            "agent-fork doctor if that is not the installed version"
+        )
     resolved_context = context
     resolved_name: str | None = None
     if context.agent == "claude":
         if version < CLAUDE_FORK_MIN:
             raise _diagnosis(
                 f"detected Claude {_render(version)}; pinned-session fork requires "
-                f">={_render(CLAUDE_FORK_MIN)}"
+                f">={_render(CLAUDE_FORK_MIN)}{hint}"
             )
         if version < CLAUDE_RELIABLE_MIN:
             notices.append(
@@ -166,12 +268,12 @@ def preflight_agent(
         if version < CODEX_FORK_MIN:
             raise _diagnosis(
                 f"detected Codex {_render(version)}; fork requires "
-                f">={_render(CODEX_FORK_MIN)}"
+                f">={_render(CODEX_FORK_MIN)}{hint}"
             )
         if version < CODEX_ENV_MIN:
             raise _diagnosis(
                 f"detected Codex {_render(version)}; CODEX_THREAD_ID support requires "
-                f">={_render(CODEX_ENV_MIN)}"
+                f">={_render(CODEX_ENV_MIN)}{hint}"
             )
         try:
             canonical = str(uuid.UUID(context.parent_session_id))
@@ -220,6 +322,27 @@ def preflight_agent(
                 f"detected Codex {_render(version)}, but parent rollout "
                 f"{resolved_context.parent_session_id} is not flushed under "
                 f"{_codex_home(env)}"
+            )
+    help_text = (
+        help_output
+        if help_output is not None
+        else read_help(context.agent, binary, env)
+    )
+    if not help_text:
+        # Third state: unverified. Silence here would make "no evidence"
+        # indistinguishable from "verified", and would hide removal of the
+        # Codex `fork` subcommand entirely, since that makes help unreadable.
+        notices.append(
+            f"could not read the output of {help_invocation(context.agent)}, so "
+            "the paste command's flags are unverified; run agent-fork doctor"
+        )
+    else:
+        absent = missing_recipe_flags(context.agent, help_text)
+        if absent:
+            notices.append(
+                f"installed {context.agent} CLI no longer documents "
+                f"{', '.join(absent)}; the paste command may fail — run "
+                "agent-fork doctor"
             )
     return PreflightResult(
         context.agent,
