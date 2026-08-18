@@ -176,6 +176,24 @@ def _anchor(
     return None, None
 
 
+def _owns(entry: RegistryEntry, anchor_common_dir: Path | None) -> bool:
+    """Whether a record's own repository permits acting on it here.
+
+    A stored value may *veto* an action but may never *authorize* one. It
+    cannot prove the fork still exists — that is what the live predicate is
+    for — but a record naming repository A is reason enough to decline acting
+    on it from repository B, because a stale value can only make this refusal
+    more conservative. Selection ignores stored identity; this does not.
+
+    A record migrated from a v1 registry names no repository and so vetoes
+    nothing. Under exact path-and-branch reuse it remains indistinguishable
+    from a record of this repository's own; `prune` is the remedy.
+    """
+    if entry.repository is None:
+        return True
+    return anchor_common_dir is not None and entry.repository == str(anchor_common_dir)
+
+
 def resolve_cleanup_target(
     target: str,
     *,
@@ -195,7 +213,11 @@ def resolve_cleanup_target(
     live: frozenset[tuple[str, str]] = frozenset()
     if anchor_path is not None:
         live = live_worktree_pairs(anchor_path, env=env)
-    actionable = [entry for entry in candidates if is_live(entry, live)]
+    actionable = [
+        entry
+        for entry in candidates
+        if is_live(entry, live) and _owns(entry, anchor_common_dir)
+    ]
     if len(actionable) > 1:
         paths = ", ".join(_escape_terminal_text(entry.worktree) for entry in actionable)
         raise PreconditionError(

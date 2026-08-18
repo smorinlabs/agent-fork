@@ -209,6 +209,29 @@ def remove_entry(
         remove_locked(token, env=env)
 
 
+def undo_add(
+    token: tuple[object, ...],
+    displaced: list[RegistryEntry],
+    *,
+    env: Mapping[str, str] | None = None,
+    timeout: float = DEFAULT_LOCK_TIMEOUT,
+) -> None:
+    """Reverse one `add_entry` in a single locked step.
+
+    Removes the record identified by `token` and puts back exactly the records
+    that call displaced. Deliberately does not reuse the replacement rule:
+    re-adding through `add_entry` would apply it a second time and could
+    delete a record another process registered in the meantime. Records added
+    concurrently under other names are preserved untouched.
+    """
+    path = registry_path(env)
+    with registry_lock(path, timeout=timeout):
+        remaining = [item for item in _decode(path) if item.token() != token]
+        present = {item.token() for item in remaining}
+        remaining.extend(item for item in displaced if item.token() not in present)
+        _atomic_write(path, remaining)
+
+
 def find_candidates(
     target: str, *, env: Mapping[str, str] | None = None
 ) -> list[RegistryEntry]:

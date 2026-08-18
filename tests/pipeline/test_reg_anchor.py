@@ -90,6 +90,56 @@ def test_path_reuse_on_the_same_branch_cannot_delete_the_other_repository(
     assert Path(worktree).exists(), "the other repository's worktree was removed"
 
 
+@pytest.mark.matrix("T-REG-24")
+def test_a_foreign_record_cannot_authorize_deletion_in_the_occupying_repository(
+    repo_scenario,
+):
+    """The destructive half of the cross-product T-REG-20 missed.
+
+    Same reuse, but invoked from the repository that now holds the path. The
+    record's own stored repository must veto it, even though its (worktree,
+    branch) pair is genuinely live here.
+    """
+    from pathlib import Path
+
+    from conftest import run_cli
+
+    first = repo_scenario()
+    second = repo_scenario()
+    shared = {**second.env, "XDG_STATE_HOME": first.env["XDG_STATE_HOME"]}
+
+    created = _fork(first.env, first.parent_path, "collide")
+    assert created.returncode == 0
+    worktree = _worktree_of(created.stdout)
+    branch = _branch_of(created.stdout)
+    shutil.rmtree(worktree)
+    subprocess.run(
+        ["git", "worktree", "add", worktree, "-b", branch],
+        cwd=second.parent_path,
+        env=shared,
+        check=True,
+        capture_output=True,
+    )
+
+    # Invoked from the OCCUPYING repository, whose live worktree genuinely
+    # matches the stale record's pair.
+    result = run_cli(
+        ["cleanup", "collide", "--yes", "--allow-unpushed"],
+        shared,
+        second.parent_path,
+    )
+    assert result.returncode != 0, result.stdout
+    assert Path(worktree).exists(), "the occupying repository's worktree was removed"
+    assert (
+        subprocess.run(
+            ["git", "-C", str(second.parent_path), "rev-parse", "--verify", branch],
+            env=shared,
+            capture_output=True,
+        ).returncode
+        == 0
+    ), "the occupying repository's branch was deleted"
+
+
 @pytest.mark.matrix("T-REG-21")
 def test_force_does_not_override_the_stale_refusal(repo_scenario):
     """--force overrides the dirty and unpushed guards, never ownership."""

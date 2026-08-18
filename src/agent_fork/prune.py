@@ -46,6 +46,10 @@ def _classify(
     missing: list[RegistryEntry] = []
     displaced: list[RegistryEntry] = []
     kept: list[RegistryEntry] = []
+    # Records commonly share a repository, and enumerating one costs a probe
+    # per worktree it holds. Without this, N records across one repository of
+    # M worktrees would run N*M subprocesses.
+    enumerated: dict[Path, frozenset[tuple[str, str]]] = {}
     for entry in entries:
         worktree = Path(entry.worktree)
         if not worktree.exists():
@@ -55,8 +59,10 @@ def _classify(
             missing.append(entry)
             continue
         try:
-            live = live_worktree_pairs(worktree, env=env)
             occupant = inspect_repository(worktree, env=env).common_dir
+            if occupant not in enumerated:
+                enumerated[occupant] = live_worktree_pairs(worktree, env=env)
+            live = enumerated[occupant]
         except Exception:
             # The path exists but is not a usable repository. Report rather
             # than remove: the row may still describe real work.

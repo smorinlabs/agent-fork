@@ -18,13 +18,12 @@ from agent_fork.agents import (
     preflight_git,
 )
 from agent_fork.content import capture_state, collect_inventory
-from agent_fork.errors import PreconditionError, RegistryBusyError
 from agent_fork.git import run_git
 from agent_fork.include import copy_worktree_includes, run_setup_hook
 from agent_fork.lineage import LineageClaim, add_lineage
 from agent_fork.materialize import materialize
 from agent_fork.models import RegistryEntry
-from agent_fork.registry import add_entry, remove_entry
+from agent_fork.registry import add_entry, undo_add
 from agent_fork.repository import (
     WorktreeCreation,
     create_worktree_at_anchor,
@@ -185,16 +184,14 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                     env=env,
                 )
             except Exception:
-                # Compensate by removing the record just written, identified
-                # exactly. A bare name would also delete another repository's
-                # same-named fork. Any record this call displaced is restored,
-                # so a failed fork does not leave the user's earlier fork
-                # unregistered. Compensation that cannot complete must not mask
-                # the failure that triggered it.
-                with suppress(PreconditionError, RegistryBusyError):
-                    remove_entry(entry.token(), env=env)
-                    for previous in displaced:
-                        add_entry(previous, env=env)
+                # Undo this call's registry write in one locked step: remove
+                # the record just written and put back exactly what it
+                # displaced, so a failed fork does not leave the user's earlier
+                # fork unregistered. Compensation is best-effort by design —
+                # whatever goes wrong here, the failure that triggered it is
+                # the one worth reporting, so nothing is allowed to mask it.
+                with suppress(Exception):
+                    undo_add(entry.token(), displaced, env=env)
                 raise
         return included.copied, hook_notices
 

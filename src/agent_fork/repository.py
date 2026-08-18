@@ -144,9 +144,13 @@ def live_worktree_pairs(
       matching nothing here is not one of this repository's forks.
     """
     own_common_dir = inspect_repository(parent, env=env).common_dir
-    # -z, because Git emits the worktree path raw and a path may contain a
-    # newline; that is precisely what this option exists for.
-    result = run_git(parent, ["worktree", "list", "--porcelain", "-z"], env=env)
+    # Newline-delimited, not `-z`. The NUL form would parse paths containing
+    # newlines, but it arrived in Git 2.36 and this product's floor is 2.19;
+    # docs/testing/PRODUCT-GIT-MIN-AUDIT.md names this exact option as
+    # deliberately avoided. A worktree path containing a newline is not
+    # matched here and its record is refused rather than acted on, which errs
+    # in the safe direction.
+    result = run_git(parent, ["worktree", "list", "--porcelain"], env=env)
     pairs: set[tuple[str, str]] = set()
     path: Path | None = None
     prunable = False
@@ -164,19 +168,17 @@ def live_worktree_pairs(
         if common_dir == own_common_dir:
             pairs.add((str(path), branch))
 
-    for token in result.stdout.split(b"\0"):
-        field = token.decode(errors="surrogateescape")
-        if field.startswith("worktree "):
+    for line in result.stdout.decode(errors="surrogateescape").splitlines() + [""]:
+        if line.startswith("worktree "):
             confirm()
-            path = Path(field.removeprefix("worktree ")).resolve()
+            path = Path(line.removeprefix("worktree ")).resolve()
             prunable = False
-        elif field.startswith("prunable"):
+        elif line.startswith("prunable"):
             prunable = True
-        elif not field:
+        elif not line:
             confirm()
             path = None
             prunable = False
-    confirm()
     return frozenset(pairs)
 
 
