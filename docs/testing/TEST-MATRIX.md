@@ -352,6 +352,7 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-21 | `--force` does not override the stale refusal — it extends targeting and overrides dirty/unpushed only, never ownership | baseline | F | live | REQ-31 (A3); gate-6 P0 |
 | T-REG-22 | a registered fork is cleanable by absolute path from outside any repository; an explicit path is fresh input and anchors the repository | baseline | F | live | REQ-31 (A3); gate-6 P1 |
 | T-REG-23 | `prune` reports path reuse as displaced even when the occupying worktree carries the same branch name | baseline | F | live | REQ-31a (A3); gate-6 P2 |
+| T-REG-24 | a record naming another repository cannot authorize deletion even when invoked from the repository that now holds its path and branch — the stored repository vetoes, though it never authorizes | baseline | F | live | REQ-31 (A3); gate-6 r2 P0 |
 
 ---
 
