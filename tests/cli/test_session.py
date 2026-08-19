@@ -187,6 +187,42 @@ def test_session_outputs_fork_command_object_or_explicit_status(repo_scenario):
     assert b"fork command: unavailable (unsafe_input)" in unsafe.stdout
 
 
+@pytest.mark.matrix("T-SES-38")
+def test_session_outputs_resume_command_object_or_explicit_status(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    machine = run_cli(["session", "--json"], env, world.parent_path)
+    document = json.loads(machine.stdout)
+    command = document["resume_command"]
+    assert command["status"] == "available"
+    assert command["command"] == (
+        f"cd {world.parent_path} && claude --resume claude-child"
+    )
+
+    human = run_cli(["session"], env, world.parent_path)
+    assert (
+        f"resume command: cd {world.parent_path} && claude --resume claude-child"
+    ).encode() in human.stdout
+
+    absent = run_cli(["session"], world.env, world.parent_path)
+    assert b"resume command: unavailable (not_detected)" in absent.stdout
+
+    unsafe_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "unsafe\x1b]52;c;Zm9v\x07\nnext\u202e",
+    }
+    unsafe = run_cli(["session"], unsafe_env, world.parent_path)
+    assert b"\x1b" not in unsafe.stdout and b"\x07" not in unsafe.stdout
+    assert b"resume command: unavailable (unsafe_input)" in unsafe.stdout
+
+
 @pytest.mark.matrix("T-SES-31")
 def test_session_command_construction_has_no_mutating_side_effects(repo_scenario):
     from agent_fork.git import run_git

@@ -9,7 +9,7 @@ uv venv "$check_root/venv" --python python3
 uv pip install --python "$check_root/venv/bin/python" "$check_root"/dist/*.whl
 
 version_output="$($check_root/venv/bin/agent-fork --version)"
-test "$version_output" = "agent-fork 1.0.0"
+test "$version_output" = "agent-fork 1.1.0"
 "$check_root/venv/bin/agent-fork" --help | grep -q '^usage: agent-fork'
 "$check_root/venv/bin/agent-fork" | grep -q '^usage: agent-fork'
 "$check_root/venv/bin/agent-fork" completion bash | grep -q agent-fork

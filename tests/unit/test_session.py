@@ -130,6 +130,7 @@ def test_validation_constraints_compose(repo_scenario):
         SessionEvidence,
         SessionForkCommand,
         SessionInspection,
+        SessionResumeCommand,
         validate_session,
     )
 
@@ -143,6 +144,9 @@ def test_validation_constraints_compose(repo_scenario):
         repository=None,
         fork_command=SessionForkCommand(
             status="available", command="codex fork child -C /tmp"
+        ),
+        resume_command=SessionResumeCommand(
+            status="available", command="codex resume child -C /tmp"
         ),
     )
     result = validate_session(
@@ -169,6 +173,7 @@ def test_validation_mismatch_is_typed(repo_scenario):
         SessionAssertions,
         SessionForkCommand,
         SessionInspection,
+        SessionResumeCommand,
         validate_session,
     )
 
@@ -183,6 +188,9 @@ def test_validation_mismatch_is_typed(repo_scenario):
                 directory=world.parent_path,
                 repository=None,
                 fork_command=SessionForkCommand(status="not_detected", command=None),
+                resume_command=SessionResumeCommand(
+                    status="not_detected", command=None
+                ),
             ),
             SessionAssertions(),
         )
@@ -474,6 +482,89 @@ def test_fork_command_status_uses_identity_and_safety_not_lineage(
         session_module.SessionForkCommand("available", None)
     with pytest.raises(ValueError, match="must be null"):
         session_module.SessionForkCommand("ambiguous", "unexpected")
+
+
+@pytest.mark.matrix("T-SES-36")
+def test_resume_command_status_uses_identity_and_safety_not_lineage(
+    repo_scenario, monkeypatch
+):
+    import agent_fork.session as session_module
+
+    world = repo_scenario()
+    no_identity = session_module.inspect_session(world.env, cwd=world.parent_path)
+    assert no_identity.resume_command.status == "not_detected"
+    assert no_identity.resume_command.command is None
+
+    claude_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    claude = session_module.inspect_session(claude_env, cwd=world.parent_path)
+    assert claude.resume_command.status == "available"
+    assert claude.resume_command.command == (
+        f"cd {world.parent_path} && claude --resume claude-child"
+    )
+
+    ambiguous = session_module.inspect_session(
+        {**claude_env, "CODEX_THREAD_ID": "codex-thread"}, cwd=world.parent_path
+    )
+    assert ambiguous.resume_command.status == "ambiguous"
+    assert ambiguous.resume_command.command is None
+
+    original_which = session_module.shutil.which
+    monkeypatch.setattr(
+        session_module.shutil,
+        "which",
+        lambda name, path=None: (
+            None if name == "codex" else original_which(name, path=path)
+        ),
+    )
+    codex = session_module.inspect_session(
+        {**world.env, "CODEX_THREAD_ID": "codex-thread"}, cwd=world.parent_path
+    )
+    assert codex.resume_command.status == "available"
+    assert codex.resume_command.command == (
+        f"codex resume codex-thread -C {world.parent_path}"
+    )
+
+    unsafe = session_module.inspect_session(
+        {
+            **world.env,
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_SESSION_ID": "unsafe\x1b]52;c;Zm9v\x07",
+        },
+        cwd=world.parent_path,
+    )
+    assert unsafe.resume_command.status == "unsafe_input"
+    assert unsafe.resume_command.command is None
+
+    with pytest.raises(ValueError, match="unknown session resume command status"):
+        session_module.SessionResumeCommand(
+            cast(session_module.SessionForkStatus, "future"), None
+        )
+    with pytest.raises(ValueError, match="must be non-empty"):
+        session_module.SessionResumeCommand("available", None)
+    with pytest.raises(ValueError, match="must be null"):
+        session_module.SessionResumeCommand("ambiguous", "unexpected")
+
+
+@pytest.mark.matrix("T-SES-37")
+def test_document_includes_resume_command(repo_scenario):
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+    claude_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    result = inspect_session(claude_env, cwd=world.parent_path)
+    document = result.document()
+    assert document["resume_command"] == {
+        "status": "available",
+        "command": result.resume_command.command,
+    }
 
 
 @pytest.mark.matrix("T-SES-29")

@@ -76,7 +76,7 @@ CLI call:
 | Skill form | CLI call | Result |
 |---|---|---|
 | The fork forms | `agent-fork fork ... --require-agent --json` | The branch, the worktree, and the paste command |
-| `--session` | `agent-fork session --json` | The session inspection plus its native fork command |
+| `--session` | `agent-fork session --json` | The session inspection plus its native fork and resume commands |
 | `--session-only` | `agent-fork session --json` | Only that native fork command |
 
 The fork's name comes from one of three places:
@@ -209,7 +209,7 @@ direct-CLI equivalents:
 ```bash
 agent-fork doctor              # confirm Git, agent CLIs, config, and XDG paths
 agent-fork fork try-redis      # create the fork, print the paste command
-agent-fork session             # inspect context and print a native fork command
+agent-fork session             # inspect context and print native fork/resume commands
 agent-fork list                # see the forks you have created
 agent-fork cleanup try-redis --yes   # remove one when you are done
 ```
@@ -241,7 +241,7 @@ than starting a new one.
 | Command | Purpose |
 |---|---|
 | `agent-fork fork [NAME]` | Create a verified branch and worktree; print the paste command |
-| `agent-fork session [validate]` | Inspect session evidence, construct its native fork command, or assert expected identity and lineage |
+| `agent-fork session [validate]` | Inspect session evidence, construct its native fork and resume commands, or assert expected identity and lineage |
 | `agent-fork list` | List forks created by `agent-fork` |
 | `agent-fork cleanup <name\|branch\|worktree> --yes` | Remove a registered fork |
 | `agent-fork doctor` | Diagnose Git, agent, config, and XDG readiness |
@@ -277,12 +277,22 @@ agent-fork session validate --agent codex --has-parent
 ```
 
 Inspection reports sourced evidence, the resolved invocation directory,
-nullable Git repository context, and `fork_command` — a shell-quoted native
-command for the one detected agent identity:
+nullable Git repository context, and two shell-quoted native commands for the
+one detected agent identity:
+
+- `fork_command` — creates a *new* session: a fresh session ID, a new Git
+  branch and worktree, carrying a copy of the current file state forward. The
+  original session keeps running untouched.
+- `resume_command` — re-enters the *same* session in place: same session ID,
+  same directory, same branch/worktree, continuing the same transcript. Use
+  this to pick a session back up after setting it aside ("rehydrate" it) —
+  nothing new is created.
 
 ```text
-cd '<resolved-directory>' && claude --session-id '<fresh-child-uuid>' --resume '<current-session-id>' --fork-session
-codex fork '<current-thread-id>' -C '<resolved-directory>'
+fork:   cd '<resolved-directory>' && claude --session-id '<fresh-child-uuid>' --resume '<current-session-id>' --fork-session
+        codex fork '<current-thread-id>' -C '<resolved-directory>'
+resume: cd '<resolved-directory>' && claude --resume '<current-session-id>'
+        codex resume '<current-thread-id>' -C '<resolved-directory>'
 ```
 
 JSON inspection also reports `agent_signal`, an additive object with
@@ -290,8 +300,9 @@ JSON inspection also reports `agent_signal`, an additive object with
 `detected`, or `ambiguous`. The detail lists contain supported environment
 variable names, never session or thread values. An incomplete Claude signal
 remains observational in `session`: it reports no current session, retains
-`lineage.status: not_detected` and `fork_command.status: not_detected`, and
-names the missing value in `notices`.
+`lineage.status: not_detected`, `fork_command.status: not_detected`, and
+`resume_command.status: not_detected`, and names the missing value in
+`notices`.
 
 Inspection never executes the returned command, mutates agent or repository
 state, or makes a network call; in an ordinary terminal it succeeds with

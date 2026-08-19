@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 398 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 404 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -430,6 +430,9 @@ Varying axes: agent (claude/codex, must vary per §4 — templates differ by age
 | T-EMT-08 | Claude session inspection emits the distinct byte-exact command with one fresh injectable child UUID and no name or extra args | agent=claude | U | live | REQ-50; D21 |
 | T-EMT-09 | Codex session inspection emits the distinct byte-exact `fork -C` command from the current thread and resolved directory | agent=codex | U | live | REQ-50; D21 |
 | T-EMT-10 | shared native rendering preserves REQ-28 templates, quotes hostile shell values, and rejects terminal-unsafe IDs, directories, or configured arguments before mutation | baseline | U | live | REQ-42; REQ-50; D21 |
+| T-EMT-11 | Claude session inspection resume command is byte-exact — `cd '<directory>' && claude --resume '<parent-id>'`, no child session ID, no `--fork-session` | agent=claude | U | live | P04; REQ-50; D21 |
+| T-EMT-12 | Codex session inspection resume command is byte-exact — `codex resume '<parent-thread-id>' -C '<directory>'` | agent=codex | U | live | P04; REQ-50; D21 |
+| T-EMT-13 | resume-mode native rendering rejects a passed child session ID, quotes hostile shell values, and rejects terminal-unsafe IDs or directories before mutation | baseline | U | live | P04; REQ-42; REQ-50; D21 |
 
 ---
 
@@ -554,6 +557,9 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 | T-SES-33 | session inspection consumes both incomplete and both partial-plus-Codex assessments without creating identity or a command | agent-signal=incomplete-marker/incomplete-id/ambiguous-partial-marker/ambiguous-partial-id | U | live | P02 A9; REQ-47; REQ-50 |
 | T-SES-34 | session human/JSON output emits exact additive assessment state for absent, incomplete, detected, and ambiguous input while incomplete inspection remains observational and write-free | agent-signal=absent/incomplete-marker/detected-claude/ambiguous-partial-marker | C | live | P02 A9; REQ-47; REQ-50; R7.2 |
 | T-SES-35 | validation preserves existing assertions and embeds the detected `agent_signal` document | agent-signal=detected-claude | U | live | P02 A9; REQ-47 |
+| T-SES-36 | resume-command status depends only on the zero/one/two ambient identity truth table and terminal safety, never lineage availability, mirroring fork-command's contract | baseline | U | live | P04; REQ-50; D21 |
+| T-SES-37 | `document()` includes the additive `resume_command` object alongside `fork_command` | agent=claude | U | live | P04; REQ-50; D21 |
+| T-SES-38 | JSON reports the additive resume-command status/command object and human output prints an exact safe command or explicit unavailable status | baseline | C | live | P04; REQ-50; D21; CLI R7.2 |
 
 ---
 

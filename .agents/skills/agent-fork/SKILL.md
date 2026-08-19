@@ -120,7 +120,7 @@ the agent CLIs, configuration validity, and XDG paths.
 
 Classify before normalizing. Choose exactly one route.
 
-### Inspect the current agent session and include its fork command
+### Inspect the current agent session and include its fork and resume commands
 
 For exact skill argument `--session`, or a natural-language request for the
 current Claude Code/Codex session ID or that agent session's repository context,
@@ -130,12 +130,16 @@ run exactly:
 agent-fork session --json
 ```
 
-Validate the session object and its `fork_command` object as specified below.
-Summarize the fields the user requested; show raw JSON only when requested. If
-the command status is `available`, include `fork_command.command`
-character-for-character under a clear fork-command label. Do not rebuild,
-reorder, re-quote, execute, or copy it. For `not_detected`, `ambiguous`, or
-`unsafe_input`, report the exact status and null command.
+Validate the session object and its `fork_command` and `resume_command`
+objects as specified below. Summarize the fields the user requested; show raw
+JSON only when requested. If a command's status is `available`, include its
+`command` character-for-character under a clear label — fork command for
+`fork_command`, resume command for `resume_command`. `resume_command` is the
+"rehydrate" command: it re-enters the exact same session in place (same
+session ID, same directory, same branch/worktree) rather than creating a new
+one, for picking a set-aside session back up. Do not rebuild, reorder,
+re-quote, execute, or copy either command. For `not_detected`, `ambiguous`,
+or `unsafe_input`, report the exact status and null command for each.
 
 ### Print only the current session's fork command
 
@@ -326,32 +330,41 @@ example values are never material to reconstruct a command from. When
 
 A missing CLI is handled by the preflight above, not here.
 
-If session JSON is otherwise valid but contains no `fork_command` key at all,
-the installed CLI predates that contract. Report
-`Installed agent-fork predates the fork_command contract`, show the upgrade
-command, and stop:
+If session JSON is otherwise valid but contains no `fork_command` key, the
+installed CLI predates that contract. If the route in use is `--session` and
+session JSON contains no `resume_command` key, the installed CLI predates
+that contract too — `--session-only` never requires `resume_command`, since
+it only ever presents `fork_command`. Report `Installed agent-fork predates
+the fork_command contract` (missing `fork_command`) or `Installed agent-fork
+predates the resume_command contract` (missing `resume_command`, `--session`
+route only), show the upgrade command, and stop:
 
 ```bash
 uv tool install --force git+https://github.com/smorinlabs/agent-fork
 ```
 
 Do not report this as `Invalid agent-fork JSON output` and do not reconstruct
-the command. `agent-fork --version` cannot separate these builds because the
-contract changed without a version bump.
+the command. `agent-fork --version` is not a reliable discriminator here: a
+version bump does not always accompany a contract change (`fork_command`'s
+own addition did not get one), so detect missing keys directly instead of
+trusting the reported version.
 
 Treat exit 0 as success only when stdout is one JSON object with the expected
 route fields:
 
 - Session: `agent`, `current_session`, `parent_session`, `lineage`, `notices`,
-  `directory`, `repository` (which may be null), and `fork_command`.
-  `fork_command` must be an object whose `status` is exactly `available`,
-  `not_detected`, `ambiguous`, or `unsafe_input`. `available` requires a
-  non-empty string `command`; every other status requires a null `command`.
+  `directory`, and `repository` (which may be null), plus `fork_command`; the
+  `--session` route additionally requires `resume_command`. Each of
+  `fork_command` and `resume_command` must be an object whose `status` is
+  exactly `available`, `not_detected`, `ambiguous`, or `unsafe_input`.
+  `available` requires a non-empty string `command`; every other status
+  requires a null `command`.
 - Fork: a non-empty string `command` and non-empty strings `fork.name`, `fork.branch`, and `fork.worktree`.
 
 Otherwise report `Invalid agent-fork JSON output` and stop. Do not invent
-missing values. An unknown future `fork_command.status` is invalid output; stop
-without reconstructing or executing anything.
+missing values. An unknown future `fork_command.status` or
+`resume_command.status` is invalid output; stop without reconstructing or
+executing anything.
 
 On fork success, present the effective name, branch, and worktree, followed by
 the exact returned `command` string. Do not rebuild, reorder, or re-quote it.
@@ -362,4 +375,4 @@ Preserve nonzero CLI output and stop.
 - Do not search transcripts.
 - Do not run hand-written Git commands.
 - Do not fall back to Git-only mode.
-- Do not execute a returned session fork command.
+- Do not execute a returned session fork or resume command.

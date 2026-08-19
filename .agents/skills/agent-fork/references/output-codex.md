@@ -28,6 +28,13 @@ codex fork 11111111-1111-4111-8111-111111111111 -C /Users/dev/project
 Codex assigns the fork its own thread ID at launch and runs in the `-C`
 directory.
 
+Resume command — paste in a new terminal to rehydrate this exact session in
+place (no new thread, branch, or worktree):
+
+```bash
+codex resume 11111111-1111-4111-8111-111111111111 -C /Users/dev/project
+```
+
 Row variants: an unnamed session shows `—` for Session name; a session with
 no recorded parent shows `none recorded (lineage: not_found)`; a clean
 repository shows `clean`. Append any `notices` afterward as a "Notices:"

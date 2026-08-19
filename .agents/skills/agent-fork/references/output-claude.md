@@ -28,6 +28,13 @@ cd /Users/dev/project && claude --session-id 33333333-3333-4333-8333-33333333333
 The `--session-id` value is the fork's new session ID, minted fresh on each
 inspection.
 
+Resume command — paste in a new terminal to rehydrate this exact session in
+place (no new session ID, branch, or worktree):
+
+```bash
+cd /Users/dev/project && claude --resume 11111111-1111-4111-8111-111111111111
+```
+
 Row variants: an unnamed session shows `—` for Session name; a known parent
 shows its ID with the lineage status, for example
 `22222222-2222-4222-8222-222222222222 (lineage: claimed)`; qualify an
