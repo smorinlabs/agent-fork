@@ -67,6 +67,13 @@ def test_render_json_missing_jsonpath_is_a_hard_error(tmp_path):
         render_json(path, ["version"], "2.0.0")
 
 
+def test_render_json_missing_intermediate_segment_is_a_hard_error(tmp_path):
+    path = tmp_path / "marketplace.json"
+    path.write_text(_canonical({"plugins": [{"name": "demo"}]}))
+    with pytest.raises(KeyError, match="metadata.version"):
+        render_json(path, ["metadata.version"], "2.0.0")
+
+
 def test_render_generic_rewrites_semver_on_annotated_lines_only(tmp_path):
     path = tmp_path / "notes.md"
     path.write_text(

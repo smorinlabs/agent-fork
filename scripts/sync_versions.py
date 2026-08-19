@@ -40,10 +40,13 @@ GENERIC_SITES = {  # path -> expected annotation count
 
 def _set(obj, dotted, value):
     *parents, leaf = dotted.split(".")
-    for key in parents:
-        obj = obj[int(key)] if isinstance(obj, list) else obj[key]
-    if leaf not in obj:
-        raise KeyError(dotted)
+    try:
+        for key in parents:
+            obj = obj[int(key)] if isinstance(obj, list) else obj[key]
+        if leaf not in obj:
+            raise KeyError(dotted)
+    except (KeyError, IndexError, TypeError, ValueError) as error:
+        raise KeyError(dotted) from error
     obj[leaf] = value
 
 
