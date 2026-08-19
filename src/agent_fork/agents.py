@@ -274,9 +274,15 @@ def _codex_home(env: Mapping[str, str]) -> Path:
     return Path(env.get("HOME", "~")).expanduser() / ".codex"
 
 
-def codex_rollout_exists(context: AgentContext, env: Mapping[str, str]) -> bool:
+def codex_rollout_path(context: AgentContext, env: Mapping[str, str]) -> Path | None:
+    """Locate one thread's rollout file; the newest match wins when several exist."""
     pattern = f"sessions/*/*/*/rollout-*-{context.parent_session_id}.jsonl"
-    return any(_codex_home(env).glob(pattern))
+    matches = sorted(_codex_home(env).glob(pattern))
+    return matches[-1] if matches else None
+
+
+def codex_rollout_exists(context: AgentContext, env: Mapping[str, str]) -> bool:
+    return codex_rollout_path(context, env) is not None
 
 
 def preflight_agent(

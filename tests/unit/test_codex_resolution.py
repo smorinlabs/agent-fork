@@ -311,3 +311,31 @@ def test_resolved_name_emits_canonical_uuid(repo_scenario):
         AgentContext("codex", UUID), worktree=Path("/tmp/fork"), name="fork"
     ).command
     assert command == f"codex fork {UUID} -C /tmp/fork"
+
+
+@pytest.mark.matrix("T-SES-42")
+def test_codex_rollout_path_resolves_the_matching_rollout(repo_scenario):
+    from agent_fork.agents import (
+        AgentContext,
+        codex_rollout_exists,
+        codex_rollout_path,
+    )
+
+    _, env = _world(repo_scenario)
+    context = AgentContext("codex", UUID)
+
+    resolved = codex_rollout_path(context, env)
+    assert resolved is not None
+    assert resolved.name == f"rollout-now-{UUID}.jsonl"
+    assert resolved.is_file()
+    assert codex_rollout_exists(context, env) is True
+
+    home = Path(env["CODEX_HOME"])
+    newer = home / "sessions/2026/08/11" / f"rollout-later-{UUID}.jsonl"
+    newer.parent.mkdir(parents=True)
+    newer.write_text("{}\n")
+    assert codex_rollout_path(context, env) == newer
+
+    missing = AgentContext("codex", "019fed92-fa7e-7262-b93e-6bd73a38ac73")
+    assert codex_rollout_path(missing, env) is None
+    assert codex_rollout_exists(missing, env) is False
