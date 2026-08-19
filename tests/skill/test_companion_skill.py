@@ -46,6 +46,8 @@ def test_skill_session_route_also_presents_the_transcript_path() -> None:
     assert "predates the transcript" in text and "contract" in text
     assert "transcript.path" in text
     assert "transcript.exists" in text
+    assert "terminal control characters escaped" in text
+    assert "never printed raw" in text
 
 
 def test_omitted_name_uses_session_context_and_cli_automatic_naming() -> None:

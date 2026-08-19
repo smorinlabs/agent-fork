@@ -36,7 +36,9 @@ place (no new thread, branch, or worktree):
 codex resume 11111111-1111-4111-8111-111111111111 -C /Users/dev/project
 ```
 
-The Transcript row is `transcript.path` verbatim; `(on disk)` renders
+The Transcript row is `transcript.path`, terminal-escaped like every other
+session- and repository-controlled value in this table — it embeds the
+invocation directory — and never otherwise rewritten. `(on disk)` renders
 `transcript.exists: true` and `(not yet written)` renders `false`. Codex
 rollout files are located by search rather than derived, so a Codex
 `transcript.path` is never non-null with `exists: false`; an unlocatable

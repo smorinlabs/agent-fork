@@ -204,7 +204,14 @@ class SessionAssertions:
 
 
 def _claude_transcript(env: Mapping[str, str], cwd: Path, session_id: str) -> Path:
-    root = Path(env.get("CLAUDE_CONFIG_DIR", Path(env.get("HOME", "~")) / ".claude"))
+    # Absolute is part of the reported contract: a relative CLAUDE_CONFIG_DIR,
+    # or an absent HOME leaving the literal "~" fallback, would otherwise emit
+    # a relative transcript path.
+    root = (
+        Path(env.get("CLAUDE_CONFIG_DIR", Path(env.get("HOME", "~")) / ".claude"))
+        .expanduser()
+        .resolve()
+    )
     encoded = re.sub(r"[^a-zA-Z0-9]", "-", str(cwd.resolve()))
     return root / "projects" / encoded / f"{session_id}.jsonl"
 

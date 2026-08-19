@@ -143,15 +143,19 @@ or `unsafe_input`, report the exact status and null command for each.
 
 Also present `transcript`: the absolute path of the file where this session's
 conversation is stored on disk — a Claude Code JSONL transcript or a Codex
-rollout JSONL. When `transcript.path` is a string, show it verbatim under a
-clear label and state whether `transcript.exists` is `true` or `false`; a
+rollout JSONL. When `transcript.path` is a string, show it under a clear label
+with terminal control characters escaped — the path embeds the invocation
+directory, so it is a repository-controlled value like any other and is
+never printed raw — and state whether `transcript.exists` is `true` or
+`false`; a
 `false` value means the path is where the transcript belongs but no file is
 there yet, which is normal early in a session and also happens when the CLI
 was invoked from a directory other than the session's own. When
 `transcript.path` is `null`,
 report that the transcript could not be located and do not guess a path.
-Never read, summarize, copy, or quote the file's contents — this field is a
-location only.
+Escaping makes the value safe to display; it never licenses rewriting,
+shortening, or re-encoding the path itself. Never read, summarize, copy, or
+quote the file's contents — this field is a location only.
 
 ### Print only the current session's fork command
 

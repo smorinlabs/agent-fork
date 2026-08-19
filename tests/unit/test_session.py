@@ -800,6 +800,21 @@ def test_transcript_resolution_uses_identity_and_disk_state(repo_scenario, monke
     assert codex_missing.transcript.path is None
     assert codex_missing.transcript.exists is False
 
+    # The reported path is absolute even when the configured root is not:
+    # a relative CLAUDE_CONFIG_DIR, or an absent HOME leaving the literal "~".
+    relative_root = session_module.inspect_session(
+        {**claude_env, "CLAUDE_CONFIG_DIR": "relative/claude-dir"},
+        cwd=world.parent_path,
+    )
+    assert relative_root.transcript.path is not None
+    assert relative_root.transcript.path.is_absolute()
+
+    tilde_root = session_module._claude_transcript(
+        {"CLAUDECODE": "1"}, world.parent_path, "claude-child"
+    )
+    assert tilde_root.is_absolute()
+    assert "~" not in str(tilde_root)
+
     with pytest.raises(ValueError, match="cannot exist"):
         session_module.SessionTranscript(None, True)
 
