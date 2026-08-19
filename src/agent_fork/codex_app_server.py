@@ -168,7 +168,7 @@ def _query_threads(
             )
             reply = response(2)
             if "error" in reply:
-                return ()
+                raise _failure("thread/read failed")
             result = reply.get("result")
             thread = result.get("thread") if isinstance(result, dict) else None
             if not isinstance(thread, dict) or thread.get("id") != thread_id:

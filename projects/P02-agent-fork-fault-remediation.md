@@ -393,8 +393,16 @@ swept with the rest.
 - [ ] [P02-T11] A11 fix per process
 - [ ] [P02-TS12] A12 adversarial verification (incl. Codex): hang/interrupt and untracked-hook execution repros
 - [ ] [P02-T12] A12 fix per process
-- [ ] [P02-TS13] A13 adversarial verification (incl. Codex): verify all eight sub-items; split into follow-up tasks if warranted
-- [ ] [P02-T13] A13 fixes per process (per surviving sub-item; batched confirmation acceptable per owner)
+- [x] [P02-TS13] A13 adversarial verification (incl. Codex) — **MIXED, EXECUTED 2026-08-17.** Confirmed: (a) one notice appears on both streams; (b) `table` and `text` were byte-identical on six public surfaces; (c) a real Codex `thread/read` error became successful `not_found` with no notice; (d) all three line parsers truncated newline paths and public fork rolled back a valid worktree; (g) ordinary cleanup, without public `--force`, reported `dirty_count: 0` and destroyed distinct child-only ignored `.env`/`local.db` bytes; (h1) parent peak RSS above baseline was about 3.0 times staged binary bytes. Partially refuted: (e) one ITA magic collision copied correctly, but two overlapping patterns double-applied an ordinary patch and rolled back; issue #29 is the same fault; (f) no-remote “unpushed” classification is correct, but “push first” omits remote setup. Refuted on current main: (h2) A1 already uses `untracked_set`; production timing was approximately linear through 500,000 plus 500,000 paths. T13 is split below, with no H2 task.
+- [ ] [P02-T13] A13 remediation umbrella — close after the three separate remediations merge
+  - [x] [P02-T13A] Emit completed-fork notices once on stderr while preserving JSON `notices[]`; RED/GREEN and final gates are recorded in the [A13 design and evidence record](../docs/superpowers/plans/2026-08-18-p02-a13-small-fault-remediation.md)
+  - [x] [P02-T13B] Remove the byte-identical `table` CLI value and make `text` the default; implementation complete, with R4.1 and R9.3 release blockers recorded in `CONFORMANCE.md`
+  - [x] [P02-T13C] Preserve typed Codex `thread/read` failure semantics, parent-name evidence, and parent-assertion honesty
+  - [ ] [P02-T13D] Make worktree parsing newline-safe without breaking the Git 2.19 floor; tracked separately in [issue #46](https://github.com/smorinlabs/agent-fork/issues/46)
+  - [x] [P02-T13E] Treat every ITA-derived operand as a literal Git pathspec; implements the remediation for issue #29, which can close after merge
+  - [x] [P02-T13F] Explain remote setup when cleanup refuses unpushed commits in a repository with no remote
+  - [ ] [P02-T13G] Prevent cleanup from deleting changed ignored worktree-local data; tracked separately in [issue #44](https://github.com/smorinlabs/agent-fork/issues/44)
+  - [ ] [P02-T13H1] Bound staged-binary materialization memory; tracked separately in [issue #45](https://github.com/smorinlabs/agent-fork/issues/45)
 - [ ] Regression Test Status
 
 ### Deliverable

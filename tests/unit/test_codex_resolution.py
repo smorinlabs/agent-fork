@@ -302,6 +302,61 @@ def test_thread_read_returns_name_and_parent(repo_scenario, tmp_path):
     assert result.name == "hello" and result.forked_from_id == "parent"
 
 
+@pytest.mark.matrix("T-SES-39")
+def test_thread_read_valid_no_parent_is_distinct_from_failure(repo_scenario, tmp_path):
+    from agent_fork.codex_app_server import read_thread
+
+    repo_scenario()
+    server = _server(
+        tmp_path,
+        [
+            {"result": {}},
+            {"result": {"thread": {"id": UUID, "name": "hello"}}},
+        ],
+    )
+    result = read_thread(str(server), UUID, {})
+    assert result is not None
+    assert result.name == "hello"
+    assert result.forked_from_id is None
+
+
+@pytest.mark.matrix("T-SES-40")
+def test_thread_read_json_rpc_error_is_typed(repo_scenario, tmp_path):
+    from agent_fork.codex_app_server import read_thread
+    from agent_fork.errors import SessionResolutionUnavailableError
+
+    repo_scenario()
+    server = _server(
+        tmp_path,
+        [
+            {"result": {}},
+            {"error": {"code": -32601, "message": "unsupported"}},
+        ],
+    )
+    with pytest.raises(SessionResolutionUnavailableError, match="thread/read failed"):
+        read_thread(str(server), UUID, {})
+
+
+@pytest.mark.matrix("T-SES-41")
+def test_thread_read_malformed_result_is_typed(repo_scenario, tmp_path):
+    from agent_fork.codex_app_server import read_thread
+    from agent_fork.errors import SessionResolutionUnavailableError
+
+    repo_scenario()
+    server = _server(
+        tmp_path,
+        [
+            {"result": {}},
+            {"result": {"thread": {"name": "missing-id"}}},
+        ],
+    )
+    with pytest.raises(
+        SessionResolutionUnavailableError,
+        match="thread/read returned an unsupported schema",
+    ):
+        read_thread(str(server), UUID, {})
+
+
 @pytest.mark.matrix("T-EMT-07")
 def test_resolved_name_emits_canonical_uuid(repo_scenario):
     from agent_fork.agents import AgentContext, build_launch_command

@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 404 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 413 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -44,6 +44,7 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 | T-CFG-15 | agent-mode precedence is CLI > environment > config > `auto` | baseline | U | live | REQ-45; D16 |
 | T-CFG-16 | invalid configured agent mode is rejected as `config_error` | baseline | U | live | REQ-45; D16 |
 | T-CFG-17 | Codex session-name resolution defaults on and obeys CLI > config precedence | agent=codex | U | live | REQ-46; D17 |
+| T-CFG-18 | output defaults to `text`; only `text` and `json` are valid effective values; an explicit fork output overrides an invalid lower-precedence `AGENT_FORK_OUTPUT` value | baseline | U | live | P02 A13(b); REQ-14; R5.1 |
 
 ---
 
@@ -253,7 +254,7 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-09 | binary file, staged → cached `--binary` diff applies with `--index`, child byte-identical | baseline | F | live | REQ-21; RESEARCH §2.2 step 1 |
 | T-MAT-10 | binary file, unstaged → uncached `--binary` diff applies without `--index`, child byte-identical | baseline | F | live | REQ-21; RESEARCH §2.2 step 2 |
 | T-MAT-11 | rename+edit → child reflects the rename with edited content; manifest oracle confirms old path absent and new path's content correct | baseline | F | live | REQ-21; RESEARCH §2.2 |
-| T-MAT-12 | intent-to-add file transported → cached diff uses `--ita-invisible-in-index`, working-tree patch uses plain `apply`, child is marked via `add --intent-to-add`, child shows `␠A` (`␠` denotes the leading status-column space) not `??`, and existing index entries remain intact | baseline | F | live | REQ-21 (A3) |
+| T-MAT-12 | intent-to-add files are transported as literal paths, including overlapping pathspec-pattern names and a name beginning `:(glob)`; ordinary changed files apply once; child bytes, `␠A` status (`␠` denotes the leading status-column space), and existing index entries remain exact | baseline | F | live | REQ-21 (A3); P02 A13(e); issue #29 |
 | T-MAT-13 | empty directory in parent → documented absence in child (git-visible state copy only; empty-dir expectation declared per mode) | baseline | F | live | REQ-21; spec §6.5 |
 | T-MAT-14 | submodule present → treated opaque, gitlink OID (mode-160000) compared, submodule contents pruned from manifest; fixture built with command-scoped `-c protocol.file.allow=always` | baseline | F | live | RESEARCH §2.1 step 6; spec §6.3; RESEARCH §4 |
 | T-MAT-15 | parent strictly read-only during materialize → full manifest+index snapshot before/after, byte-identical | baseline | F | live | REQ-21; spec §6.5 item 3 |
@@ -385,12 +386,13 @@ the group.
 | T-CLN-15 | flag combination — `--force` with `--no-input` and no `--yes` → fail, exit 2 (`--force` never substitutes for consent) | baseline | C | live | REQ-33; DESIGN-DECISIONS D12 |
 | T-CLN-16 | `cleanup --force --dry-run` on a dirty worktree reports each at-risk path and performs no mutation | baseline | C | live | issue #16 sections 1–2; REQ-18; REQ-32 |
 | T-CLN-17 | dirty-worktree refusal enumerates modified and untracked paths with porcelain statuses and names `--allow-dirty` | baseline | C | live | issue #16 sections 1 and 3; REQ-32 |
-| T-CLN-18 | unpushed-commit refusal enumerates each abbreviated SHA and subject and names `--allow-unpushed` | baseline | C | live | issue #16 sections 1 and 3; REQ-32 |
+| T-CLN-18 | unpushed-commit refusal with a configured remote enumerates each abbreviated SHA and subject, names `--allow-unpushed`, and retains `push first` guidance | baseline | C | live | issue #16 sections 1 and 3; REQ-32 |
 | T-CLN-19 | dirty enumeration is capped at 10 entries with the remaining count reported in human and JSON errors | baseline | C | live | issue #16 sections 1 and 4; REQ-17 |
 | T-CLN-20 | `--allow-dirty` and `--allow-unpushed` override only their named guard | baseline | C | live | issue #16 section 3; REQ-32; DESIGN-DECISIONS D12 |
 | T-CLN-21 | JSON refusal and `--force --dry-run` result carry matching dirty and unpushed `details` objects | baseline | C | live | issue #16 section 4; REQ-17; REQ-18 |
 | T-CLN-22 | `--allow-dirty` and `--allow-unpushed` never override the invoking-cwd refusal | baseline | C | live | issue #16 section 3; REQ-32; DESIGN-DECISIONS D12 |
 | T-CLN-23 | Human cleanup diagnostics escape terminal control bytes in Git-controlled paths and commit subjects while JSON preserves the values | baseline | C | live | PR #17 late security review; issue #16 sections 1 and 4; REQ-17 |
+| T-CLN-24 | unpushed-commit refusal with no configured remote explains remote setup; JSON preserves the existing error code and `details` object | baseline | C | live | P02 A13(f); REQ-17; REQ-32 |
 
 ---
 
@@ -454,7 +456,7 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-06 | error object shape on stderr — single `{"error":{"code","message"}}` under any machine format | baseline | C | live | REQ-17 |
 | T-OUT-07 | every code in the authoritative stable error catalog round-trips correctly in the `-o json` error object — asserted individually | baseline | C | live | REQ-17 |
 | T-OUT-08 | `--dry-run` output lists every planned mutation (branch, worktree path, files-to-carry counts, paste command) and states validation was local-only | baseline | C | live | REQ-18 |
-| T-OUT-09 | clipboard copy failure emits a stderr notice; exit code is unaffected | baseline | C | live | DESIGN-DECISIONS D9 |
+| T-OUT-09 | clipboard copy failure is absent from human stdout, emits exactly one stderr notice, remains in JSON `notices[]`, and does not affect the exit code | baseline | C | live | DESIGN-DECISIONS D9; REQ-16; REQ-17; P02 A13(a) |
 | T-OUT-10 | non-C locale row — `-o json` machine output is byte-identical regardless of process locale | locale=non-C | C | live | REQ-38 R9.4 |
 | T-OUT-11 | `fork -o json` success object carries the REQ-17 minimum fields — `agent`, `parent_session_id`, `fork.branch`, `fork.worktree`, `fork.anchor_commit`, `fork.mode` (state-carry booleans), `verification` (per-check results), `command`, `notices[]` | baseline | C | live | REQ-17 |
 | T-OUT-12 | dry-run reports exact composed destination and mutates nothing | baseline | C | live | D15; REQ-44 |
@@ -511,6 +513,7 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-29 | automatic real fork refuses incomplete Claude input with exit 3 and exact JSON details | agent-signal=incomplete-marker; agent-mode=auto | C | live | P02 A9; REQ-17; REQ-45 |
 | T-CLI-30 | strict real fork refuses incomplete Claude input with exit 3 and exact JSON details | agent-signal=incomplete-id; agent-mode=strict | C | live | P02 A9; REQ-17; REQ-45 |
 | T-CLI-31 | automatic incomplete dry-run refusal emits one stderr JSON error and creates no Git or Agent Fork artifact | agent-signal=incomplete-marker; agent-mode=auto | C | live | P02 A9; REQ-18; REQ-29; R8.6 |
+| T-CLI-32 | every output parser accepts only `text` and `json`; all human-result defaults equal explicit `text`; `table` is rejected; completions omit it; invalid environment output follows each command's existing config-resolution contract | baseline | C | live | P02 A13(b); REQ-10; R4.2; R5.1 |
 
 ---
 
@@ -561,6 +564,11 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 | T-SES-36 | resume-command status depends only on the zero/one/two ambient identity truth table and terminal safety, never lineage availability, mirroring fork-command's contract | baseline | U | live | P04; REQ-50; D21 |
 | T-SES-37 | `document()` includes the additive `resume_command` object alongside `fork_command` | agent=claude | U | live | P04; REQ-50; D21 |
 | T-SES-38 | JSON reports the additive resume-command status/command object and human output prints an exact safe command or explicit unavailable status | baseline | C | live | P04; REQ-50; D21; CLI R7.2 |
+| T-SES-39 | a valid Codex `thread/read` response with no `forkedFromId` returns the current thread with no parent | agent=codex | U | live | P02 A13(c); REQ-47 |
+| T-SES-40 | a Codex `thread/read` JSON-RPC error raises typed unavailable evidence instead of returning valid absence | agent=codex | U | live | P02 A13(c); REQ-47 |
+| T-SES-41 | a Codex `thread/read` result with an unsupported schema raises the existing typed unavailable failure | agent=codex | U | live | P02 A13(c); REQ-47 |
+| T-SES-42 | CLI inspection distinguishes valid no-parent from current-thread failure; parent-name failure preserves the resolved parent ID and marks only its name unavailable | agent=codex | C | live | P02 A13(c); REQ-47 |
+| T-SES-43 | unavailable parent evidence satisfies neither parent-presence assertion, while agent-only and current-session-only assertions remain independent of lineage availability | agent=codex | C | live | P02 A13(c); REQ-47 |
 
 ---
 

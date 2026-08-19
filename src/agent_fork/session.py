@@ -509,6 +509,10 @@ def validate_session(
             actual == assertions.parent_session_id,
         )
     if assertions.has_parent is not None:
+        if inspection.lineage_status == "unavailable":
+            raise SessionValidationError(
+                "session assertion has_parent failed: parent evidence is unavailable"
+            )
         actual = inspection.parent_session is not None
         check(
             "has_parent", assertions.has_parent, actual, actual == assertions.has_parent

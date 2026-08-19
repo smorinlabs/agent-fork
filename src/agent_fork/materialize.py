@@ -162,12 +162,16 @@ def materialize(
                     "--no-color",
                     "--ita-invisible-in-index",
                     "--",
-                    path,
+                    f":(literal){path}",
                 ],
                 env=env,
             ).stdout
             _apply_patch(child, ita_patch, [], env=env)
-            run_git(child, ["add", "--intent-to-add", "--", path], env=env)
+            run_git(
+                child,
+                ["add", "--intent-to-add", "--", f":(literal){path}"],
+                env=env,
+            )
 
         unstaged_args = [
             "diff-files",
@@ -178,7 +182,11 @@ def materialize(
         ]
         if ita_paths:
             unstaged_args.extend(
-                ["--", ".", *(f":(exclude){path}" for path in ita_paths)]
+                [
+                    "--",
+                    ".",
+                    *(f":(exclude,literal){path}" for path in ita_paths),
+                ]
             )
         unstaged = run_git(parent, unstaged_args, env=env).stdout
         unstaged_applied = _apply_patch(child, unstaged, [], env=env)

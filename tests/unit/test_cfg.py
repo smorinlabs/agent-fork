@@ -131,15 +131,15 @@ def test_precedence_chain_flags_beat_env_beat_config_file(repo_scenario):
     from agent_fork.config import resolve_config
 
     sources = (
-        {"branch_prefix": "system/", "output": "system"},
-        {"branch_prefix": "user/", "output": "user"},
-        {"branch_prefix": "project/", "output": "project"},
+        {"branch_prefix": "system/", "output": "text"},
+        {"branch_prefix": "user/", "output": "json"},
+        {"branch_prefix": "project/", "output": "text"},
     )
-    env = {"AGENT_FORK_OUTPUT": "env"}
-    resolved = resolve_config(sources=sources, env=env, flags={"output": "flag"})
+    env = {"AGENT_FORK_OUTPUT": "json"}
+    resolved = resolve_config(sources=sources, env=env, flags={"output": "text"})
     assert resolved.branch_prefix == "project/"
-    assert resolved.output == "flag"
-    assert resolve_config(sources=sources, env=env).output == "env"
+    assert resolved.output == "text"
+    assert resolve_config(sources=sources, env=env).output == "json"
 
 
 @pytest.mark.matrix("T-CFG-08")
@@ -172,6 +172,33 @@ def test_env_vars_applied_to_config_path_and_output_format(repo_scenario):
     )
     assert resolved.config_path == path.resolve()
     assert resolved.output == "json"
+
+
+@pytest.mark.matrix("T-CFG-18")
+def test_output_defaults_validates_final_value_and_honors_precedence():
+    """A13(B) — the effective output is text or JSON, with flags winning."""
+    from agent_fork.config import ConfigError, resolve_config
+
+    assert resolve_config().output == "text"
+    assert resolve_config(env={"AGENT_FORK_OUTPUT": "text"}).output == "text"
+    assert resolve_config(env={"AGENT_FORK_OUTPUT": "json"}).output == "json"
+
+    for invalid in ("table", "yaml", ""):
+        with pytest.raises(ConfigError, match="output must be text or json"):
+            resolve_config(env={"AGENT_FORK_OUTPUT": invalid})
+
+    assert (
+        resolve_config(
+            env={"AGENT_FORK_OUTPUT": "table"}, flags={"output": "text"}
+        ).output
+        == "text"
+    )
+    assert (
+        resolve_config(
+            env={"AGENT_FORK_OUTPUT": "table"}, flags={"output": "json"}
+        ).output
+        == "json"
+    )
 
 
 @pytest.mark.matrix("T-CFG-14")

@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 
 
-def _forked(repo_scenario, name):
+def _forked(repo_scenario, name, *, with_remote=True):
     from agent_fork.agents import AgentContext
     from agent_fork.pipeline import ForkRequest, fork
     from conftest import origin
 
-    world = repo_scenario("plain@main", remote=origin())
+    world = repo_scenario("plain@main", remote=origin() if with_remote else None)
     result = fork(
         ForkRequest(
             parent=world.parent_path,
@@ -189,6 +189,50 @@ def test_unpushed_refusal_reports_commit_sha_and_subject(repo_scenario):
     assert short_sha.encode() in completed.stderr
     assert subject.encode() in completed.stderr
     assert b"Override with --allow-unpushed" in completed.stderr
+    assert b"or push first" in completed.stderr
+    assert b"No Git remote is configured" not in completed.stderr
+    assert result.creation.path.exists()
+
+
+@pytest.mark.matrix("T-CLN-24")
+def test_unpushed_refusal_explains_remote_setup_when_none_configured(
+    repo_scenario,
+):
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "no-remote", with_remote=False)
+
+    human = run_cli(["cleanup", "no-remote", "--dry-run"], world.env, world.parent_path)
+    machine = run_cli(
+        ["cleanup", "no-remote", "--dry-run", "--json"],
+        world.env,
+        world.parent_path,
+    )
+
+    assert human.returncode == 5 and human.stdout == b""
+    assert b"cleanup_unpushed_commits" in human.stderr
+    assert b"No Git remote is configured." in human.stderr
+    assert b"Configure one before pushing these commits" in human.stderr
+    assert b"git remote add REMOTE-NAME REMOTE-URL" in human.stderr
+    assert b"or push first" not in human.stderr
+
+    assert machine.returncode == 5 and machine.stdout == b""
+    error = json.loads(machine.stderr)["error"]
+    assert set(error) == {"code", "details", "message"}
+    assert error["code"] == "cleanup_unpushed_commits"
+    assert error["message"] == "refusing to remove fork/no-remote"
+    assert set(error["details"]) == {
+        "dirty",
+        "dirty_count",
+        "dirty_truncated",
+        "unpushed",
+        "unpushed_count",
+        "unpushed_truncated",
+    }
+    assert error["details"]["dirty"] == []
+    assert error["details"]["dirty_count"] == 0
+    assert error["details"]["unpushed_count"] == 1
+    assert len(error["details"]["unpushed"]) == 1
     assert result.creation.path.exists()
 
 

@@ -26,7 +26,7 @@ Two artifacts, one name (locked): an **agent skill** (`agent-fork`) and a **Pyth
 - **REQ-01** The **CLI owns all mechanics**: git-state detection, worktree+branch creation, state materialization, verification, launch-command construction/emission, cleanup. It is fully usable by a human in a bare terminal with no skill involved (R8.2 non-interactive path).
 - **REQ-02** The **skill owns intent routing inside the agent session**: it maps inspection intent and exact `--session`/`--session-only` arguments to `agent-fork session --json`, and fork intent to `agent-fork fork ... --require-agent --json`; it parses machine output and renders the returned result prominently. `--session` includes the exact returned native session-fork command, while `--session-only` prints only that command. It delegates host/session detection, directory inference, command construction, and all Git mechanics to the CLI. No skill-side executable or Git implementation is permitted.
 - **REQ-03** The CLI **self-detects as the primary skill path** when `--agent`/`--parent-session` are absent: it runs as a child of the agent process, so the same environment signals are visible (`CLAUDECODE=1` + `CLAUDE_CODE_SESSION_ID`; `CODEX_THREAD_ID`). Detection ladder per agent is in §5. Explicit flags remain available for direct CLI use and always win (R5.1 spirit).
-- **REQ-04** The skill↔CLI contract is the CLI's **machine output** (`-o json`, R4.2/R7.2): a stable JSON result object (§3.6). The skill parses JSON, never human tables.
+- **REQ-04** The skill↔CLI contract is the CLI's **machine output** (`-o json`, R4.2/R7.2): a stable JSON result object (§3.6). The skill parses JSON, never human output.
 - **REQ-05** Skill distribution: placed for both Claude Code and Codex per the existing skill-placement conventions; the skill's only hard dependency is the CLI being on `PATH` (it reports a clear install hint when missing).
 
 ---
@@ -74,14 +74,14 @@ Positional `[NAME]` = the fork's identity (R2.3): seeds the default branch, deri
 | `--no-verify` | — | bool | verify **on** (D8) | Skip the §4 verification ladder |
 | `--copy` / `--no-copy` | — | bool | D9 | Clipboard assist (stretch) |
 | **`--force`** | — | bool | off | **Amended 2026-08-08 (owner, test-architecture spec A14):** override the `PRODUCT_GIT_MIN` refusal only (stderr warning; verify still on); never overrides correctness refusals |
-| `--output` / `--json` | `-o` | enum | `table` | R4.1 result-output tier |
+| `--output` / `--json` | `-o` | `text`, `json` | `text` | Owner-approved A13(B) interface; R4.1 and R9.3 release blockers are recorded in `CONFORMANCE.md` |
 
 - **REQ-08** All boolean-true defaults get documented `--no-<foo>` negations (R3.6). No prefix abbreviation (R3.10). Long flags kebab-case (R3.3); no short flags beyond the reserved set (R3.4).
 - **REQ-09** `fork` is **not** destructive (creates only) — no confirmation prompt. Collisions and unsafe parent states are **refusals**, not prompts (§4, exit 5).
 
 ### 3.4 Standard options & exit codes
 
-- **REQ-10** Required global core implemented verbatim (R4.1): `-h/--help`, `-V/--version`, `-v/--verbose` (repeatable), `-q/--quiet`, `--config`, `--debug`. Result-output (`-o/--output`, `--json`) on every command that emits result data (`fork`, `cleanup`, `list`, `doctor`, `config view`). Verbosity ladder per R4.4. `--version` prints `agent-fork <semver>` (R4.6).
+- **REQ-10** Required global core is implemented for `-h/--help`, `-V/--version`, `-v/--verbose` (repeatable), `-q/--quiet`, `--config`, and `--debug`. Result output (`-o/--output {text,json}`, `--json`) is available on every command that emits result data (`fork`, `session`, `cleanup`, `list`, `doctor`, `config view`). The owner-approved A13(B) removal of `table` and `text` default are deliberate R4.1 and R9.3 `MUST` nonconformances that block release; they are not waivers. Verbosity follows R4.4. `--version` prints `agent-fork <semver>` (R4.6).
 - **REQ-11** Exit codes (R6.1/R6.2), documented in help + error catalog (R7.12):
 
 | Code | agent-fork meaning |

@@ -80,7 +80,7 @@ def resolve_config(
     agent_mode = DEFAULT_AGENT_MODE
     verify = True
     copy = False
-    output = "table"
+    output = "text"
     config_path: Path | None = None
     claude_extra_args: tuple[str, ...] = ()
     codex_extra_args: tuple[str, ...] = ()
@@ -119,6 +119,8 @@ def resolve_config(
 
     if agent_mode not in {"auto", "strict", "git-only"}:
         raise ConfigError("agent_mode must be auto, strict, or git-only")
+    if output not in {"text", "json"}:
+        raise ConfigError("output must be text or json")
 
     return ResolvedConfig(
         with_state=with_state,
