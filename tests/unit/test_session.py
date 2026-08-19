@@ -131,6 +131,7 @@ def test_validation_constraints_compose(repo_scenario):
         SessionForkCommand,
         SessionInspection,
         SessionResumeCommand,
+        SessionTranscript,
         validate_session,
     )
 
@@ -148,6 +149,7 @@ def test_validation_constraints_compose(repo_scenario):
         resume_command=SessionResumeCommand(
             status="available", command="codex resume child -C /tmp"
         ),
+        transcript=SessionTranscript(None, False),
     )
     result = validate_session(
         inspection,
@@ -174,6 +176,7 @@ def test_validation_mismatch_is_typed(repo_scenario):
         SessionForkCommand,
         SessionInspection,
         SessionResumeCommand,
+        SessionTranscript,
         validate_session,
     )
 
@@ -191,6 +194,7 @@ def test_validation_mismatch_is_typed(repo_scenario):
                 resume_command=SessionResumeCommand(
                     status="not_detected", command=None
                 ),
+                transcript=SessionTranscript(None, False),
             ),
             SessionAssertions(),
         )
@@ -716,4 +720,104 @@ def test_validation_embeds_detected_agent_signal(repo_scenario):
         "status": "detected",
         "present": ["CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID"],
         "missing": [],
+    }
+
+
+@pytest.mark.matrix("T-SES-39")
+def test_transcript_resolution_uses_identity_and_disk_state(repo_scenario, monkeypatch):
+    import agent_fork.session as session_module
+
+    world = repo_scenario()
+
+    no_identity = session_module.inspect_session(world.env, cwd=world.parent_path)
+    assert no_identity.transcript.path is None
+    assert no_identity.transcript.exists is False
+
+    claude_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    absent = session_module.inspect_session(claude_env, cwd=world.parent_path)
+    expected = session_module._claude_transcript(
+        claude_env, world.parent_path, "claude-child"
+    )
+    assert absent.transcript.path == expected
+    assert absent.transcript.exists is False
+
+    expected.parent.mkdir(parents=True)
+    expected.write_text("{}\n")
+    present = session_module.inspect_session(claude_env, cwd=world.parent_path)
+    assert present.transcript.path == expected
+    assert present.transcript.exists is True
+
+    ambiguous = session_module.inspect_session(
+        {**claude_env, "CODEX_THREAD_ID": "codex-thread"}, cwd=world.parent_path
+    )
+    assert ambiguous.transcript.path is None
+    assert ambiguous.transcript.exists is False
+
+    unsafe = session_module.inspect_session(
+        {
+            **world.env,
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_SESSION_ID": "unsafe\x1b]52;c;Zm9v\x07",
+        },
+        cwd=world.parent_path,
+    )
+    assert unsafe.transcript.path is None
+    assert unsafe.transcript.exists is False
+
+    original_which = session_module.shutil.which
+    monkeypatch.setattr(
+        session_module.shutil,
+        "which",
+        lambda name, path=None: (
+            None if name == "codex" else original_which(name, path=path)
+        ),
+    )
+    codex_home = world.parent_path.parent / "codex-home"
+    rollout = codex_home / "sessions/2026/08/19" / "rollout-now-codex-thread.jsonl"
+    rollout.parent.mkdir(parents=True)
+    rollout.write_text("{}\n")
+    codex_env = {
+        **world.env,
+        "CODEX_THREAD_ID": "codex-thread",
+        "CODEX_HOME": str(codex_home),
+    }
+    codex = session_module.inspect_session(codex_env, cwd=world.parent_path)
+    assert codex.transcript.path == rollout
+    assert codex.transcript.exists is True
+
+    codex_missing = session_module.inspect_session(
+        {
+            **world.env,
+            "CODEX_THREAD_ID": "absent-thread",
+            "CODEX_HOME": str(codex_home),
+        },
+        cwd=world.parent_path,
+    )
+    assert codex_missing.transcript.path is None
+    assert codex_missing.transcript.exists is False
+
+    with pytest.raises(ValueError, match="cannot exist"):
+        session_module.SessionTranscript(None, True)
+
+
+@pytest.mark.matrix("T-SES-40")
+def test_document_includes_transcript(repo_scenario):
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+    claude_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    result = inspect_session(claude_env, cwd=world.parent_path)
+    document = result.document()
+    assert result.transcript.path is not None
+    assert document["transcript"] == {
+        "path": str(result.transcript.path),
+        "exists": False,
     }
