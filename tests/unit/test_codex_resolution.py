@@ -157,6 +157,40 @@ def test_malformed_app_server_is_typed(repo_scenario, tmp_path):
         list_named_threads(str(server), "hello", {})
 
 
+@pytest.mark.matrix("T-PRE-30")
+def test_app_server_closed_stdin_is_typed_under_default_sigpipe(
+    repo_scenario, tmp_path
+):
+    import signal
+
+    from agent_fork.codex_app_server import list_named_threads
+    from agent_fork.errors import SessionResolutionUnavailableError
+
+    repo_scenario()
+    # The server closes its stdin BEFORE answering the initialize request, so
+    # by the time the client sends its next message the pipe's read end is
+    # deterministically gone (the response acts as an ordering barrier).
+    server = tmp_path / "codex"
+    server.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os,sys,time\n"
+        "sys.stdin.readline()\n"
+        "os.close(0)\n"
+        'print(\'{"id":1,"result":{}}\',flush=True)\n'
+        "time.sleep(5)\n"
+    )
+    server.chmod(0o755)
+    # cli.main() sets SIGPIPE to SIG_DFL for the real CLI's stdout contract;
+    # reproduce that disposition so a raw write here would be fatal, then
+    # assert the adapter still surfaces the typed failure instead of dying.
+    previous = signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    try:
+        with pytest.raises(SessionResolutionUnavailableError, match="closed its input"):
+            list_named_threads(str(server), "hello", {})
+    finally:
+        signal.signal(signal.SIGPIPE, previous)
+
+
 @pytest.mark.matrix("T-PRE-17")
 def test_resolved_stale_rollout_is_accurate(repo_scenario, monkeypatch):
     from agent_fork.agents import AgentContext, preflight_agent

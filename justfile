@@ -52,5 +52,20 @@ strict-collect:
 clean-install:
     bash scripts/check_clean_install.sh
 
-# Format, lint, typecheck, and hermetic tests
-all: fmt lint typecheck test
+# Bump the version everywhere: part = major | minor | patch | an explicit X.Y.Z
+bump part:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{part}}" in
+      major|minor|patch) uv version --bump "{{part}}" ;;
+      *)                 uv version "{{part}}" ;;
+    esac
+    uv run python scripts/sync_versions.py
+    git diff --stat
+
+# Verify every version site matches pyproject.toml
+version-check:
+    uv run python scripts/sync_versions.py --check
+
+# Format, lint, typecheck, version sync, and hermetic tests
+all: fmt lint typecheck version-check test
