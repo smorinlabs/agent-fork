@@ -143,7 +143,7 @@ transcript: unavailable
 | `README.md` | Document the field, both storage layouts, and the directory-encoding caveat. |
 | `projects/P05-session-transcript-path.md` | The item's own project file. |
 | `PROJECTS.md` | Trunk row for P05. |
-| `pyproject.toml`, `uv.lock`, `tests/cli/test_cli.py`, `scripts/check_clean_install.sh` | Version `1.1.0` to `1.2.0`, all written by `just bump minor`. |
+| `pyproject.toml`, `uv.lock`, `tests/cli/test_cli.py`, `scripts/check_clean_install.sh`, `README.md`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json` | Version `1.1.0` to `1.2.0`, all eight written by `just bump minor`. |
 
 ---
 
@@ -891,7 +891,13 @@ survive.
 
 **Files:**
 - Modify: `pyproject.toml:3`, `uv.lock`, `tests/cli/test_cli.py:43`,
-  `scripts/check_clean_install.sh:12` — all written by the command below
+  `scripts/check_clean_install.sh:12`, `README.md`,
+  `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, and
+  `.claude-plugin/marketplace.json` — **eight** sites, all written by the
+  command below. (Corrected after the live run: an earlier draft listed only
+  the first four. `scripts/sync_versions.py` also syncs both plugin manifests,
+  the marketplace listing, and a README version string. Stage all eight or
+  `just version-check` fails.)
 
 **Interfaces:**
 - Consumes: nothing.
@@ -1201,8 +1207,21 @@ make check && just all && just check-matrix
 ```
 
 Expected: all green. `just all` covers `fmt`, `lint`, `typecheck`,
-`version-check`, and the hermetic test suite; the suite should report four more
-passing tests than before this plan.
+`version-check`, and the hermetic test suite; the suite should report **five**
+more passing tests than before this plan — the four matrix-marked tests plus
+the unmarked skill-contract test from Task 7. (Corrected after the live run:
+an earlier draft said four, having overlooked that skill tests carry no matrix
+marker. Observed: 479 passed, 1 skipped, 9 deselected.)
+
+Also run the wheel-build conformance check, which is neither in `just all` nor
+in CI's matrix gate and is what actually failed CI on PR #47:
+
+```bash
+just clean-install
+```
+
+Expected: exit 0, having built `agent_fork-1.2.0` and smoke-tested the entry
+point in a disposable venv.
 
 - [ ] **Step 4: Verify the feature by hand against a real session**
 
