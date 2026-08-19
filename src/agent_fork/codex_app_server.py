@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import os
 import selectors
+import signal
 import subprocess
 import time
 from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib.metadata import version
 from typing import cast
@@ -29,6 +31,25 @@ class CodexThread:
     forked_from_id: str | None = None
 
 
+@contextmanager
+def _sigpipe_ignored():
+    """Keep a write to the app-server's closed stdin raising BrokenPipeError.
+
+    The CLI runs with SIGPIPE at SIG_DFL (cli.main restores it for its own
+    stdout contract), which would otherwise kill the process on such a write
+    before the exception could be raised.
+    """
+    if not hasattr(signal, "SIGPIPE"):
+        yield
+        return
+    previous = signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+    try:
+        yield
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGPIPE, previous)
+
+
 def _failure(detail: str) -> SessionResolutionUnavailableError:
     return SessionResolutionUnavailableError(
         f"Codex session-name resolution unavailable: {detail}; pass the canonical "
@@ -45,6 +66,10 @@ def _query_threads(
     thread_id: str | None = None,
 ) -> tuple[CodexThread, ...]:
     """Return bounded exact-name candidates through Codex-owned state access."""
+    # Resolved before the spawn: the metadata read costs milliseconds, and any
+    # delay between Popen and the first stdin write widens the window in which
+    # a short-lived app-server can exit before the handshake reaches it.
+    client_version = version("agent-fork")
     try:
         process = subprocess.Popen(
             [executable, "app-server", "--listen", "stdio://"],
@@ -70,11 +95,12 @@ def _query_threads(
 
     def send(message: dict[str, object]) -> None:
         payload = json.dumps(message, separators=(",", ":")).encode() + b"\n"
-        try:
-            stdin.write(payload)
-            stdin.flush()
-        except (BrokenPipeError, OSError) as error:
-            raise _failure("app-server closed its input") from error
+        with _sigpipe_ignored():
+            try:
+                stdin.write(payload)
+                stdin.flush()
+            except (BrokenPipeError, OSError) as error:
+                raise _failure("app-server closed its input") from error
 
     def response(request_id: int) -> dict[str, object]:
         while time.monotonic() < deadline:
@@ -123,7 +149,7 @@ def _query_threads(
                 "params": {
                     "clientInfo": {
                         "name": "agent-fork",
-                        "version": version("agent-fork"),
+                        "version": client_version,
                     }
                 },
             }
@@ -217,7 +243,13 @@ def _query_threads(
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=0.5)
-        process.stdin.close()
+        # A failed send leaves its payload in the BufferedWriter, and close()
+        # retries that flush against the dead pipe — same SIGPIPE hazard.
+        with _sigpipe_ignored():
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
         process.stdout.close()
         process.stderr.close()
 
