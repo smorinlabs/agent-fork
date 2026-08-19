@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 404 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 408 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -561,6 +561,10 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 | T-SES-36 | resume-command status depends only on the zero/one/two ambient identity truth table and terminal safety, never lineage availability, mirroring fork-command's contract | baseline | U | live | P04; REQ-50; D21 |
 | T-SES-37 | `document()` includes the additive `resume_command` object alongside `fork_command` | agent=claude | U | live | P04; REQ-50; D21 |
 | T-SES-38 | JSON reports the additive resume-command status/command object and human output prints an exact safe command or explicit unavailable status | baseline | C | live | P04; REQ-50; D21; CLI R7.2 |
+| T-SES-39 | transcript resolution derives the Claude path from identity and directory, discovers the Codex rollout by glob, and reports no path for an unsafe ID or absent identity | baseline | U | live | P05; REQ-47; REQ-50 |
+| T-SES-40 | `document()` includes the additive `transcript` object alongside `fork_command` and `resume_command` | agent=claude | U | live | P05; REQ-47; REQ-50 |
+| T-SES-41 | JSON reports the additive transcript path/exists object and human output prints an escaped path with its on-disk state or an explicit unavailable line | baseline | C | live | P05; REQ-47; REQ-50; CLI R7.2 |
+| T-SES-42 | Codex rollout resolution returns the newest matching rollout file and stays consistent with the existence probe | agent=codex | U | live | P05; REQ-46; REQ-50 |
 
 ---
 
