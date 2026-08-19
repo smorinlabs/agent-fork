@@ -1,0 +1,880 @@
+# P02-A12 — Repository setup-hook execution policy
+
+This document defines `P02-T12`, the remediation for fault A12 in the P02
+fault-remediation project. The intended reader is the engineer who implements
+or reviews A12. The required action is to replace today's unconditional,
+unbounded, invisible setup-hook execution with a disclosed, provenance-gated,
+process-group-bounded one — without turning a `SHOULD`-tier convenience
+(`REQ-24`) into a fatal fork step.
+
+Terms used throughout:
+
+- **setup hook** — `.agent-fork/worktree-setup.sh`, an executable script that
+  lives in the *repository being forked*, not in agent-fork's own source.
+  agent-fork owns the execution mechanism; the consuming repository supplies
+  the content, exactly as `npm` owns `postinstall` and the package supplies it.
+- **anchor** — `WorktreeCreation.anchor`, the commit SHA the new worktree was
+  created at (`repository.create_worktree_at_anchor()`). The child's `HEAD`
+  equals it; `verify_fork()` already asserts that.
+- **eligible** — the hook is committed in the anchor's tree as a regular blob
+  *and* the bytes on disk in the child are identical to that blob.
+- **process group** — the POSIX group created by `start_new_session=True`, so
+  `os.killpg()` reaches the hook and every process it spawned.
+
+The CLI interface review below uses CLI Design Standard 1.4.14 at the existing
+publishable tier. A12 adds flags, configuration keys, machine-output fields,
+and a diagnostic row. It adds no commands, no network access, no streaming, no
+plugins, and no interactive behavior.
+
+| P02 gate | State |
+|---|---|
+| 1. Adversarial verification, including Codex | **CONFIRMED-WITH-CORRECTION** on 2026-08-17; executed evidence recorded below |
+| 2. Owner scope decision | **three constraints settled**; recorded below. Four open questions remain, listed at the end |
+| 3. Design document | **this document** |
+| 4. Implementation plan and adversarial review, including Codex | pending |
+| 5. Test-driven implementation | pending |
+| 6. Adversarial implementation review, including Codex | pending |
+
+---
+
+## Outcome required
+
+After A12, a fork that reaches the setup-hook step must satisfy all of the
+following.
+
+1. **Disclosed before it runs.** `fork --dry-run` states the hook path, whether
+   it is present, whether it is eligible, whether it would run, and the
+   timeout. `doctor` reports the same facts for the current worktree.
+2. **Provenance-gated by default.** Only a hook committed at the anchor and
+   byte-identical on disk runs. An untracked or modified hook is skipped with a
+   named reason, and runs only under an explicit opt-in.
+3. **Opt-out.** `--no-setup-hook` and a matching `[fork]` config key stop the
+   step entirely, before any eligibility check or execution.
+4. **Bounded.** Execution has a timeout. The hook runs in its own process
+   group, so a timeout kills the hook *and its children*, not just the shell.
+5. **Reaped on interruption.** `SIGINT`/`SIGTERM` to the CLI kills and reaps the
+   whole hook process group before rollback removes the worktree.
+6. **Correct interrupt exit code.** After rollback the CLI exits `130`
+   (`SIGINT`) or `143` (`SIGTERM`) with a rendered error, not a traceback and
+   exit `1`.
+7. **Visible outcome.** Human output shows the hook running and whether it
+   succeeded. Successful output is retained in a bounded form instead of being
+   discarded.
+8. **Structured for machines.** `--json` carries one `setup_hook` object with
+   path, eligibility, ran/skipped plus reason, exit code, timed-out flag, and
+   duration — and stdout stays exactly one JSON line, with no progress text.
+
+Non-goals, stated so the reviewer does not expect them: hook failure stays
+**non-fatal** (`REQ-24` is a `SHOULD`), and the pipeline order fixed by the
+test-architecture spec (`docs/superpowers/specs/2026-08-08-test-architecture-design.md:105`)
+is unchanged — the hook still runs after `.worktreeinclude` and before the
+registry write.
+
+---
+
+## Gate-1 evidence
+
+`P02-TS12` recorded **CONFIRMED-WITH-CORRECTION, 2026-08-17**. The executed
+repro produced these facts:
+
+| # | Observed | Mechanism in current code |
+|---|---|---|
+| 1 | A real fork executed an **index-untracked** hook | `include.py:97` tests only `hook.is_file()` |
+| 2 | A `sleep 30` hook still had the CLI process, the hook shell, and the sleeper alive after **4.026 s** | `include.py:107-109` calls `subprocess.run(...)` with no `timeout=` |
+| 3 | Successful stdout/stderr was swallowed | `include.py:112-113` returns `()` when `returncode == 0` |
+| 4 | No dedicated opt-out existed | no flag, no `_FORK_KEYS` entry (`config.py:21-29`) |
+| 5 | Neither `--dry-run` nor `doctor` disclosed the hook | `DryRunOutput` (`output.py:84-127`) and `run_doctor()` (`doctor.py:89-179`) have no hook field or check |
+| 6 | Parent-only `SIGINT` removed the worktree and branch in **59.081 ms**, killed the direct hook shell, but **orphaned its sleeper under PID 1** | `subprocess.run()` kills only the direct child on exception, and the hook is not started with `start_new_session=True`, so descendants survive reparenting |
+| 7 | The CLI exited **1 with a traceback** instead of **130** | `OperationInterrupted` (`rollback.py:19`) derives from `BaseException`; `main()` catches only `Exception` (`cli.py:1257`), so it escapes uncaught |
+
+Fact 7 is a **conformance gap against text this repository already publishes**,
+not a new requirement:
+
+- `REQUIREMENTS.md:132` (`REQ-22`): "Signals mid-pipeline trigger the same
+  rollback (exit 130/143)."
+- `README.md:526-527`: "**Interrupts are handled.** SIGINT and SIGTERM exit 130
+  and 143 after rollback where applicable."
+
+The gap survived because the matrix rows that prove it — `T-RBK-03` and
+`T-RBK-04` — assert at the *library* boundary. `tests/pipeline/test_rbk.py:133-143`
+forks a worker that calls `run_with_rollback()` directly, catches
+`OperationInterrupted`, and calls `os._exit(error.exit_code)` itself. Nothing
+exercises `main()`'s exception handling under a signal, so `main()` never had
+to translate the exception. A12 must add that missing CLI-level row.
+
+---
+
+## Settled owner constraints
+
+These three are decided. The design accommodates them; it does not relitigate
+them.
+
+1. **A timeout cannot undo side effects.** A hook killed at 120 s may already
+   have pushed a branch, written `~/.npmrc`, or mutated shared repository
+   configuration. The timeout bounds *duration*, not *blast radius*, and every
+   user-facing string must say so rather than implying a rollback of the hook's
+   own work.
+2. **Tracked proves provenance, not safety.** A committed hook is one a
+   reviewer *could* have read; it is not one that is safe. The eligibility gate
+   is a trust boundary against a *cloned repository silently running new code
+   on the next fork*. It is not a sandbox and must never be described as one.
+3. **Error messaging alone is insufficient.** The nonzero-exit notice path at
+   `include.py:112-116` already exists and is not the fix. A12 must add
+   controls — visibility, policy, bounded process-group execution and reaping,
+   correct signal exit codes — not better prose.
+
+A fourth boundary follows from `REQ-24`'s `SHOULD` tier and is asserted here as
+a design decision rather than an owner ruling: **an ineligible hook is skipped,
+not refused.** A refusal would make a `SHOULD`-tier step able to fail a fork,
+which contradicts both `REQ-24` and `T-INC-04`. Skipping is loud (a notice, a
+structured reason, a doctor row) and recoverable (commit the hook, or pass the
+override).
+
+---
+
+## Scope boundary
+
+In scope:
+
+- `src/agent_fork/include.py` — eligibility, process-group execution, reaping,
+  bounded output capture, the `SetupHookResult` type;
+- `src/agent_fork/git.py` — promote the existing `_signal_process_group()`
+  helper to a public name so include.py reuses it rather than copying it;
+- `src/agent_fork/rollback.py` — `interrupt()` also terminates an active hook
+  group;
+- `src/agent_fork/pipeline.py` — thread the anchor, policy, and a progress
+  callback in; carry `SetupHookResult` out on `ForkResult`;
+- `src/agent_fork/cli.py` — flags, dry-run disclosure, progress line,
+  `OperationInterrupted` handling;
+- `src/agent_fork/config.py` — three new `[fork]` keys and their validation;
+- `src/agent_fork/output.py` — the `setup_hook` document in `ForkOutput` and
+  `DryRunOutput`;
+- `src/agent_fork/doctor.py` — one additional check;
+- `src/agent_fork/errors.py` — two interrupt error codes;
+- tests and the documents listed under "Documentation and conformance".
+
+Out of scope, with reasons:
+
+- **Sandboxing or restricting the hook's environment.** A2 closed the
+  environment-hardening item and explicitly left "the setup hook runs after
+  verification with an inherited environment and can write shared repository
+  configuration" as a *named, visible gap* (register lines 128-131 and
+  142-146, issue #38). A12 does not reopen it; the eligibility gate is a
+  disclosure and provenance control, not a confinement control.
+- **The duplicate-notice defect.** `output.py:79` renders notices into stdout
+  and `cli.py:624-625` reprints them on stderr. That is A13(a), now tracked as
+  `P02-T13ABF`. A12 must not add the hook's *success* status to `notices` (it
+  would double-print through the same defect) and must not fix the defect
+  either.
+- **Streaming the hook's output live.** Deferred; see "Known limits".
+- **Making hook failure fatal.** Contradicts `REQ-24`.
+
+---
+
+## Design options
+
+Three axes carry real choices. Each is presented with its options, then one
+recommended combination.
+
+### Axis A — process ownership and reaping
+
+**A1 — mirror `run_git`, with a local active-process slot. (recommended)**
+
+Replace `subprocess.run()` with `subprocess.Popen(..., start_new_session=True)`
+and reuse the escalation ladder that `git.py:106-130` already runs for Git.
+Add a module-local `_ACTIVE = threading.local()` slot and
+`terminate_active_setup_hook()` in `include.py`, exactly parallel to
+`git.py:14` and `git.py:73-78`. `rollback.interrupt()` calls both terminators.
+
+Promote `git.py:_signal_process_group()` to the public
+`signal_process_group()`, unchanged. Its docstring encodes hard-won behavior —
+macOS can report `EPERM` after another signal killed the group leader but
+before `Popen` reaped it, so it re-polls before falling back to a direct-child
+signal. `T-RBK-07` exists solely to pin that. Copying the function would
+duplicate a regression the repository has already paid for once.
+
+- Cost: one rename, one new module-local slot, one extra call in `interrupt()`.
+- Benefit: identical shape to the only other subprocess primitive in the
+  codebase, so a reviewer verifies it by comparison.
+
+**A2 — a shared active-child registry module.**
+
+Introduce `process.py` owning `signal_process_group()`, an active-process
+registry, and the reap ladder; `git.py` and `include.py` both register into it,
+and `interrupt()` sweeps the registry.
+
+- Cost: a new module and a refactor of the Git path, which A1 leaves untouched.
+- Benefit: a third subprocess site (the Codex app-server, the agent version
+  probes) would get reaping for free.
+- Rejected for now: the repository's scope rules say do not build an
+  abstraction for what is currently two call sites. A2 is the right shape *if*
+  a later item needs the third; A12 should not pre-pay for it.
+
+**A3 — `subprocess.run(timeout=...)` plus `os.setsid` and a `killpg` on timeout.**
+
+The minimal patch: keep `run()`, add `timeout=`, add
+`preexec_fn=os.setsid`, and `killpg` in the `TimeoutExpired` handler.
+
+- Rejected: it closes the timeout orphan but **not** the signal orphan, which
+  is the actual Gate-1 finding (fact 6). `subprocess.run()` kills only the
+  direct child when an exception unwinds through it, and
+  `OperationInterrupted` is raised from a signal handler *inside* the wait, so
+  the group is never signalled. `preexec_fn` is also documented as unsafe in
+  the presence of threads, where `start_new_session=True` is the supported
+  spelling of the same thing.
+
+### Axis B — the eligibility check
+
+**B1 — two Git plumbing calls compared by digest. (recommended)**
+
+Evaluated **in the child, immediately before execution**:
+
+1. `git -C <child> ls-tree -z <anchor> -- .agent-fork/worktree-setup.sh`
+   → zero entries means `untracked`; a mode of `120000` (symlink) or `160000`
+   (gitlink) means `not_a_regular_blob`; otherwise keep the blob OID.
+2. `git -C <child> cat-file blob <oid>` → the committed bytes.
+3. `Path.lstat()` on the child's hook → a symlink or non-regular file means
+   `not_a_regular_blob`.
+4. `hashlib.sha256` of the committed bytes versus `sha256` of the child's
+   on-disk bytes → unequal means `modified`; equal means `eligible`.
+
+Why the *child* and not the parent: `materialize()` carries the parent's
+staged, unstaged, and untracked state into the new worktree. A parent-side-only
+check would pass on the committed copy while the child executes a modified
+one. Checking the file that is about to be executed is the only version of this
+check that means anything.
+
+Why digest comparison and not `git hash-object`: `hash-object` on a path
+applies the path's clean filter and text conversion, so a repository with a
+filter on `.agent-fork/**` could make differing bytes hash equal. Comparing raw
+committed bytes to raw on-disk bytes has no such escape.
+
+Why not `100755`-only eligibility: a committed-but-non-executable hook is
+already covered by `T-INC-04`, which asserts the `setup hook failed to start`
+notice. Folding executability into eligibility would silently change that row's
+meaning. Mode is reported in the structured result; it does not gate.
+
+**B2 — reuse `content.py`'s `capture_state()` / `compare_states()` on the single hook path.**
+
+- Rejected: `content.py` is inventory-shaped. `collect_inventory()` runs five
+  Git commands to build the *set of carried paths*, and `capture_state()`
+  walks the index and manifest for all of them. Restricting it to one path
+  means constructing a synthetic `Inventory` and discarding almost all of the
+  result. It also compares parent-to-child, which is not the question A12
+  asks — A12 compares child-to-*anchor*.
+
+**B3 — `git status --porcelain -- <hook>` emptiness as the clean test.**
+
+- Rejected on this repository's own evidence. A1 (`P02-TS01`, CONFIRMED
+  2026-08-16) demonstrated *status-preserving content divergence*: with
+  `apply.whitespace=fix`, child bytes diverged while porcelain status stayed
+  identical and verification reported `passed: true`. Using status as a
+  byte-equality oracle is the exact mistake A1 exists to have corrected.
+
+### Axis C — surfacing successful hook output
+
+**C1 — bounded tails always in the structured result; human echo on failure, timeout, or `--debug`. (recommended)**
+
+- Capture stdout and stderr separately (they already are separate pipes).
+- Bound each to its **last 4096 bytes** before decoding, then run
+  `escape_terminal_text()` (`text.py:23`) over the result. The hook's output is
+  repository-controlled and directly attacker-chosen — that is the premise of
+  `T-INC-07` — so the success path needs the same escaping the failure path
+  already has.
+- Record `stdout_bytes` / `stderr_bytes` totals and a `truncated` flag so a
+  consumer can see that a bound was applied rather than inferring it.
+- Human mode prints a one-line status always; it echoes the tails to stderr
+  only when the hook failed, timed out, or `--debug` is set.
+- 4096 bytes is chosen as large enough for a realistic dependency-install
+  failure and small enough to keep a single JSON line manageable. The existing
+  house precedent for bounded detail is `verify.DETAIL_LIMIT = 5`, which bounds
+  *items*; bytes are the right unit for a free-form stream.
+
+**C2 — a new `--verbose` flag gating the echo in both modes.**
+
+- Rejected: a machine consumer cannot be expected to pass an extra flag to get
+  a field it needs, and a bounded field costs nothing when the hook is quiet.
+  `--debug` already exists (`cli.py:67`) and already means "include debugging
+  diagnostics", so C1 reuses it rather than adding a near-synonym.
+
+**C3 — spool full output to a file under `XDG_STATE_HOME` and print the path.**
+
+- Rejected for v1: it creates a new artifact class with no lifecycle, no
+  cleanup path, and a new leak surface (a hook that prints a token would write
+  it to disk). Worth reconsidering only if a real hook's output routinely
+  exceeds the bound.
+
+### Recommended combination
+
+| Axis | Choice | One-line rationale |
+|---|---|---|
+| A | **A1** | Same shape as `run_git`; closes both the timeout orphan and the signal orphan; smallest diff that is actually correct |
+| B | **B1** | Compares the bytes that will execute against the bytes that were committed, immune to filters and to the status oracle A1 disproved |
+| C | **C1** | Output is never discarded, never unbounded, always escaped, and needs no new flag |
+
+---
+
+## Contracts
+
+### Policy resolution
+
+```
+disabled   := not resolved.setup_hook            # --no-setup-hook wins over everything
+unreviewed := resolved.allow_unreviewed_setup_hook
+timeout    := resolved.setup_hook_timeout        # seconds, > 0
+```
+
+| `setup_hook` | Hook present | Eligible | Override | Outcome |
+|---|---|---|---|---|
+| `false` | any | any | any | `status="disabled"`, never executed, eligibility not evaluated |
+| `true` | no | — | — | `status="absent"` |
+| `true` | yes | yes | any | `status="ran"` |
+| `true` | yes | no | `false` | `status="skipped"`, `reason` names the eligibility failure |
+| `true` | yes | no | `true` | `status="ran"`, eligibility reported as observed |
+
+`--no-setup-hook` dominates the override: disabled means disabled. Eligibility
+is still *reported* when the override is on, so the structured result never
+hides that unreviewed code ran.
+
+### Flags and configuration keys
+
+Following the `--verify` / `[fork] verify` pairing already in the repository
+(`cli.py:145-150`, `config.py:27`, README's `[fork]` table):
+
+| Flag | argparse form | `[fork]` key | Type | Default |
+|---|---|---|---|---|
+| `--setup-hook` / `--no-setup-hook` | `BooleanOptionalAction`, `default=None` | `setup_hook` | bool | `true` |
+| `--allow-unreviewed-setup-hook` / `--no-allow-unreviewed-setup-hook` | `BooleanOptionalAction`, `default=None` | `allow_unreviewed_setup_hook` | bool | `false` |
+| `--setup-hook-timeout SECONDS` | `type=int`, `default=None` | `setup_hook_timeout` | int (seconds) | `120` |
+
+Config plumbing:
+
+- `setup_hook` and `allow_unreviewed_setup_hook` join `_FORK_KEYS` and
+  `_BOOL_KEYS` (`config.py:21-30`).
+- `setup_hook_timeout` joins `_FORK_KEYS` and needs a new `_INT_KEYS = {"setup_hook_timeout"}`
+  validated as a positive `int` — note that `isinstance(True, int)` is true in
+  Python, so the check must reject `bool` explicitly. A value `<= 0` raises
+  `ConfigError` (exit 2). There is deliberately **no** "no timeout" sentinel:
+  an unbounded hook is the fault A12 exists to close.
+- `ConfigValues` and `ResolvedConfig` (`models.py`) gain the three fields;
+  `resolve_config()` gains three assignment blocks.
+- `set_user_value()` gains int coercion so `config set setup_hook_timeout 300`
+  round-trips. A11 (`P02-TS11`) confirmed that `config validate` currently
+  passes values that later crash `fork`; A12 must not add a fourth such key, so
+  the positive-integer check lives in `load_config()`, where validation runs,
+  not only at the point of use.
+
+### `SetupHookResult`
+
+```python
+@dataclass(frozen=True)
+class SetupHookResult:
+    path: str                    # always ".agent-fork/worktree-setup.sh"
+    present: bool
+    policy: str                  # "run" | "disabled"
+    eligibility: str             # "eligible" | "untracked" | "modified"
+                                 #  | "not_a_regular_blob" | "absent" | "unchecked"
+    status: str                  # "ran" | "skipped" | "disabled" | "absent"
+                                 #  | "failed_to_start"
+    reason: str | None           # populated for "skipped" and "failed_to_start"
+    exit_code: int | None        # None unless status == "ran"
+    timed_out: bool
+    duration_seconds: float | None
+    timeout_seconds: int
+    stdout_tail: str             # escaped, bounded
+    stderr_tail: str             # escaped, bounded
+    stdout_bytes: int            # pre-bound totals
+    stderr_bytes: int
+    truncated: bool
+    notices: tuple[str, ...]
+```
+
+`eligibility == "unchecked"` occurs only when the override is on *and* the Git
+plumbing could not answer (no anchor, or the path is not inside a worktree). It
+is a reporting state, never a way to run a hook that policy would skip.
+
+### Function signature
+
+```python
+def run_setup_hook(
+    repo_root: Path,
+    child: Path,
+    *,
+    anchor: str,
+    policy: SetupHookPolicy,
+    env: Mapping[str, str] | None = None,
+) -> SetupHookResult:
+```
+
+The two positional parameters are unchanged so the diff at the call sites stays
+readable. The return type changes from `tuple[str, ...]` to
+`SetupHookResult`; the failure-notice strings inside `.notices` stay
+**byte-identical** so `T-INC-04`'s assertion
+(`"setup hook failed (exit 17): deliberate"`) and `T-INC-07`'s escaping
+assertion survive with only a `.notices` attribute access added.
+
+`pipeline.fork()` passes `anchor=creation.anchor`, builds `SetupHookPolicy`
+from the resolved config, and carries the result out on a new
+`ForkResult.setup_hook` field. The normative pipeline order is unchanged.
+
+### Execution and reaping
+
+```python
+process = subprocess.Popen(
+    [str(hook)],
+    cwd=child,
+    env=environment,
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    start_new_session=True,
+)
+```
+
+`stdin=subprocess.DEVNULL` is a deliberate behavior change, and it follows from
+`start_new_session=True`: a new session has no controlling terminal, so a hook
+that reads the inherited TTY would block or take a `SIGTTIN` rather than fail
+cleanly. `DEVNULL` gives it a defined EOF instead. This is recorded in
+"Known limits" as a compatibility note.
+
+Reap ladder, used identically on the timeout path and the signal path, matching
+`git.py:117-127`:
+
+1. `signal_process_group(process, SIGTERM)`
+2. `process.wait(timeout=1)`
+3. on `TimeoutExpired`: `signal_process_group(process, SIGKILL)`
+4. `process.wait(timeout=1)`
+5. on a second `TimeoutExpired`: give up and append a notice naming the PID —
+   cleanup stays best-effort so the original interruption remains observable.
+
+Timeout path:
+
+```python
+try:
+    stdout, stderr = process.communicate(timeout=policy.timeout_seconds)
+except subprocess.TimeoutExpired:
+    _reap(process)
+    stdout, stderr = process.communicate()   # drains the pipes; the group is dead
+    timed_out = True
+```
+
+The second `communicate()` cannot hang: every process that could still hold the
+pipe write end was in the group and has been `SIGKILL`ed. The result is
+`status="ran"`, `timed_out=True`, and a non-fatal notice —
+**the fork still succeeds**, because a timeout is a hook problem, not a
+worktree problem, and the settled constraints say the timeout cannot undo what
+the hook already did.
+
+Signal path: `rollback.interrupt()` fires inside `communicate()`, calls both
+`terminate_active_git()` and `terminate_active_setup_hook()`, and raises
+`OperationInterrupted`. `run_setup_hook()` wraps `communicate()` in
+`except BaseException: _reap(process); raise` with a `finally` that clears the
+active slot — again the `run_git` shape. `run_with_rollback()` then rolls back
+and re-raises. Because the group is reaped *before* rollback, nothing is still
+writing into the directory being removed, which is precisely the ordering that
+produced the PID-1 orphan in Gate-1 fact 6.
+
+### Interrupt exit codes
+
+Three ways to give `main()` a `130`/`143` path were considered. The constraint
+that decides it is `T-OUT-14`
+(`tests/cli/test_out.py:455-482`), which parses every `src/agent_fork/*.py`
+file and asserts that the set of `code = "<literal>"` class attributes equals
+`set(ERROR_CATALOG)` exactly. A catalog entry without a class fails it, and a
+class without an entry fails it.
+
+| Option | Shape | Verdict |
+|---|---|---|
+| **I-a** | One catalog code `interrupted` at `ErrorSpec(130, ...)`, one class, and a per-instance `exit_code` of `143` for `SIGTERM` | Rejected: silently breaks the catalog's one-code-one-exit-code invariant |
+| **I-b** | No catalog change; an ad-hoc `render_interrupt()` emitting a non-catalog `interrupted` code | Rejected: publishes a machine code that `STABLE_ERROR_CODES` does not list, so consumers cannot enumerate it |
+| **I-c** | Two codes, two classes, strict 1:1 | **Recommended** |
+
+I-c, concretely:
+
+```python
+# errors.py
+"interrupted_sigint":  ErrorSpec(130, "interrupted by SIGINT after rollback"),
+"interrupted_sigterm": ErrorSpec(143, "interrupted by SIGTERM after rollback"),
+```
+
+with two `AgentForkError` subclasses carrying those codes. `main()` gains, ahead
+of the existing `except Exception` clause:
+
+```python
+except OperationInterrupted as error:
+    translated = INTERRUPT_ERRORS[error.signum]("interrupted after rollback")
+    print(render_error(translated, machine=machine), file=sys.stderr)
+    return translated.exit_code
+```
+
+`OperationInterrupted` itself stays a `BaseException` so pipeline-internal
+`except Exception` handlers (`pipeline.py:181`) still cannot swallow it.
+
+For completeness outside the `run_with_rollback()` window — during preflight,
+naming, or dry-run, where no worktree exists to roll back — `main()` also
+catches `KeyboardInterrupt` and returns `130` without a traceback. `SIGTERM`
+there retains its default disposition, which already yields `143` at the shell.
+
+README's exit-code table gains the two codes on its existing `130 / 143` row,
+which currently reads `—`.
+
+### `fork` output
+
+Human (`text` and `table`), on **stderr**, so stdout stays the paste-command
+surface:
+
+```
+setup hook: running .agent-fork/worktree-setup.sh (timeout 120s)
+setup hook: ok in 0.42s
+```
+
+and the other terminal lines:
+
+```
+setup hook: failed (exit 17) in 0.31s; fork kept
+setup hook: timed out after 120s; process group terminated. Changes it already made are not undone
+setup hook: skipped — present but not committed at the fork anchor (run it anyway with --allow-unreviewed-setup-hook)
+setup hook: skipped — present but modified since the fork anchor (run it anyway with --allow-unreviewed-setup-hook)
+setup hook: disabled (--no-setup-hook)
+```
+
+The running line is emitted through a new optional
+`ForkRequest.progress: Callable[[str], None] | None = None`. `_fork_cli()`
+supplies a closure writing to `sys.stderr`; library callers get silence by
+default. Rendering stays in the CLI layer, which is why the callback is
+preferred over printing from `include.py`.
+
+**In `--json` mode the progress line is suppressed entirely.** In machine mode
+stderr is reserved for exactly one JSON error object
+(`README.md:542`, `render_error(machine=True)`); interleaving plain progress
+text would break a consumer that parses stderr as JSON.
+
+The success status is **not** appended to `ForkResult.notices`. Notices are
+rendered into stdout by `output.py:79` *and* reprinted on stderr by
+`cli.py:624-625` — the A13(a) duplicate-notice defect, tracked as
+`P02-T13ABF`. Adding a success notice would double-print through it. Failure,
+timeout, and skip reasons stay in `notices` for backward compatibility.
+
+`ForkOutput.document()` gains one additive top-level key, always present:
+
+```json
+"setup_hook": {
+  "path": ".agent-fork/worktree-setup.sh",
+  "present": true,
+  "policy": "run",
+  "eligibility": "eligible",
+  "status": "ran",
+  "reason": null,
+  "exit_code": 0,
+  "timed_out": false,
+  "duration_seconds": 0.418,
+  "timeout_seconds": 120,
+  "output": {
+    "stdout": "installed 42 packages\n",
+    "stderr": "",
+    "stdout_bytes": 22,
+    "stderr_bytes": 0,
+    "truncated": false
+  }
+}
+```
+
+Absent hook:
+
+```json
+"setup_hook": {"path": ".agent-fork/worktree-setup.sh", "present": false,
+               "policy": "run", "eligibility": "absent", "status": "absent",
+               "reason": null, "exit_code": null, "timed_out": false,
+               "duration_seconds": null, "timeout_seconds": 120,
+               "output": {"stdout": "", "stderr": "", "stdout_bytes": 0,
+                          "stderr_bytes": 0, "truncated": false}}
+```
+
+Emitting the object unconditionally gives consumers one stable shape, matching
+A9's additive-object precedent for `agent_signal`. `json_line()` sorts keys, so
+field order is automatic.
+
+### `fork --dry-run` disclosure
+
+Dry-run evaluates the same predicate **parent-side**, against the anchor that
+`resolve_anchor()` returns and the parent's working-tree copy. That is a
+*prediction* of the child state, because `materialize()` has not run yet; the
+document says so with a `prediction: true` field rather than implying certainty.
+
+Human, one line added to `DryRunOutput.render()`:
+
+```
+setup-hook: .agent-fork/worktree-setup.sh; eligible at anchor; would run; timeout 120s
+setup-hook: .agent-fork/worktree-setup.sh; not committed at anchor; would skip; override --allow-unreviewed-setup-hook
+setup-hook: none
+setup-hook: disabled (--no-setup-hook)
+```
+
+JSON, nested under the existing `plan` object so the dry-run schema keeps its
+shape:
+
+```json
+"plan": {
+  "branch": {"...": "unchanged"},
+  "worktree": {"...": "unchanged"},
+  "files_to_carry": {"...": "unchanged"},
+  "setup_hook": {
+    "path": ".agent-fork/worktree-setup.sh",
+    "present": true,
+    "policy": "run",
+    "eligibility": "eligible",
+    "would_run": true,
+    "reason": null,
+    "timeout_seconds": 120,
+    "prediction": true
+  }
+}
+```
+
+`mutation_performed: false` still holds: eligibility runs `ls-tree` and
+`cat-file`, both read-only plumbing.
+
+### `doctor` disclosure
+
+One additional `DoctorCheck`, which needs no JSON schema change because
+`doctor` already emits `checks[]` of `{name, ok, detail}` (`cli.py:710-724`):
+
+```
+ok repository setup hook: .agent-fork/worktree-setup.sh present, eligible at HEAD, policy=run, timeout=120s
+ok repository setup hook: .agent-fork/worktree-setup.sh present, modified since HEAD (would be skipped; override --allow-unreviewed-setup-hook)
+ok repository setup hook: none in /path/to/repo
+ok repository setup hook: disabled by config
+```
+
+**The check is informational: `ok` is always `true`.** Two options were
+weighed. Failing on a present-but-ineligible hook would be actionable, but it
+would also make `doctor` exit 1 in any worktree where someone is mid-edit on
+the hook — and every existing doctor failure is *machine readiness* (a missing
+or too-old binary, invalid config, an unwritable XDG path), not a repository's
+working-tree state. A12's mandate is disclosure, not a new failure mode. The
+detail string still names the exact reason and the exact override flag, so the
+diagnostic value is retained without the false alarm.
+
+`doctor` evaluates against `HEAD` in the cwd's worktree, and the detail says
+`HEAD` explicitly, because `fork` resolves its own anchor
+(`repository.resolve_anchor()`) which can differ — notably on a detached HEAD.
+
+### CLI Design Standard 1.4.14 review scope
+
+| Rule | A12 requirement |
+|---|---|
+| R5.x flags | New flags use `BooleanOptionalAction` with `default=None`, matching `--verify`; the integer flag names its unit in `--help` |
+| R6.1 | `130` / `143` become reachable process exit codes from `main()`; `config_error` (2) covers an invalid timeout |
+| R7.1, R7.6 | Progress and hook diagnostics on stderr; the fork result and the JSON line on stdout |
+| R7.2, R9.3 | `setup_hook` is additive; no existing field changes meaning |
+| R7.8 | Machine failures, including interrupts, remain exactly one JSON error object on stderr |
+| R7.12 | `interrupted_sigint` and `interrupted_sigterm` are published stable codes |
+| R8.6 | `--dry-run` performs no mutation while disclosing the hook |
+| R9.10 | `doctor` names the exact reason a hook would not run and the exact override |
+| R9.14 | Every new behavior gets a permanent matrix row |
+
+Groups not affected and therefore N/A for this scoped review: command structure
+and vocabulary, configuration *precedence* (unchanged — new keys ride the
+existing chain), destructive-action confirmation, networked behavior,
+streaming, plugins, and interactive setup.
+
+---
+
+## Test-driven implementation plan
+
+Every production change follows a demonstrated failing test. New IDs are added
+to `docs/testing/TEST-MATRIX.md` with tier and requirement source, and the
+matrix's "Total rows" line is updated after the rows exist.
+
+Numbering, per the matrix's own convention that IDs are never renumbered:
+`T-INC-06` was never issued and the gap stays — new include rows start at
+**`T-INC-08`**. `T-RBK-07` is taken, so new rollback rows start at
+**`T-RBK-08`**. New CLI rows start at **`T-CLI-32`**, new output-contract rows
+at **`T-OUT-23`**, and new config rows at **`T-CFG-18`**.
+
+### Step 1 — RED: eligibility and policy, `tests/pipeline/test_inc.py`
+
+Tier F (a real repository fixture is required — this is Git plumbing).
+
+| Test ID | Required proof |
+|---|---|
+| `T-INC-08` | A hook committed at the anchor and unchanged on disk runs; `SetupHookResult.eligibility == "eligible"`, `status == "ran"`, `exit_code == 0` |
+| `T-INC-09` | An **untracked** hook carried into the child is skipped by default: the hook's sentinel file does not exist, `eligibility == "untracked"`, `status == "skipped"`, and the notice names the override flag. This is the direct Gate-1 fact-1 regression |
+| `T-INC-10` | A committed hook **modified** in the parent working tree is carried into the child and skipped: `eligibility == "modified"`. Asserted by byte comparison, not by `git status`, per Axis B |
+| `T-INC-11` | With `allow_unreviewed=True`, both the untracked and the modified hook run, and `eligibility` still reports `"untracked"` / `"modified"` rather than being masked |
+| `T-INC-12` | A hook recorded in the anchor tree as a symlink (`120000`), and separately a hook that is a symlink on disk, are both `not_a_regular_blob` and are skipped |
+| `T-INC-13` | Policy disabled: eligibility is never evaluated, no process is spawned (assert the sentinel is absent), `status == "disabled"` |
+| `T-INC-14` | Successful stdout and stderr reach `stdout_tail` / `stderr_tail`; a hook printing more than the bound sets `truncated: true` and the byte totals exceed the tail lengths. This is Gate-1 fact 3 |
+| `T-INC-15` | Success-path output is escaped: a hook printing `ESC[2J` on **stdout with exit 0** renders safely, extending `T-INC-07`'s guarantee from the failure path to the success path |
+
+`T-INC-04` and `T-INC-07` change mechanically only: `T-INC-04` reads
+`result.setup_hook.notices` instead of scanning `result.notices` (the notice
+strings themselves are unchanged, which is the point of the assertion), and
+`T-INC-07` passes `policy=SetupHookPolicy(allow_unreviewed=True)` so its bare
+`tmp_path` child needs no anchor. Its escaping assertion is untouched.
+`T-INC-03` and `T-INC-05` need the hook committed, which `_commit_support()`
+(`tests/pipeline/test_inc.py:17-26`) already does, so they stay green
+unmodified — worth confirming explicitly in the RED run.
+
+### Step 2 — GREEN: `include.py`, `git.py`, `rollback.py`, `pipeline.py`
+
+1. `git.py`: rename `_signal_process_group` → `signal_process_group`, docstring
+   unchanged; update the two internal call sites.
+2. `include.py`: add `SetupHookPolicy`, `SetupHookResult`, `_ACTIVE`,
+   `terminate_active_setup_hook()`, `_eligibility()`, the reap ladder, and the
+   new `run_setup_hook()` body.
+3. `rollback.py`: `interrupt()` calls both terminators.
+4. `pipeline.py`: pass `anchor`, `policy`, and `progress`; carry
+   `SetupHookResult` on `ForkResult`.
+
+### Step 3 — RED then GREEN: timeout and signal reaping
+
+Tier F, marked `requires_process_group_signals`, so they run under
+`just test-signals` and are excluded from `just all` — the same gate
+`T-RBK-03`/`T-RBK-04` use.
+
+| Test ID | File | Required proof |
+|---|---|---|
+| `T-INC-16` | `tests/pipeline/test_inc.py` | A hook that sleeps past a short configured timeout is killed; the fork **succeeds**; `timed_out: true`; and the hook's own long-lived grandchild is gone. Prove the grandchild by having the hook write its background child's PID to a file and asserting the PID is unkillable afterwards. This is Gate-1 fact 2 |
+| `T-RBK-08` | `tests/pipeline/test_rbk.py` | `SIGINT` delivered while the hook is running exits `130`, rolls the worktree back, and leaves **no** surviving process from the hook's group. This is Gate-1 fact 6, the PID-1 orphan |
+| `T-RBK-09` | `tests/pipeline/test_rbk.py` | Same for `SIGTERM` → `143` |
+
+`T-RBK-08`/`T-RBK-09` use `T-RBK-03`'s harness shape
+(`tests/pipeline/test_rbk.py:133-163`): `os.fork()` a worker, wait for a
+readiness sentinel the hook writes, signal the worker, `waitpid`, and assert
+`os.waitstatus_to_exitcode(status)`. The orphan assertion is the new part —
+read the grandchild PID from the sentinel file and assert it no longer exists.
+
+### Step 4 — RED then GREEN: CLI exit codes, dry-run, doctor, JSON
+
+| Test ID | File | Required proof |
+|---|---|---|
+| `T-CLI-32` | `tests/cli/test_cli.py` | `fork --dry-run` human and JSON disclose the hook for all four states (eligible, ineligible, absent, disabled), the JSON carries `prediction: true`, `mutation_performed` stays `false`, and no branch or worktree is created |
+| `T-CLI-33` | `tests/cli/test_cli.py` | `doctor` human and JSON carry the `repository setup hook` row for all four states; overall `ok` is unchanged in every case, proving the check is informational |
+| `T-OUT-23` | `tests/cli/test_out.py` | `fork --json` stdout is exactly one parseable line containing the full `setup_hook` object with **no** progress text; the same fork in `text` mode prints the running and result lines to stderr and leaves stdout byte-identical to today's |
+| `T-CLI-34` | `tests/cli/test_cli.py` | `main()` under a real `SIGINT` during the hook returns `130` and prints a rendered error, not a traceback; the `--json` variant prints exactly one JSON error object on stderr with code `interrupted_sigint`. Marked `requires_process_group_signals`. This is Gate-1 fact 7 and the missing CLI-boundary row |
+| `T-OUT-24` | `tests/cli/test_out.py` | `interrupted_sigint` and `interrupted_sigterm` satisfy the existing catalog-exactness and JSON round-trip invariants (`T-OUT-14`, `T-OUT-15` stay green unmodified) |
+
+### Step 5 — RED then GREEN: configuration
+
+| Test ID | File | Required proof |
+|---|---|---|
+| `T-CFG-18` | `tests/unit/test_cfg.py` | The three keys default to `true` / `false` / `120`; an explicit flag beats a config value; `--no-setup-hook` dominates `allow_unreviewed_setup_hook = true` |
+| `T-CFG-19` | `tests/cli/test_cfg.py` | `config set` / `config get` round-trip all three keys, including integer coercion for `setup_hook_timeout` |
+| `T-CFG-20` | `tests/unit/test_cfg.py` | `setup_hook_timeout = 0`, a negative value, a string, and a boolean each raise `ConfigError`; the CLI exits `2`. Directly guards against repeating the A11 pattern of a key that validates clean and crashes at use |
+
+### Step 6 — Documentation and conformance
+
+Proposed edits, all outside this document and none of them made by it:
+
+- `README.md` — three rows in the `fork` flag table, three rows in the
+  `[fork]` config table, the two interrupt codes on the existing `130 / 143`
+  row, and a rewrite of the two-sentence "Repository hooks" section
+  (`README.md:502-506`) covering the eligibility rule, the timeout, and the
+  explicit statement that a timeout does not undo the hook's side effects;
+- `REQUIREMENTS.md` — amend `REQ-24` to record that the hook is
+  provenance-gated, bounded, and opt-outable while remaining non-fatal;
+  `REQ-22` needs no change, since A12 implements what it already says;
+- `CONFORMANCE.md` — refresh the `REQ-24` evidence row and add one CLI
+  Standard 1.4.14 review-history row; no new waiver expected;
+- `DESIGN-DECISIONS.md` — a new `D22 — Repository setup-hook execution policy`
+  (next free number after `D21`) recording the default-tracked rule, the
+  skip-not-refuse choice, and the timeout default, since those are policy
+  decisions a future reader will otherwise have to re-derive. Proposed here;
+  written only if the owner approves;
+- `docs/testing/TEST-MATRIX.md` — all nineteen new rows (`T-INC-08` through
+  `T-INC-16`, `T-RBK-08`, `T-RBK-09`, `T-CLI-32` through `T-CLI-34`,
+  `T-OUT-23`, `T-OUT-24`, and `T-CFG-18` through `T-CFG-20`), plus the
+  `Total rows:` count, which moves from 404 to 423.
+
+### Step 7 — Gates and review
+
+```bash
+just all
+just test-signals      # T-RBK-08, T-RBK-09, T-INC-16, T-CLI-34
+just check-matrix
+just strict-collect
+just clean-install
+```
+
+Then an adversarial implementation review and an independent Codex second lens
+against the complete A12 diff. Absorb only findings this design promises or
+A12 introduces; route the rest under P02 Gate 6.
+
+---
+
+## Known limits
+
+Stated so no reviewer mistakes them for oversights.
+
+1. **A timeout does not undo the hook's work.** Settled constraint 1. The
+   timeout message says this in words.
+2. **Tracked is not safe.** Settled constraint 2. A malicious committed hook
+   runs exactly as before. The gate stops *new, unreviewed* code from executing
+   on the next fork; it does not evaluate what the code does.
+3. **The eligibility check is read-then-execute.** A racing writer could swap
+   the file between the digest comparison and `Popen`. The window is inside a
+   directory agent-fork created moments earlier, and closing it would need an
+   `O_EXEC`-style handle Python does not portably expose. This belongs to the
+   A8 TOCTOU family and should be reconciled there, not solved here.
+4. **The hook's environment is still inherited.** Out of scope, per A2's named
+   gap (issue #38).
+5. **Output is buffered whole before it is bounded.** `communicate()` holds the
+   full stream in memory; the 4096-byte bound is applied afterwards. A hook
+   printing gigabytes can still exhaust memory. This is true of the current
+   code as well, so A12 does not regress it, but it is a real ceiling that a
+   streaming reader would remove.
+6. **`stdin` becomes `/dev/null`.** A hook that today prompts interactively
+   will now read EOF instead of the user's terminal. This follows from running
+   in a new session and is the correct behavior for an unattended post-fork
+   step, but it is a behavior change worth a README line.
+7. **`doctor` reads `HEAD`, `fork` resolves its own anchor.** On a detached
+   HEAD the two can differ. The doctor detail names `HEAD` so the user is not
+   misled.
+
+---
+
+## Open questions for the owner
+
+Four items need an owner decision; everything else in this document is decided
+with its rationale.
+
+1. **Timeout default.** This document proposes **120 seconds**: long enough for
+   a realistic `uv sync` or `npm ci`, short enough that a hang is caught within
+   a coffee-refill. Alternatives worth a ruling: 300 s (favors heavy
+   dependency installs, tolerates a longer hang) or 60 s (catches hangs fast,
+   will interrupt real installs on a cold cache). Confirm or replace.
+2. **Override flag name.** This document proposes
+   `--allow-unreviewed-setup-hook` / `[fork] allow_unreviewed_setup_hook`,
+   paired with `--setup-hook` / `--no-setup-hook`. The alternative collapses
+   both into one enum, `--setup-hook-policy {tracked,any,off}` with
+   `[fork] setup_hook_policy = "tracked"`, which is one key instead of two but
+   abandons the `--verify` / `--no-verify` boolean-pair convention this CLI
+   uses everywhere else, and drops the literal `--no-setup-hook` spelling the
+   A12 register entry names.
+3. **Whether the success output tail is always in the JSON.** This document
+   says yes, always, bounded at 4096 bytes per stream (option C1). The
+   alternative gates it behind a flag, at the cost of making a machine consumer
+   pass an option to see a field it needs.
+4. **Whether `doctor` may fail on a present-but-ineligible hook.** This
+   document says no — the check is informational so that mid-edit worktrees do
+   not turn `doctor` red, and because every other doctor failure is machine
+   readiness rather than repository working-tree state. Reversing this is a
+   one-line change if the owner prefers a hard signal.
+
+---
+
+## References
+
+- Register entry: `projects/P02-agent-fork-fault-remediation.md` — A12 at lines
+  326-334, `P02-TS12` verdict and `P02-T12` at lines 394-395
+- Gate-1 handoff: `docs/handoffs/2026-08-17-p02-a7-a13-validation.md`
+- Pipeline order: `docs/superpowers/specs/2026-08-08-test-architecture-design.md:105`
+- Prior-art design docs followed for structure:
+  `docs/superpowers/plans/2026-08-18-p02-a09-shared-agent-signal-assessment.md`,
+  `docs/superpowers/plans/2026-08-17-p02-a4-recipe-flag-probe.md`
+- Current implementation: `src/agent_fork/include.py:90-116`,
+  `src/agent_fork/pipeline.py:150-153`, `src/agent_fork/rollback.py:19-42`,
+  `src/agent_fork/git.py:50-78`, `src/agent_fork/cli.py:1257-1268`
+- Contract text A12 closes: `REQUIREMENTS.md:132` (`REQ-22`),
+  `REQUIREMENTS.md:134` (`REQ-24`), `README.md:526-527`
