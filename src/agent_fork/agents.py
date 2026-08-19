@@ -277,7 +277,9 @@ def _codex_home(env: Mapping[str, str]) -> Path:
 def codex_rollout_path(context: AgentContext, env: Mapping[str, str]) -> Path | None:
     """Locate one thread's rollout file; the newest match wins when several exist."""
     pattern = f"sessions/*/*/*/rollout-*-{context.parent_session_id}.jsonl"
-    matches = sorted(_codex_home(env).glob(pattern))
+    matches = sorted(
+        match for match in _codex_home(env).glob(pattern) if match.is_file()
+    )
     return matches[-1] if matches else None
 
 

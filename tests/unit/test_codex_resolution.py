@@ -339,3 +339,20 @@ def test_codex_rollout_path_resolves_the_matching_rollout(repo_scenario):
     missing = AgentContext("codex", "019fed92-fa7e-7262-b93e-6bd73a38ac73")
     assert codex_rollout_path(missing, env) is None
     assert codex_rollout_exists(missing, env) is False
+
+    # Only real files count. A directory or a broken symlink carrying a
+    # rollout-shaped name must never be returned, and — because the newest
+    # match wins — must never shadow the real rollout by sorting after it.
+    shadow_dir = home / "sessions/2026/08/11" / f"rollout-zzz-dir-{UUID}.jsonl"
+    shadow_dir.mkdir()
+    shadow_link = home / "sessions/2026/08/11" / f"rollout-zzzz-link-{UUID}.jsonl"
+    shadow_link.symlink_to(home / "sessions/2026/08/11/absent-target.jsonl")
+    assert not shadow_link.is_file() and shadow_link.is_symlink()
+    assert codex_rollout_path(context, env) == newer
+    assert codex_rollout_exists(context, env) is True
+
+    # With every real file gone, rollout-shaped non-files resolve to nothing.
+    newer.unlink()
+    (home / "sessions/2026/08/10" / f"rollout-now-{UUID}.jsonl").unlink()
+    assert codex_rollout_path(context, env) is None
+    assert codex_rollout_exists(context, env) is False
