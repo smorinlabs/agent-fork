@@ -144,8 +144,8 @@ Or run it once without installing:
 uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
 ```
 
-> PyPI and Homebrew releases land with v1.0.0; after PyPI publication the
-> no-install command becomes simply `uvx agent-fork`.
+> After PyPI publication the no-install command becomes simply
+> `uvx agent-fork`.
 
 **Requirements:** Python 3.11+ and Git 2.19+. Forking an agent session
 additionally needs Claude Code 2.0.73+ or Codex 0.95+ (Codex's native `fork`
