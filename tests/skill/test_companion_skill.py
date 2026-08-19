@@ -146,7 +146,8 @@ def test_stale_cli_contract_reports_a_specific_upgrade_path() -> None:
     assert (
         "uv tool install --force git+https://github.com/smorinlabs/agent-fork" in text
     )
-    assert "contract changed without a version bump" in text
+    assert "not a reliable discriminator" in text
+    assert "fork_command" in text and "did not get one" in text
 
 
 def test_failure_and_success_json_contracts_remain_explicit() -> None:
