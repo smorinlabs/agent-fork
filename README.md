@@ -187,7 +187,8 @@ agent-fork --version
 readlink ~/.claude/skills/agent-fork ~/.agents/skills/agent-fork
 ```
 
-The version command must print `agent-fork 1.0.0`. Both symlinks must resolve
+The version command must print `agent-fork 1.0.0`. <!-- x-release-please-version -->
+Both symlinks must resolve
 to this repository's `.agents/skills/agent-fork` directory.
 
 ### Uninstall
