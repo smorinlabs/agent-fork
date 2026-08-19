@@ -12,6 +12,10 @@ jobs:
   matrix-and-tests:
     name: Matrix, strict collection, and tests
     runs-on: ubuntu-latest
+    # Backstop only. Observed runtime is ~96s; without an explicit bound a job
+    # inherits GitHub's 360-minute default, which is how a hung apt step held a
+    # runner for hours on PR #51.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -22,8 +26,19 @@ jobs:
           prune-cache: true
       - uses: extractions/setup-just@v4
 
+      # zsh and fish are optional: T-CLI-17/18 resolve them with shutil.which()
+      # and skip only the syntax check when absent. Keep the install fatal so a
+      # silent skip never masquerades as coverage — but bound it, and remove the
+      # two ways apt waits forever: the frontend lock held by the image's
+      # unattended-upgrades, and a debconf prompt that --yes does not answer.
       - name: Install completion syntax checkers
-        run: sudo apt-get update && sudo apt-get install --yes zsh fish
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get -o DPkg::Lock::Timeout=120 update
+          sudo apt-get -o DPkg::Lock::Timeout=120 install \
+            --yes --no-install-recommends zsh fish
 
       - name: Check matrix coverage and lifecycle
         run: just check-matrix
@@ -37,6 +52,8 @@ jobs:
   git-compatibility:
     name: Apple Git and Flox Git compatibility
     runs-on: macos-latest
+    # Observed runtime is ~72s; the wider bound covers the Flox install.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -54,6 +71,8 @@ jobs:
   conformance:
     name: Clean-install CLI conformance
     runs-on: ubuntu-latest
+    # Observed runtime is ~33s.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
