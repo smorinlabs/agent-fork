@@ -187,6 +187,7 @@ def test_session_outputs_fork_command_object_or_explicit_status(repo_scenario):
     assert b"fork command: unavailable (unsafe_input)" in unsafe.stdout
 
 
+@pytest.mark.matrix("T-SES-38")
 def test_session_outputs_resume_command_object_or_explicit_status(repo_scenario):
     from conftest import run_cli
 

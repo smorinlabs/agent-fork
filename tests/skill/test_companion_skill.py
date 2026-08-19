@@ -32,6 +32,14 @@ def test_skill_locks_session_and_fork_command_routes() -> None:
     assert "character-for-character" in text
 
 
+def test_skill_session_route_also_presents_the_resume_command() -> None:
+    text = _text()
+    assert "`resume_command`" in text
+    assert "predates the resume_command" in text and "contract" in text
+    assert "rehydrate" in text.lower()
+    assert "Do not execute a returned session fork or resume command." in text
+
+
 def test_omitted_name_uses_session_context_and_cli_automatic_naming() -> None:
     text = _text()
     assert "Resolve the candidate name and confirm it as specified above." in text

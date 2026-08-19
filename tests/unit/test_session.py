@@ -484,6 +484,7 @@ def test_fork_command_status_uses_identity_and_safety_not_lineage(
         session_module.SessionForkCommand("ambiguous", "unexpected")
 
 
+@pytest.mark.matrix("T-SES-36")
 def test_resume_command_status_uses_identity_and_safety_not_lineage(
     repo_scenario, monkeypatch
 ):
@@ -548,6 +549,7 @@ def test_resume_command_status_uses_identity_and_safety_not_lineage(
         session_module.SessionResumeCommand("ambiguous", "unexpected")
 
 
+@pytest.mark.matrix("T-SES-37")
 def test_document_includes_resume_command(repo_scenario):
     from agent_fork.session import inspect_session
 

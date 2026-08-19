@@ -76,7 +76,7 @@ CLI call:
 | Skill form | CLI call | Result |
 |---|---|---|
 | The fork forms | `agent-fork fork ... --require-agent --json` | The branch, the worktree, and the paste command |
-| `--session` | `agent-fork session --json` | The session inspection plus its native fork command |
+| `--session` | `agent-fork session --json` | The session inspection plus its native fork and resume commands |
 | `--session-only` | `agent-fork session --json` | Only that native fork command |
 
 The fork's name comes from one of three places:

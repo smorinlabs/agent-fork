@@ -292,6 +292,7 @@ def test_session_renderer_quotes_shell_values_and_rejects_terminal_controls(
     assert not destination.exists()
 
 
+@pytest.mark.matrix("T-EMT-11")
 def test_claude_session_resume_command_is_byte_exact(repo_scenario):
     from agent_fork.agents import build_session_resume_command
 
@@ -308,6 +309,7 @@ def test_claude_session_resume_command_is_byte_exact(repo_scenario):
     assert built.extra_args == ()
 
 
+@pytest.mark.matrix("T-EMT-12")
 def test_codex_session_resume_command_is_byte_exact(repo_scenario):
     from agent_fork.agents import build_session_resume_command
 
@@ -321,6 +323,7 @@ def test_codex_session_resume_command_is_byte_exact(repo_scenario):
     assert built.extra_args == ()
 
 
+@pytest.mark.matrix("T-EMT-13")
 def test_session_resume_renderer_quotes_shell_values_and_rejects_terminal_controls(
     repo_scenario,
 ):
