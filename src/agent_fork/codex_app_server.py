@@ -9,6 +9,7 @@ import subprocess
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from importlib.metadata import version
 from typing import cast
 
 from agent_fork.errors import SessionResolutionUnavailableError
@@ -119,7 +120,12 @@ def _query_threads(
             {
                 "id": 1,
                 "method": "initialize",
-                "params": {"clientInfo": {"name": "agent-fork", "version": "1.0.0"}},
+                "params": {
+                    "clientInfo": {
+                        "name": "agent-fork",
+                        "version": version("agent-fork"),
+                    }
+                },
             }
         )
         initialized = response(1)
