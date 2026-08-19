@@ -475,6 +475,7 @@ def _render_native_command(
     child_session_id: str | None,
     name: str | None,
     extra_args: tuple[str, ...],
+    mode: Literal["fork", "resume"] = "fork",
 ) -> str:
     """Render the shared native-command grammar with one quoting boundary."""
     values = [str(directory), context.parent_session_id, *extra_args]
@@ -489,6 +490,19 @@ def _render_native_command(
 
     quote = shlex.quote
     suffix = "".join(f" {quote(value)}" for value in extra_args)
+    if mode == "resume":
+        if child_session_id is not None:
+            raise ValueError("resume command must not carry a child session ID")
+        if context.agent == "claude":
+            command = (
+                f"cd {quote(str(directory))} && claude "
+                f"--resume {quote(context.parent_session_id)}{suffix}"
+            )
+            return command.rstrip()
+        return (
+            f"codex resume {quote(context.parent_session_id)} "
+            f"-C {quote(str(directory))}{suffix}"
+        )
     if context.agent == "claude":
         if child_session_id is None:
             raise ValueError("Claude native command requires a child session ID")
@@ -547,6 +561,21 @@ def build_session_fork_command(
         extra_args=(),
     )
     return LaunchCommand(command, child, ())
+
+
+def build_session_resume_command(
+    context: AgentContext, *, directory: Path
+) -> LaunchCommand:
+    """Construct the read-only in-place resume command: no fork, no new session."""
+    command = _render_native_command(
+        context,
+        directory=directory,
+        child_session_id=None,
+        name=None,
+        extra_args=(),
+        mode="resume",
+    )
+    return LaunchCommand(command, None, ())
 
 
 def detect_agent(

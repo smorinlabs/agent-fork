@@ -16,6 +16,7 @@ from agent_fork.agents import (
     UnsafeCommandInputError,
     assess_agent_signals,
     build_session_fork_command,
+    build_session_resume_command,
 )
 from agent_fork.errors import PreconditionError, SessionValidationError
 from agent_fork.lineage import find_lineage
@@ -113,6 +114,29 @@ class SessionForkCommand:
 
 
 @dataclass(frozen=True)
+class SessionResumeCommand:
+    status: SessionForkStatus
+    command: str | None
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            "available",
+            "not_detected",
+            "ambiguous",
+            "unsafe_input",
+        }:
+            raise ValueError(f"unknown session resume command status: {self.status}")
+        if self.status == "available":
+            if not self.command:
+                raise ValueError("available session resume command must be non-empty")
+        elif self.command is not None:
+            raise ValueError("unavailable session resume command must be null")
+
+    def document(self) -> dict[str, object]:
+        return {"status": self.status, "command": self.command}
+
+
+@dataclass(frozen=True)
 class SessionInspection:
     agent: str | None
     current_session: SessionEvidence | None
@@ -121,6 +145,7 @@ class SessionInspection:
     directory: Path
     repository: SessionRepository | None
     fork_command: SessionForkCommand
+    resume_command: SessionResumeCommand
     notices: tuple[str, ...] = ()
     agent_signal: AgentSignalAssessment = field(
         default_factory=lambda: assess_agent_signals({})
@@ -146,6 +171,7 @@ class SessionInspection:
                 self.repository.document() if self.repository is not None else None
             ),
             "fork_command": self.fork_command.document(),
+            "resume_command": self.resume_command.document(),
         }
 
 
@@ -258,6 +284,7 @@ def inspect_session(
             directory=directory,
             repository=repository,
             fork_command=SessionForkCommand("ambiguous", None),
+            resume_command=SessionResumeCommand("ambiguous", None),
             notices=tuple(notices),
             agent_signal=assessment,
         )
@@ -272,6 +299,7 @@ def inspect_session(
             directory=directory,
             repository=repository,
             fork_command=SessionForkCommand("not_detected", None),
+            resume_command=SessionResumeCommand("not_detected", None),
             notices=tuple(notices),
             agent_signal=assessment,
         )
@@ -291,6 +319,14 @@ def inspect_session(
         )
     except UnsafeCommandInputError:
         fork_command = SessionForkCommand("unsafe_input", None)
+
+    try:
+        resume_built = build_session_resume_command(
+            AgentContext(agent, current_id), directory=directory
+        )
+        resume_command = SessionResumeCommand("available", resume_built.command)
+    except UnsafeCommandInputError:
+        resume_command = SessionResumeCommand("unsafe_input", None)
 
     if agent == "claude":
         claude_id = current_id
@@ -365,6 +401,7 @@ def inspect_session(
             directory=directory,
             repository=repository,
             fork_command=fork_command,
+            resume_command=resume_command,
             notices=tuple(notices),
             agent_signal=assessment,
         )
@@ -384,6 +421,7 @@ def inspect_session(
             directory=directory,
             repository=repository,
             fork_command=fork_command,
+            resume_command=resume_command,
             notices=tuple(notices),
             agent_signal=assessment,
         )
@@ -404,6 +442,7 @@ def inspect_session(
             directory=directory,
             repository=repository,
             fork_command=fork_command,
+            resume_command=resume_command,
             notices=tuple(notices),
             agent_signal=assessment,
         )
@@ -417,6 +456,7 @@ def inspect_session(
             directory=directory,
             repository=repository,
             fork_command=fork_command,
+            resume_command=resume_command,
             notices=tuple(notices),
             agent_signal=assessment,
         )
@@ -455,6 +495,7 @@ def inspect_session(
         directory=directory,
         repository=repository,
         fork_command=fork_command,
+        resume_command=resume_command,
         notices=tuple(notices),
         agent_signal=assessment,
     )

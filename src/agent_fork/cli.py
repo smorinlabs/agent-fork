@@ -176,12 +176,13 @@ def _parser() -> argparse.ArgumentParser:
         help="Inspect or validate the current agent session",
         description=(
             "Report agent-neutral current-session evidence and construct its native "
-            "fork command without executing it."
+            "fork command and resume (rehydrate) command without executing either."
         ),
         epilog=(
             "Examples:\n"
-            "  agent-fork session          # human inspection and fork command\n"
-            "  agent-fork session --json   # exact command in fork_command.command\n\n"
+            "  agent-fork session          # human inspection, fork/resume commands\n"
+            "  agent-fork session --json   # exact commands in fork_command.command "
+            "and resume_command.command\n\n"
             "Command availability means constructible, not preflighted."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1099,6 +1100,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"fork command: {fork_command.command}")
             else:
                 print(f"fork command: unavailable ({fork_command.status})")
+            resume_command = inspection.resume_command
+            if resume_command.status == "available":
+                assert resume_command.command is not None
+                print(f"resume command: {resume_command.command}")
+            else:
+                print(f"resume command: unavailable ({resume_command.status})")
             return 0
         if args.command == "cleanup":
             from agent_fork.cleanup import cleanup, resolve_cleanup_target
