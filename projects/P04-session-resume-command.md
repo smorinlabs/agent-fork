@@ -25,18 +25,12 @@ New JSON field `resume_command` (status/command, same status enum as
 CLI subcommand, no new skill argument.
 
 **Out of Scope**
-- Companion skill (`.agents/skills/agent-fork/SKILL.md`) surfacing
-  `resume_command` in its `--session` presentation, and the generated
-  `agents/openai.yaml` metadata. Deferred: `openai.yaml` is generator-managed
-  and regenerating it without the generator risks drift; flagged to the owner
-  as a follow-up rather than hand-edited.
+- The generated `agents/openai.yaml` metadata: it is generator-managed and
+  its `short_description`/`default_prompt` remain accurate (not exhaustive)
+  without a resume mention, so it is left untouched rather than hand-edited
+  without the generator.
 - Registry persistence / re-emitting a *past* fork's session ID (that is
   P03-B2) — this item only concerns the live `session` inspection command.
-- TEST-MATRIX.md row registration (`docs/testing/TEST-MATRIX.md` /
-  `scripts/check_matrix.py`) — new tests were written and pass under
-  `just all`, but were not registered as `T-EMT-11..`/`T-SES-3x` rows to keep
-  this change proportionate to its scope; `check-matrix` is not part of
-  `just all` so this does not fail the standard gate.
 
 ### Tests & Tasks
 - [x] [P04-TS01] RED: byte-exact resume-command template tests
@@ -60,9 +54,38 @@ CLI subcommand, no new skill argument.
       distinction, and the two native command shapes
 - [x] [P04-T05] Version bump `1.0.0` → `1.1.0` in `pyproject.toml` (additive
       JSON field, same class of contract change SKILL.md already documents
-      for `fork_command`)
-- [x] Regression Test Status: `just all` green (fmt, lint, typecheck,
-      hermetic tests) — 460 passed, 1 skipped, 9 deselected
+      for `fork_command`); regenerated `uv.lock` and the hardcoded
+      `--version` test
+- [x] [P04-T06] TEST-MATRIX.md: registered `T-EMT-11..13` and `T-SES-36..38`
+      rows, marked the 6 new tests, updated the total-row count; `just
+      check-matrix` (the CI gate at `.github/workflows/ci.yml:29`, not part
+      of `just all`) is clean
+- [x] [P04-T07] Companion skill: `--session` route in
+      `.agents/skills/agent-fork/SKILL.md` now validates and presents
+      `resume_command` alongside `fork_command` (own "predates the
+      resume_command contract" upgrade path), `--session-only` stays
+      fork-only per the confirmed route decision; both
+      `references/output-{claude,codex}.md` gained a resume-command
+      example; README's skill-routes table row updated to match
+- [x] [P04-T08] Owner-requested targeted quality pass on `session.py`'s
+      `SessionInspection(...)` construction: the six-field repetition across
+      5 of 7 call sites (amplified by `resume_command`) was analyzed with
+      Fable (fresh-context review, no prior bias toward a specific fix).
+      Recommendation: consolidate the 5 shared-tail sites (Claude main +
+      4 Codex sites) behind a local `_inspection(...)` closure — the real
+      risk isn't the repetition itself but the two *defaulted* fields
+      (`notices`, `agent_signal`), where a future site could omit them with
+      no type error and silently drop notices; `dataclasses.replace()` was
+      rejected (would freeze `notices` before the 7 later `.append()` calls
+      and requires a semantically-false placeholder base instance). Leave
+      the 2 early-return sites alone — different shape (literal
+      fork/resume command values, no `current_session` yet), not worth
+      forcing into the same helper. Implemented as recommended, scoped only
+      to this function; `just all` re-run green with identical counts (461
+      passed, 1 skipped, 9 deselected) before and after — pure refactor, no
+      behavior change.
+- [x] Regression Test Status: `just all` and `just check-matrix` green
+      (fmt, lint, typecheck, hermetic tests incl. skill contract tests)
 
 ### Deliverable
 `agent-fork session` (human and `--json`) reports both `fork_command` and
@@ -74,7 +97,11 @@ CLI subcommand, no new skill argument.
   `SessionInspection(...)` constructions gained the new required argument)
 
 ### Manual Verification
-- Not yet performed against a real Claude Code / Codex install — the new
-  commands are read-only string templates verified via the existing
-  shell-injection proof (subprocess execution of the rendered command against
-  a fake `claude`/`codex` binary), the same technique the fork command uses
+- Ran `agent-fork session` in this worktree with real Claude Code session
+  env vars set: output included both
+  `fork command: cd <dir> && claude --session-id <fresh-uuid> --resume
+  <this-session-id> --fork-session` and
+  `resume command: cd <dir> && claude --resume <this-session-id>`.
+  Codex's `-C` flag on `resume` was independently confirmed against the
+  installed `codex resume --help` (not run end-to-end — no live Codex
+  session in this conversation).

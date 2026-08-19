@@ -328,6 +328,25 @@ def inspect_session(
     except UnsafeCommandInputError:
         resume_command = SessionResumeCommand("unsafe_input", None)
 
+    def _inspection(
+        agent: str,
+        current_session: SessionEvidence,
+        parent_session: SessionEvidence | None,
+        lineage_status: str,
+    ) -> SessionInspection:
+        return SessionInspection(
+            agent=agent,
+            current_session=current_session,
+            parent_session=parent_session,
+            lineage_status=lineage_status,
+            directory=directory,
+            repository=repository,
+            fork_command=fork_command,
+            resume_command=resume_command,
+            notices=tuple(notices),
+            agent_signal=assessment,
+        )
+
     if agent == "claude":
         claude_id = current_id
         name, name_status = _claude_name(env, directory, claude_id)
@@ -389,21 +408,15 @@ def inspect_session(
             if inference is not None
             else None
         )
-        return SessionInspection(
-            agent="claude",
-            current_session=current,
-            parent_session=parent,
-            lineage_status="claimed"
+        return _inspection(
+            "claude",
+            current,
+            parent,
+            "claimed"
             if claim is not None
             else inference.status
             if inference
             else "not_found",
-            directory=directory,
-            repository=repository,
-            fork_command=fork_command,
-            resume_command=resume_command,
-            notices=tuple(notices),
-            agent_signal=assessment,
         )
 
     codex_id = current_id
@@ -413,18 +426,7 @@ def inspect_session(
         current = SessionEvidence(
             codex_id, "CODEX_THREAD_ID", name_status="unavailable"
         )
-        return SessionInspection(
-            agent="codex",
-            current_session=current,
-            parent_session=None,
-            lineage_status="unavailable",
-            directory=directory,
-            repository=repository,
-            fork_command=fork_command,
-            resume_command=resume_command,
-            notices=tuple(notices),
-            agent_signal=assessment,
-        )
+        return _inspection("codex", current, None, "unavailable")
     try:
         from agent_fork.codex_app_server import read_thread
 
@@ -434,32 +436,10 @@ def inspect_session(
         current = SessionEvidence(
             codex_id, "CODEX_THREAD_ID", name_status="unavailable"
         )
-        return SessionInspection(
-            agent="codex",
-            current_session=current,
-            parent_session=None,
-            lineage_status="unavailable",
-            directory=directory,
-            repository=repository,
-            fork_command=fork_command,
-            resume_command=resume_command,
-            notices=tuple(notices),
-            agent_signal=assessment,
-        )
+        return _inspection("codex", current, None, "unavailable")
     if thread is None:
         current = SessionEvidence(codex_id, "CODEX_THREAD_ID", name_status="not_found")
-        return SessionInspection(
-            agent="codex",
-            current_session=current,
-            parent_session=None,
-            lineage_status="not_found",
-            directory=directory,
-            repository=repository,
-            fork_command=fork_command,
-            resume_command=resume_command,
-            notices=tuple(notices),
-            agent_signal=assessment,
-        )
+        return _inspection("codex", current, None, "not_found")
     current = SessionEvidence(
         codex_id,
         "CODEX_THREAD_ID",
@@ -487,18 +467,7 @@ def inspect_session(
             "codex-app-server",
             "resolved",
         )
-    return SessionInspection(
-        agent="codex",
-        current_session=current,
-        parent_session=parent,
-        lineage_status="resolved" if parent else "not_found",
-        directory=directory,
-        repository=repository,
-        fork_command=fork_command,
-        resume_command=resume_command,
-        notices=tuple(notices),
-        agent_signal=assessment,
-    )
+    return _inspection("codex", current, parent, "resolved" if parent else "not_found")
 
 
 def validate_session(
