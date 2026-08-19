@@ -374,6 +374,12 @@ Expected: PASS, including every pre-existing test in the file — the preflight
 tests exercise `codex_rollout_exists` and so prove the delegation is
 behavior-neutral.
 
+**Expect `just check-matrix` to fail from here until Task 6.** From this commit
+onward the tree carries `matrix` markers whose rows do not exist yet, so the
+gate reports `CHECK1: <item> cites unknown matrix ID`. That is the designed
+intermediate state — Task 6 registers the rows. Do not "fix" it by deleting a
+marker.
+
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -784,7 +790,7 @@ def test_session_outputs_transcript_path_or_unavailable(repo_scenario):
     unsafe_env = {
         **world.env,
         "CLAUDECODE": "1",
-        "CLAUDE_CODE_SESSION_ID": "unsafe\x1b]52;c;Zm9v\x07\nnext‮",
+        "CLAUDE_CODE_SESSION_ID": "unsafe\x1b]52;c;Zm9v\x07\nnext\u202e",
     }
     unsafe = run_cli(["session"], unsafe_env, world.parent_path)
     assert b"\x1b" not in unsafe.stdout and b"\x07" not in unsafe.stdout
