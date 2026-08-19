@@ -97,11 +97,22 @@ The invariant, exhaustively:
    `exists` is always equivalent to `path is not None`. On Claude the path is
    *derived* from the session ID, so it can be non-null while `exists` is
    `false`. This follows from the two agents' storage layouts.
-2. The Claude path is keyed on the resolved current directory. A session
-   started in a main checkout and inspected from a linked worktree encodes the
-   wrong directory and reports `exists: false`. This limitation is
-   pre-existing — `_claude_name()` already resolves names the same way — and is
-   documented in the README rather than fixed here. Fixing it is out of scope.
+2. The Claude path is keyed on the directory `agent-fork` was invoked in.
+   Invoking it outside the session's own working directory encodes the wrong
+   directory and reports `exists: false`. This limitation is pre-existing —
+   `_claude_name()` already resolves names the same way — and is documented in
+   the README rather than fixed here. Fixing it is out of scope.
+
+   **Empirically corrected 2026-08-19, after Task 8's live run.** An earlier
+   draft of this plan claimed the failure case was "a session started in a main
+   checkout and inspected from a linked worktree". That is wrong: Claude Code
+   re-keys its transcript folder when the session's directory changes, so this
+   very session — started in the main checkout, moved into
+   `.claude/worktrees/p05-session-transcript-path` — resolved to an existing
+   file under the *worktree's* encoded folder, with nothing left under the
+   original. The real failure mode is invoking the CLI from an unrelated
+   directory, verified by running it from the scratchpad and getting
+   `(missing)`.
 
 ## Human output
 

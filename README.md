@@ -76,7 +76,7 @@ CLI call:
 | Skill form | CLI call | Result |
 |---|---|---|
 | The fork forms | `agent-fork fork ... --require-agent --json` | The branch, the worktree, and the paste command |
-| `--session` | `agent-fork session --json` | The session inspection plus its native fork and resume commands |
+| `--session` | `agent-fork session --json` | The session inspection plus its transcript path and its native fork and resume commands |
 | `--session-only` | `agent-fork session --json` | Only that native fork command |
 
 The fork's name comes from one of three places:
@@ -295,6 +295,30 @@ fork:   cd '<resolved-directory>' && claude --session-id '<fresh-child-uuid>' --
 resume: cd '<resolved-directory>' && claude --resume '<current-session-id>'
         codex resume '<current-thread-id>' -C '<resolved-directory>'
 ```
+
+Inspection also reports `transcript`: where this session's conversation is
+stored on disk.
+
+```text
+claude: <CLAUDE_CONFIG_DIR|~/.claude>/projects/<encoded-directory>/<session-id>.jsonl
+codex:  <CODEX_HOME|~/.codex>/sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<thread-id>.jsonl
+```
+
+`transcript.path` is the absolute path and `transcript.exists` says whether a
+file is there right now. The two agents store transcripts differently, and the
+difference is visible in the field. The Claude path is *derived* from the
+session ID and the resolved invocation directory — every non-alphanumeric
+character of that directory becomes `-` — so it can be reported before the
+file is flushed. Because the derivation keys on the directory `agent-fork`
+itself was invoked in, running it from somewhere other than the session's
+working directory derives a path that does not exist and reports
+`exists: false`. Claude Code re-keys its transcript folder when the session's
+directory changes, so an ordinary in-session invocation — including from a
+linked worktree the session moved into — resolves correctly. The Codex path is
+*discovered* by search, because the rollout filename embeds a timestamp, so a
+Codex `transcript.path` is null whenever no rollout matches. A session ID that
+is not `[A-Za-z0-9-]+` never reaches the filesystem and reports a null path.
+Inspection reports the location only; it never reads the transcript.
 
 JSON inspection also reports `agent_signal`, an additive object with
 `status`, `present`, and `missing`. Its status is `absent`, `incomplete`,

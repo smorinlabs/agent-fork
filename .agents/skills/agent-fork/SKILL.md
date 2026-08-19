@@ -146,8 +146,9 @@ conversation is stored on disk — a Claude Code JSONL transcript or a Codex
 rollout JSONL. When `transcript.path` is a string, show it verbatim under a
 clear label and state whether `transcript.exists` is `true` or `false`; a
 `false` value means the path is where the transcript belongs but no file is
-there yet, which is normal early in a session and also happens when the
-session began in a different directory. When `transcript.path` is `null`,
+there yet, which is normal early in a session and also happens when the CLI
+was invoked from a directory other than the session's own. When
+`transcript.path` is `null`,
 report that the transcript could not be located and do not guess a path.
 Never read, summarize, copy, or quote the file's contents — this field is a
 location only.
