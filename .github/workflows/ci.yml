@@ -28,16 +28,20 @@ jobs:
 
       # zsh and fish are optional: T-CLI-17/18 resolve them with shutil.which()
       # and skip only the syntax check when absent. Keep the install fatal so a
-      # silent skip never masquerades as coverage — but bound it, and remove the
-      # two ways apt waits forever: the frontend lock held by the image's
-      # unattended-upgrades, and a debconf prompt that --yes does not answer.
+      # silent skip never masquerades as coverage — but bound it.
+      #
+      # DEBIAN_FRONTEND must ride on each sudo invocation: sudo's default
+      # env_reset drops a step-level env: entry before apt-get ever sees it.
+      # DPkg::Lock::Timeout bounds waits on the dpkg locks; it does not cover
+      # /var/lib/apt/lists/lock, which `update` takes — that one is bounded by
+      # timeout-minutes below, which turns a hang into a fast, visible failure.
       - name: Install completion syntax checkers
         timeout-minutes: 5
-        env:
-          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get -o DPkg::Lock::Timeout=120 update
-          sudo apt-get -o DPkg::Lock::Timeout=120 install \
+          sudo env DEBIAN_FRONTEND=noninteractive \
+            apt-get -o DPkg::Lock::Timeout=120 update
+          sudo env DEBIAN_FRONTEND=noninteractive \
+            apt-get -o DPkg::Lock::Timeout=120 install \
             --yes --no-install-recommends zsh fish
 
       - name: Check matrix coverage and lifecycle

@@ -277,9 +277,11 @@ def _codex_home(env: Mapping[str, str]) -> Path:
 def codex_rollout_path(context: AgentContext, env: Mapping[str, str]) -> Path | None:
     """Locate one thread's rollout file; the newest match wins when several exist."""
     pattern = f"sessions/*/*/*/rollout-*-{context.parent_session_id}.jsonl"
-    matches = sorted(
-        match for match in _codex_home(env).glob(pattern) if match.is_file()
-    )
+    # Absolute is part of the reported contract and a configured CODEX_HOME (or
+    # the HOME fallback) may be relative. Resolve here rather than in
+    # _codex_home() so the preflight existence check keeps its exact behavior.
+    root = _codex_home(env).resolve()
+    matches = sorted(match for match in root.glob(pattern) if match.is_file())
     return matches[-1] if matches else None
 
 

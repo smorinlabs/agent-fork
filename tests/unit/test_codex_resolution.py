@@ -314,7 +314,7 @@ def test_resolved_name_emits_canonical_uuid(repo_scenario):
 
 
 @pytest.mark.matrix("T-SES-42")
-def test_codex_rollout_path_resolves_the_matching_rollout(repo_scenario):
+def test_codex_rollout_path_resolves_the_matching_rollout(repo_scenario, monkeypatch):
     from agent_fork.agents import (
         AgentContext,
         codex_rollout_exists,
@@ -356,3 +356,24 @@ def test_codex_rollout_path_resolves_the_matching_rollout(repo_scenario):
     (home / "sessions/2026/08/10" / f"rollout-now-{UUID}.jsonl").unlink()
     assert codex_rollout_path(context, env) is None
     assert codex_rollout_exists(context, env) is False
+
+    # The reported path is absolute even when the configured root is relative,
+    # for both CODEX_HOME and the HOME fallback — the contract says absolute.
+    relative_home = home.parent / "relative-codex"
+    (relative_home / "sessions/2026/08/12").mkdir(parents=True)
+    (relative_home / "sessions/2026/08/12" / f"rollout-rel-{UUID}.jsonl").write_text(
+        "{}\n"
+    )
+    monkeypatch.chdir(home.parent)
+
+    configured = codex_rollout_path(context, {**env, "CODEX_HOME": "relative-codex"})
+    assert configured is not None and configured.is_absolute()
+
+    fallback_home = home.parent / "relative-home"
+    (fallback_home / ".codex/sessions/2026/08/13").mkdir(parents=True)
+    (
+        fallback_home / ".codex/sessions/2026/08/13" / f"rollout-fb-{UUID}.jsonl"
+    ).write_text("{}\n")
+    fallback_env = {k: v for k, v in env.items() if k != "CODEX_HOME"}
+    fallback = codex_rollout_path(context, {**fallback_env, "HOME": "relative-home"})
+    assert fallback is not None and fallback.is_absolute()
