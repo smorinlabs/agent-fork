@@ -21,6 +21,7 @@ from agent_fork.errors import (
     SessionResolutionUnavailableError,
 )
 from agent_fork.git import PRODUCT_GIT_MIN
+from agent_fork.text import BIDI_CONTROLS
 
 AgentName = Literal["claude", "codex"]
 AgentSignalStatus = Literal["absent", "incomplete", "detected", "ambiguous"]
@@ -164,22 +165,6 @@ _HELP_ARGS: dict[str, tuple[str, ...]] = {
     "codex": ("fork", "--help"),
 }
 _VERSION = re.compile(r"(?<![\d.])(\d+)\.(\d+)(?:\.(\d+))?")
-_BIDI_CONTROLS = frozenset(
-    {
-        "\u061c",
-        "\u200e",
-        "\u200f",
-        "\u202a",
-        "\u202b",
-        "\u202c",
-        "\u202d",
-        "\u202e",
-        "\u2066",
-        "\u2067",
-        "\u2068",
-        "\u2069",
-    }
-)
 
 
 def parse_version(output: str) -> tuple[int, int, int]:
@@ -480,7 +465,7 @@ def _terminal_safe(value: str) -> bool:
     """
     return all(
         not (ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F)
-        and character not in _BIDI_CONTROLS
+        and character not in BIDI_CONTROLS
         for character in value
     )
 

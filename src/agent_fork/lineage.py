@@ -68,7 +68,13 @@ def _decode(path: Path) -> list[LineageClaim]:
         if document.get("version") != LINEAGE_VERSION:
             raise ValueError(f"invalid agent-fork lineage store: {path}")
         return [LineageClaim(**item) for item in document["claims"]]
-    except (OSError, TypeError, KeyError, json.JSONDecodeError) as error:
+    except (
+        OSError,
+        TypeError,
+        KeyError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as error:
         raise ValueError(f"invalid agent-fork lineage store: {path}") from error
 
 

@@ -29,18 +29,25 @@ def _declared_options(parser: argparse.ArgumentParser) -> set[str]:
     return {value for action in parser._actions for value in action.option_strings}
 
 
-@pytest.mark.parametrize("command", SUBCOMMANDS)
-def test_completion_offers_every_declared_option(command):
-    declared = _declared_options(_subcommand_parsers()[command]) - {"-h", "--help"}
-    offered = set(_vocabulary()[f"{command}_options"])
-    missing = sorted(declared - offered)
-    assert not missing, f"{command} completion is missing {missing}"
+@pytest.mark.matrix("T-CLI-33")
+def test_completion_offers_every_declared_option():
+    parsers = _subcommand_parsers()
+    vocabulary = _vocabulary()
+    missing = {}
+    for command in SUBCOMMANDS:
+        declared = _declared_options(parsers[command]) - {"-h", "--help"}
+        offered = set(vocabulary[f"{command}_options"])
+        if declared - offered:
+            missing[command] = sorted(declared - offered)
+    assert not missing, f"completion is missing declared options: {missing}"
 
 
+@pytest.mark.matrix("T-CLI-34")
 def test_completion_offers_every_declared_command():
     assert set(_subcommand_parsers()) <= set(_vocabulary()["commands"])
 
 
+@pytest.mark.matrix("T-CLI-35")
 def test_completion_output_choices_track_the_parser():
     """Output formats offered must be exactly those the parser accepts.
 

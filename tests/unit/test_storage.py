@@ -4,6 +4,8 @@ import json
 import os
 import stat
 
+import pytest
+
 from agent_fork.storage import atomic_write_json
 
 
@@ -11,12 +13,14 @@ def _mode(path):
     return stat.S_IMODE(os.stat(path).st_mode)
 
 
+@pytest.mark.matrix("T-REG-09")
 def test_atomic_write_json_round_trips(tmp_path):
     target = tmp_path / "store.json"
     atomic_write_json(target, {"version": 1, "items": []})
     assert json.loads(target.read_text()) == {"version": 1, "items": []}
 
 
+@pytest.mark.matrix("T-REG-10")
 def test_store_is_owner_only_even_under_a_restrictive_umask(tmp_path):
     """The explicit chmod is load-bearing, not redundant.
 
@@ -34,12 +38,14 @@ def test_store_is_owner_only_even_under_a_restrictive_umask(tmp_path):
     assert json.loads(target.read_text()) == {"version": 1}
 
 
+@pytest.mark.matrix("T-REG-11")
 def test_no_temporary_file_survives_a_successful_write(tmp_path):
     target = tmp_path / "store.json"
     atomic_write_json(target, {"version": 1})
     assert [p.name for p in tmp_path.iterdir()] == ["store.json"]
 
 
+@pytest.mark.matrix("T-REG-12")
 def test_temporary_file_is_not_left_behind_when_serialization_fails(tmp_path):
     """The temp file is created inside the try, so a dump failure cleans up."""
 
@@ -47,15 +53,12 @@ def test_temporary_file_is_not_left_behind_when_serialization_fails(tmp_path):
         pass
 
     target = tmp_path / "store.json"
-    try:
+    with pytest.raises(TypeError):
         atomic_write_json(target, {"bad": Unserializable()})
-    except TypeError:
-        pass
-    else:  # pragma: no cover - defensive
-        raise AssertionError("expected TypeError for an unserializable document")
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.matrix("T-REG-13")
 def test_fsync_false_still_writes_the_document(tmp_path):
     target = tmp_path / "cache.json"
     atomic_write_json(target, {"cached": True}, fsync=False)
