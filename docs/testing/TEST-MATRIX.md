@@ -165,6 +165,8 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-21 | A2 — `GIT_CONFIG_PARAMETERS`, Git's second inline-injection channel, is stripped too; stripping only the `GIT_CONFIG_COUNT` triple left it open | baseline | F | live | PR #36 review; A2 design doc |
 | T-GRD-22 | A6a — a submodule checked out at a commit the parent's index does not record is refused before any mutation (`submodule_unrepresentable`, exit 5); conditional on submodules not being carried, so A6b gates it rather than deleting it | baseline | F | live | A6 design doc §Matrix 1 cell `c` |
 | T-GRD-23 | A6a — the refusal is gated on carrying state, so `--no-with-state` (the remedy the error recommends) is not itself refused | baseline | F | live | A6 design doc §Split |
+| T-GRD-24 | A6a gate-6 — a removed submodule directory is an ordinary `deleted file mode 160000` deletion that transports, so the guard must not refuse it; `--diff-filter=M` is what distinguishes it from an unrepresentable modified gitlink | baseline | F | live | A6 gate-6 finding 1 |
+| T-GRD-25 | A6a gate-6 — a conflicted gitlink reports as unmerged, not modified, so it is excluded by `--diff-filter=M`, and the mid-operation refusal that names the user's real state wins | baseline | F | live | A6 gate-6 finding 3 |
 
 ---
 
@@ -283,6 +285,7 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-24 | A2 transport — the committed/staged/working-tree split survives transport while a diff driver is active (the reason patches exist rather than file copies) | baseline | F | live | REQ-21; A2 design doc |
 | T-MAT-25 | A2 audit — reported staged/unstaged counts match the carried inventory for a staged rename; porcelain rename detection reported one path where transport carries both endpoints | baseline | F | live | A2 design doc §T9 |
 | T-MAT-26 | A6a — the materialize notice names the submodule state that was not carried instead of claiming `submodules copied opaquely` over an empty directory | baseline | F | live | A6 design doc §Matrix 1 correction 5 |
+| T-MAT-27 | A6a gate-6 — a submodule sitting at its recorded commit produces no loss notice; the notice reports only paths whose state the filter suppresses | baseline | F | live | A6 gate-6 finding 4 |
 
 ---
 
@@ -543,6 +546,9 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-33 | every option argparse declares for each subcommand reaches the completion vocabulary — the parity invariant that replaces hand-maintained option lists | baseline | U | live | REQ-10 |
 | T-CLI-34 | every subcommand argparse declares reaches the completion vocabulary | baseline | U | live | REQ-10 |
 | T-CLI-35 | completion output choices are exactly those the parser accepts, so a removed alias cannot linger in completions | baseline | U | live | P02 A13(b); REQ-10 |
+| T-CLI-36 | A6a gate-6 — the console script forwards `--no-with-state` to the submodule guard, so the refusal and its remedy are proven through the real CLI rather than a direct call | baseline | F | live | A6 gate-6 finding 5 |
+| T-CLI-37 | A6a gate-6 — dry-run counts and notices describe the fork that will actually happen: a dirty submodule previews as zero unstaged paths and carries a loss notice | baseline | F | live | A6 gate-6 finding 2 |
+| T-CLI-38 | Every code in `ERROR_CATALOG` appears in the README exit-code table, so a stable identifier cannot ship undocumented | baseline | F | live | A6 gate-6 finding 7 |
 
 ---
 

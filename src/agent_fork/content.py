@@ -139,6 +139,37 @@ def gitlink_paths(root: Path, *, env: Mapping[str, str] | None = None) -> list[s
     return sorted(paths)
 
 
+def suppressed_submodules(
+    root: Path, *, env: Mapping[str, str] | None = None
+) -> list[str]:
+    """Submodule paths whose state `--ignore-submodules=dirty` stops reporting.
+
+    This is what a fork actually leaves behind: submodules Git would call
+    modified on working-tree grounds alone. A submodule sitting at its recorded
+    commit is not in this set, and a commit-level gitlink difference is not
+    either, because the filter keeps reporting that and the fork carries it.
+    """
+    gitlinks = set(gitlink_paths(root, env=env))
+    if not gitlinks:
+        return []
+
+    def reported(extra: list[str]) -> set[str]:
+        result = run_git(
+            root,
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all", *extra],
+            env=env,
+        )
+        seen = set()
+        for record in result.stdout.split(b"\0"):
+            if len(record) > 3:
+                seen.add(os.fsdecode(record[3:]))
+        return seen
+
+    unfiltered = reported(["--ignore-submodules=none"])
+    filtered = reported(["--ignore-submodules=dirty"])
+    return sorted(gitlinks.intersection(unfiltered - filtered))
+
+
 def collect_inventory(
     root: Path,
     *,

@@ -9,7 +9,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_fork.content import Inventory, collect_inventory, gitlink_paths
+from agent_fork.content import (
+    Inventory,
+    collect_inventory,
+    suppressed_submodules,
+)
 from agent_fork.git import GitCommandError, run_git
 from agent_fork.text import escape_terminal_text
 
@@ -77,7 +81,7 @@ def _apply_patch(
     return True
 
 
-def _submodule_notices(
+def submodule_loss_notices(
     parent: Path, *, env: Mapping[str, str] | None
 ) -> tuple[str, ...]:
     """Name what the fork leaves behind, rather than claiming a copy.
@@ -86,11 +90,16 @@ def _submodule_notices(
     submodule directory was empty — `git worktree add` does not initialize
     submodules and nothing here populates them. Under `--no-verify` that message
     was the only thing a user saw before their submodule work went missing.
+
+    It named every indexed gitlink, so a repository whose submodules all sat at
+    their recorded commits was told its submodule changes were dropped. Nothing
+    was dropped, and a false loss warning teaches the reader to ignore a real
+    one, so this reports only the paths whose state verification stops seeing.
     """
-    paths = gitlink_paths(parent, env=env)
-    if not paths:
+    suppressed = suppressed_submodules(parent, env=env)
+    if not suppressed:
         return ()
-    listed = ", ".join(escape_terminal_text(path) for path in paths)
+    listed = ", ".join(escape_terminal_text(path) for path in suppressed)
     return (f"submodule working-tree changes are not carried: {listed}",)
 
 
@@ -196,5 +205,5 @@ def materialize(
         copied_untracked=len(untracked),
         copied_ignored=len(ignored),
         intent_to_add=tuple(ita_paths),
-        notices=_submodule_notices(parent, env=env),
+        notices=submodule_loss_notices(parent, env=env),
     )

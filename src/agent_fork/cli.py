@@ -371,6 +371,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     )
     from agent_fork.config import resolve_discovered_config
     from agent_fork.git import run_git
+    from agent_fork.materialize import submodule_loss_notices
     from agent_fork.naming import (
         derive_auto_name,
         naming_plan,
@@ -541,7 +542,15 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             count(["diff", "--cached", "--name-only", "-z", "--no-renames"])
             if config.with_state
             else 0,
-            count(["diff", "--name-only", "-z", "--no-renames"])
+            count(
+                [
+                    "diff",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "--ignore-submodules=dirty",
+                ]
+            )
             if config.with_state
             else 0,
             count(["ls-files", "--others", "--exclude-standard", "-z"])
@@ -551,7 +560,14 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             if config.with_state and config.with_ignored
             else 0,
             launch.command,
-            agent_check.notices if context is not None else (),
+            (
+                (agent_check.notices if context is not None else ())
+                + (
+                    submodule_loss_notices(parent_path, env=environment)
+                    if config.with_state
+                    else ()
+                )
+            ),
         )
         print(dry.render(output_kind))
         return 0

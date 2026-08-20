@@ -250,3 +250,190 @@ def test_unstaged_gitlink_advance_is_not_refused_when_no_state_is_carried(
         with_state=False,
         env=world.env,
     )
+
+
+# ---------------------------------------------------------------------------
+# Gate-6 regressions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.matrix("T-GRD-24")
+def test_deleted_submodule_checkout_is_not_refused(repo_scenario):
+    """Gate-6 finding 1 — a removed submodule directory is carriable, not refused.
+
+    `--ignore-submodules=dirty` reports a missing submodule directory as a
+    deletion, which the first guard intersected with the gitlink set and
+    refused. The deletion is not an unrepresentable state: its patch is an
+    ordinary `deleted file mode 160000` hunk that applies to the child cleanly,
+    so the fork would have succeeded. Only a *modified* gitlink — the checkout
+    sitting at a commit the index does not record — is unrepresentable.
+    """
+    import shutil
+
+    from agent_fork.repository import validate_fork_guards
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="modified"),))
+    shutil.rmtree(world.parent_path / "vendor/submodule")
+    assert b" D vendor/submodule" in _status(world, world.parent_path)
+
+    validate_fork_guards(
+        world.parent_path,
+        "fork/a6-deleted",
+        world.parent_path.parent / "a6-deleted",
+        env=world.env,
+    )
+
+
+@pytest.mark.matrix("T-GRD-25")
+def test_unmerged_index_refusal_is_not_masked_by_the_submodule_guard(repo_scenario):
+    """Gate-6 finding 3 — pre-existing refusals keep precedence over the new one.
+
+    `gitlink_paths` reads mode-160000 entries from every index stage, so a
+    submodule left unmerged by a conflicted merge could reach the guard's diff
+    and raise `submodule_unrepresentable`. That code recommends staging or
+    `--no-with-state`, and neither clears a conflicted index, so the advertised
+    remedy could not work.
+
+    Two changes close it, and the row pins both. `--diff-filter=M` excludes the
+    conflicted gitlink, because Git reports an unmerged path as `U`. The guard
+    also runs after the mid-operation and unmerged-index refusals, which name
+    the state the user actually has — defence in depth, since the filter alone
+    is what an unrelated change is most likely to disturb.
+    """
+    from agent_fork.errors import PreconditionError
+    from agent_fork.repository import validate_fork_guards
+
+    world = repo_scenario("plain@main", states=(submodule(),))
+    parent = world.parent_path
+    sub = parent / "vendor/submodule"
+    _git(world, parent, "commit", "-qm", "record the gitlink")
+    base = _git(world, sub, "rev-parse", "HEAD").stdout.decode().strip()
+
+    # Advance the SUBMODULE differently on two branches, so the merge conflicts
+    # on the gitlink itself and leaves mode-160000 at index stages 1-3. Each side
+    # advances from `base`: checking out the parent branch does not rewind the
+    # submodule, so without the reset both commits stack and Git fast-forwards
+    # the gitlink instead of conflicting.
+    _git(world, parent, "checkout", "-q", "-b", "other")
+    (sub / "tracked.txt").write_text("other side\n")
+    _git(world, sub, "commit", "-qam", "other advance")
+    _git(world, parent, "commit", "-qam", "record other advance")
+
+    _git(world, parent, "checkout", "-q", "main")
+    _git(world, sub, "checkout", "-q", base)
+    (sub / "tracked.txt").write_text("main side\n")
+    _git(world, sub, "commit", "-qam", "main advance")
+    _git(world, parent, "commit", "-qam", "record main advance")
+
+    merge = _git(world, parent, "merge", "other", check=False)
+    assert merge.returncode != 0, "fixture must leave a conflicted merge"
+    staged = _git(world, parent, "ls-files", "--stage", "vendor/submodule").stdout
+    assert staged.count(b"160000") > 1, "fixture must leave a conflicted gitlink"
+
+    # Two independent defences, both pinned. First, `--diff-filter=M` excludes a
+    # conflicted gitlink, which Git reports as unmerged (`U`) rather than
+    # modified: drop that filter and this assertion goes red.
+    from agent_fork.repository import _unrepresentable_submodules
+
+    assert _unrepresentable_submodules(parent, env=world.env) == []
+
+    with pytest.raises(PreconditionError) as raised:
+        validate_fork_guards(
+            parent, "fork/a6-unmerged", parent.parent / "a6-unmerged", env=world.env
+        )
+    # A conflicted merge leaves MERGE_HEAD, so the mid-operation guard is the one
+    # that wins — and it names the state the user actually has to resolve.
+    assert raised.value.code == "parent_mid_operation"
+
+
+@pytest.mark.matrix("T-MAT-27")
+def test_no_loss_notice_for_a_submodule_with_nothing_to_lose(repo_scenario):
+    """Gate-6 finding 4 — the notice names suppressed state, not every submodule.
+
+    The notice listed every indexed gitlink, so a repository whose submodules
+    are all at their recorded commits was told its submodule working-tree
+    changes were not carried. Nothing was dropped, and a false loss warning is
+    worse than none: it trains the reader to ignore a real one.
+    """
+    from agent_fork.materialize import materialize
+    from agent_fork.repository import create_worktree_at_anchor
+
+    world = repo_scenario("plain@main", states=(submodule(),))
+    child = world.parent_path.parent / "a6-clean-notice"
+    create_worktree_at_anchor(
+        world.parent_path, "fork/a6-clean-notice", child, env=world.env
+    )
+    result = materialize(world.parent_path, child, with_state=True, env=world.env)
+
+    assert result.notices == ()
+
+
+@pytest.mark.matrix("T-CLI-36")
+def test_cli_forwards_the_no_state_mode_to_the_submodule_guard(repo_scenario):
+    """Gate-6 finding 5 — prove the wiring, not just the function's parameter.
+
+    T-GRD-23 calls `validate_fork_guards(with_state=False)` directly, so it stays
+    green even if neither the CLI nor the pipeline forwards the mode. This row
+    runs the real console script, so removing either forwarding turns it red.
+    """
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="advanced"),))
+    refused = run_cli(
+        ["fork", "guarded", "--no-agent", "-o", "json"], world.env, world.parent_path
+    )
+    assert refused.returncode == 5
+    assert b"submodule_unrepresentable" in refused.stderr
+
+    allowed = run_cli(
+        ["fork", "nostate", "--no-agent", "--no-with-state", "-o", "json"],
+        world.env,
+        world.parent_path,
+    )
+    assert allowed.returncode == 0, allowed.stderr.decode()
+
+
+@pytest.mark.matrix("T-CLI-37")
+def test_dry_run_counts_and_notices_match_what_the_fork_will_carry(repo_scenario):
+    """Gate-6 finding 2 — the preview must describe the fork that will happen.
+
+    The dry-run counts came from an unfiltered `git diff --name-only` while the
+    real inventory filters submodule working-tree state, so a dirty submodule
+    was previewed as one unstaged path that the fork then did not carry, with no
+    warning. A preview that over-reports is worse than a bare count: it is the
+    one place a user checks before committing to the operation.
+    """
+    import json
+
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="modified"),))
+    completed = run_cli(
+        ["fork", "preview", "--no-agent", "--dry-run", "-o", "json"],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+    document = json.loads(completed.stdout)
+
+    assert document["plan"]["files_to_carry"]["unstaged"] == 0
+    assert any("vendor/submodule" in notice for notice in document["notices"])
+
+
+@pytest.mark.matrix("T-CLI-38")
+def test_every_catalogued_error_code_is_documented():
+    """Gate-6 finding 7 — a stable identifier nobody published is not stable.
+
+    README calls error codes compatibility identifiers, so a client may switch
+    on them. `submodule_unrepresentable` was added to the catalog without being
+    listed, which would hand a conforming client an unknown code. This pins the
+    catalog and the published table together for every future code, not just
+    this one.
+    """
+    from pathlib import Path as _Path
+
+    from agent_fork.errors import ERROR_CATALOG
+
+    readme = (_Path(__file__).resolve().parents[2] / "README.md").read_text()
+    missing = sorted(code for code in ERROR_CATALOG if f"`{code}`" not in readme)
+    assert not missing, f"error codes missing from README: {missing}"

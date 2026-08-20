@@ -238,13 +238,18 @@ def _unrepresentable_submodules(
 ) -> list[str]:
     """Submodules checked out at a commit the parent's index does not record.
 
-    A fork carries submodule state only as the gitlink in the parent's index. An
-    unstaged gitlink difference means the parent's submodule checkout sits at a
-    different commit than its index — a fact that needs a submodule checkout to
-    express, and a fork's child has none. `--ignore-submodules=dirty` keeps
-    reporting exactly this case while suppressing working-tree dirt, so the
-    difference survives to be refused here instead of failing verification after
-    a worktree has been built and destroyed.
+    A fork carries submodule state only as the gitlink in the parent's index, so
+    a checkout sitting at some other commit is a fact the child cannot express:
+    saying it would require a submodule checkout, and the child has none.
+    `--ignore-submodules=dirty` keeps reporting that case while suppressing
+    working-tree dirt, so it survives to be refused here rather than failing
+    verification after a worktree has been built and destroyed.
+
+    `--diff-filter=M` narrows it to exactly that case. A removed submodule
+    directory also reports as an unstaged gitlink change, but it transports as an
+    ordinary `deleted file mode 160000` hunk like any other deletion, and a
+    conflicted gitlink reports as unmerged rather than modified. Refusing either
+    would block a fork that works.
 
     A6b removes this limitation for the default path: once the child's submodule
     is initialized and detached at the parent's submodule HEAD, the state is
@@ -255,7 +260,14 @@ def _unrepresentable_submodules(
         return []
     changed = run_git(
         parent,
-        ["diff", "--name-only", "-z", "--no-renames", "--ignore-submodules=dirty"],
+        [
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--diff-filter=M",
+            "--ignore-submodules=dirty",
+        ],
         env=env,
     )
     return sorted(gitlinks.intersection(nul_paths(changed.stdout)))
@@ -277,18 +289,6 @@ def validate_fork_guards(
     itself recommends.
     """
     info = inspect_repository(parent, env=env)
-    unrepresentable = (
-        _unrepresentable_submodules(info.parent_path, env=env) if with_state else []
-    )
-    if unrepresentable:
-        listed = ", ".join(escape_terminal_text(path) for path in unrepresentable)
-        raise PreconditionError(
-            "submodule_unrepresentable",
-            f"submodule checkout differs from the recorded commit: {listed}; "
-            "a fork carries submodules only as the commit recorded in the index. "
-            "Stage it (git add -- <path>), or fork without carrying state "
-            "(--no-with-state)",
-        )
     attached = _worktree_branches(info.parent_path, env=env)
     if branch in attached:
         raise PreconditionError(
@@ -338,6 +338,22 @@ def validate_fork_guards(
         raise PreconditionError(
             "unmerged_index",
             f"unmerged index paths: {rendered}; resolve conflicts and re-run",
+        )
+    # Last, because every guard above names a state the user can act on directly.
+    # `gitlink_paths` reads mode-160000 entries from every index stage, so a
+    # conflicted submodule would otherwise be refused here first, with a remedy
+    # -- stage it, or --no-with-state -- that cannot clear a conflicted index.
+    unrepresentable = (
+        _unrepresentable_submodules(info.parent_path, env=env) if with_state else []
+    )
+    if unrepresentable:
+        listed = ", ".join(escape_terminal_text(path) for path in unrepresentable)
+        raise PreconditionError(
+            "submodule_unrepresentable",
+            f"submodule checkout differs from the recorded commit: {listed}; "
+            "a fork carries submodules only as the commit recorded in the index. "
+            "Stage it (git add -- <path>), or fork without carrying state "
+            "(--no-with-state)",
         )
     return info
 

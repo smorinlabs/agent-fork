@@ -688,7 +688,18 @@ def _dirty_submodule(
     # Commit the gitlink first, so the dirt below is the only state in play.
     # Clean submodules deliberately stay uncommitted: T-VER-30 and T-MAT-14 pin
     # the index-only gitlink shape, which a commit would erase.
-    _run_git(handle.env, parent, "commit", "-m", f"add submodule {relative}")
+    # Pathspec-scoped, so a `staged()` element earlier in the same states tuple
+    # is not swept into this commit and silently lost.
+    _run_git(
+        handle.env,
+        parent,
+        "commit",
+        "-m",
+        f"add submodule {relative}",
+        "--",
+        ".gitmodules",
+        f":(literal){relative}",
+    )
     if dirt == "modified":
         (path / "tracked.txt").write_text("submodule modified\n")
     elif dirt == "untracked":
