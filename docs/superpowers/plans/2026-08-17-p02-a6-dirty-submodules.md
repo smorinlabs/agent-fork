@@ -7,7 +7,7 @@ verification verdict through implementation sign-off.
 |---|---|
 | 1. Adversarial verification | **CONFIRMED-WITH-CORRECTIONS** (2026-08-17) — matrices below; Codex second lens returned CONFIRM-WITH-CORRECTIONS, findings 5 and 6 narrow the verdict wording |
 | 3. Design doc | this document |
-| 4. Plan + adversarial plan review (incl. Codex) | **NOT IMPLEMENTATION-READY** on first pass (2026-08-17) — nine findings, four high; all absorbed below; **re-review required before gate 5**. Re-validated against main 2026-08-20 after 51 commits: fault unchanged, design holds, one new requirement (pathspec `:(literal)`) |
+| 4. Plan + adversarial plan review (incl. Codex) | **NOT-READY** on both passes. First pass 2026-08-17: nine findings, four high, all absorbed. Re-validated against main 2026-08-20 after 51 commits (fault unchanged; `:(literal)` requirement added). Second pass 2026-08-20: **NOT-READY** — two blockers, both absorbed below (pins-vs-verbatim-reuse collision; carrying activated before its flag and verifier). Report file was lost to a read-only sandbox; findings recovered from the job log and independently re-verified. **Third pass required before gate 5** |
 | 5. Implementation (TDD, subagent-driven) | blocked on gate 4 re-review |
 | 6. Adversarial implementation review (incl. Codex) | pending |
 
@@ -261,11 +261,24 @@ state transport. Mirrors the existing `with_state` / `with_ignored` coupling at
 4. **Match the checked-out commit:**
    `git -C <child>/<path> checkout --detach <parent submodule HEAD>`. This is what
    makes an unstaged gitlink advance representable.
-5. **Reuse the existing transport verbatim:**
+5. **Reuse the existing transport — through one added seam, not verbatim:**
    `materialize(<parent>/<path>, <child>/<path>, with_state=…, with_ignored=…, inventory=<frozen>)`.
    Unmodified, it carried staged (cell `i`), unstaged (`a`, `f`, `h`), and
    untracked (`b`) state. A submodule is just another repository; this is
-   structural reuse, not a second implementation. **The modes must be threaded**
+   structural reuse, not a second implementation. **"Verbatim" was wrong, and it
+   collided with the semantic pins below** (gate-4 re-review 2026-08-20):
+   `materialize` builds its own Git argv internally and has no way to receive
+   command-scoped `-c` flags, and the environment escape hatch is deliberately
+   closed — `run_git` routes every call through `without_config_injection`
+   (`git.py:20-47`), which strips `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_*`,
+   `GIT_CONFIG_VALUE_*`, and `GIT_CONFIG_PARAMETERS` as A2's fix. Hijacking the
+   preserved `GIT_CONFIG_GLOBAL` instead is rejected: it would replace the
+   user's configuration wholesale, which is the divergence A2 exists to prevent.
+   The resolution is an explicit pins parameter at the chokepoint —
+   `run_git(..., config_pins=())` prepending `-c k=v`, threaded through
+   `materialize`, `collect_inventory`, `capture_state`, and the recursive
+   verification calls. One implementation still, one new argument.
+   **The modes must be threaded**
    (finding 7): `materialize` defaults `with_ignored=False`
    (`materialize.py:112-120`), so a helper taking only `(parent, child, env)`
    cannot honour a top-level `--with-ignored` — an ignored file inside a
@@ -304,7 +317,9 @@ sides. Reproduced at depth 2: with `diff.ignoreSubmodules=all` set inside the
 parent's outer submodule, the parent read clean while the child read
 ` M vendor/outer` for byte-identical state. Every recursive status, inventory,
 and diff call therefore runs with command-scoped `-c diff.ignoreSubmodules=none`
-plus an explicit `--ignore-submodules=none` where the command accepts it. The
+plus an explicit `--ignore-submodules=none` where the command accepts it. Those
+pins reach the recursive calls through the `config_pins` parameter added in
+recipe step 5 — there is no environment channel for them, by A2's design. The
 matrix gains rows for `diff.ignoreSubmodules`, `submodule.<name>.ignore`,
 `submodule.recurse`, and `status.submoduleSummary` set in repository
 configuration — none of these may be assumed to hold their defaults or to be
@@ -349,45 +364,66 @@ cloned.
 
 ## Implementation plan (TDD; subagent-driven)
 
+**Ordering rule** (gate-4 re-review 2026-08-20): the first draft activated
+recursive carrying at step 4, before the flag that disables it and the verifier
+that checks it existed — an interrupted implementation would have carried
+submodules with no opt-out and no recursive verification. Carrying is now the
+**last** behaviour change: every step before it is inert, so any prefix of this
+plan is a safe stopping point.
+
 1. **Test rows first.** Extend the `submodule()` state constructor
    (`tests/conftest.py:168`) to express the nine cells (dirty variants,
    uninitialized-in-parent, nested, staged-in-own-index, and
    `j_renamed_submodule` where the config name differs from the path). Add G-MAT
    and G-VER rows for each cell × both modes to `docs/testing/TEST-MATRIX.md`,
    failing first.
-2. **Recursive snapshot** — resolve the frozen submodule plan in the parent
-   before `create_worktree_at_anchor`, alongside the existing inventory and
-   status bracket (`pipeline.py:113-129`).
-3. **`submodules.py`** — the recipe and its recursion, taking the frozen plan
-   plus `with_state` / `with_ignored` / `env`, and returning carried paths,
-   skipped paths, and notices.
-4. **Pipeline wiring** — carry after `create_worktree_at_anchor`, before
-   verification, consuming the frozen plan.
-5. **Flag through the whole data model** (finding 9) — not just `config.py` and
-   `cli.py`: `ConfigValues` and `ResolvedConfig` (`models.py:10-44`), or
+2. **`config_pins` at the chokepoint** — `run_git(..., config_pins=())`
+   prepending `-c k=v`, threaded through `materialize`, `collect_inventory`, and
+   `capture_state`. Enabling primitive; no caller passes pins yet, so behaviour
+   is unchanged. This is what the semantic pins ride on, and it is why transport
+   reuse is "one added argument" rather than verbatim.
+3. **Flag through the whole data model** (finding 9) — not just `config.py` and
+   `cli.py`: `ConfigValues` and `ResolvedConfig` (`models.py:11-33`), or
    `load_config`'s `ConfigValues(**fork)` raises `TypeError` on a config file
-   that sets it (`config.py:181-202`) and `_coerce_source` silently drops an
-   unknown mapping key (`config.py:40-50`); `ForkRequest` (`pipeline.py:35-46`);
+   that sets it (`config.py:157-162`) and `_coerce_source` silently drops an
+   unknown mapping key (`config.py:41-51`); `ForkRequest` (`pipeline.py:35-46`);
    the dry-run preview; `ForkOutput` and its JSON mode object
-   (`output.py:26-57`); config get/set/show; completion and help text. Add
-   precedence tests for `--no-with-state` against every explicit and configured
-   `with_submodules` value.
-6. **Verification** — recursive rungs per carried submodule with the semantic
-   pins; opt-out filtering on `status_args` (`verify.py:106`) and the unstaged
+   (`output.py:26-57`); config get/set/show; completion and help text. The flag
+   is inert until step 7. Add precedence tests for `--no-with-state` against
+   every explicit and configured `with_submodules` value.
+4. **Recursive snapshot** — resolve the frozen submodule plan in the parent
+   before `create_worktree_at_anchor`, alongside the existing inventory and
+   status bracket (`pipeline.py:113-129`). Read-only: computed and returned,
+   not yet consumed.
+5. **`submodules.py`** — the recipe and its recursion, taking the frozen plan
+   plus `with_state` / `with_ignored` / `config_pins` / `env`, and returning
+   carried paths, skipped paths, and notices. Unit-tested directly; not yet
+   called by the pipeline.
+6. **Recursive verification** — rungs per carried submodule with the semantic
+   pins; opt-out filtering on `status_args` (`verify.py:103`) and the unstaged
    inventory listing (`content.py:158`), leaving the staged path carried.
-   `pipeline.py:114` and `verify.py:150` are a matched pair for the
-   `parent-untouched` rung: that bracket stays unfiltered on both sides.
-7. **Notices and JSON document** — `materialize.py:109`, `output.py:51`;
-   including the structured loss notice for the opt-out and the
-   configuration-fidelity limit from step 3 of the recipe.
-8. **`scripts/check_git_matrix.sh`** — copy-mode rows.
-9. **Docs** — README, skill text, and the four prose copies of the recipe.
+   `pipeline.py:114` and `verify.py:146` are a matched pair for the
+   `parent-untouched` rung: that bracket stays unfiltered on both sides. With
+   nothing carrying yet, this verifies the status quo and must stay green.
+7. **Pipeline wiring — the behaviour change.** Carry after
+   `create_worktree_at_anchor`, before verification, consuming the frozen plan,
+   gated on the flag. The nine cells flip from red to green here.
+8. **Notices and JSON document** — `materialize.py:91`, `output.py`; including
+   the structured loss notice for the opt-out and the configuration-fidelity
+   limit from recipe step 3.
+9. **`scripts/check_git_matrix.sh`** — copy-mode rows.
+10. **Docs** — README, skill text, and the four prose copies of the recipe.
 
 ## Open items
 
-- **Gate 4 re-review required before implementation starts.** The first pass
-  found the plan not implementation-ready; findings 1–9 are absorbed above but
-  the corrected design has not itself been reviewed.
+- **Gate 4 third pass required before implementation starts.** Two passes have
+  returned NOT-READY. The second pass's two blockers are absorbed above, but its
+  full report — including the per-finding absorption audit of the first pass's
+  nine findings — was lost when its sandbox mounted the worktree read-only and
+  `apply_patch` was rejected. Only the two findings recorded in its job log were
+  recovered, so **no pass has yet confirmed that findings 1–9 are genuinely
+  absorbed rather than cosmetically reworded.** The third pass must return its
+  report as its final message rather than writing a file.
 - Cells the matrix still owes, per finding 5, before "production feasible" may be
   claimed: renamed submodule with a genuine **remote** URL; relative
   `.gitmodules` URL; a configured `submodule.<name>.update` policy; depth-2 dirt;
