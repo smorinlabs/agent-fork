@@ -431,9 +431,13 @@ repository-controlled text raw).
   at snapshot time likewise fail, because the inventory lists only paths git
   had just seen; (c) keep the rollback, add a named cause ("the parent changed
   during the fork; nothing was lost"), retry **once** with fresh snapshots, and
-  emit a distinct message when the retry fails identically. Retry fires only
-  when parent drift was detected, never on a `content-match` failure without
-  drift, which would be an A1-class transport defect that a retry would mask.
+  emit a distinct message when the retry fails identically. The retry fires on any
+  content or drift failure and is itself the classifier: succeeding means
+  transient drift, failing with drift means a continuous writer, and failing
+  with the same content-only mismatch means a probable transport defect. An
+  earlier drift-only trigger was refuted by the gate 1 Codex review, which
+  produced a reverting writer that yields a lone `content-match` failure from
+  a genuine race.
   A single `--strict`-style flag inverts (b): skips become refusals with a
   non-zero exit. Flag name and strict-mode exit code are subject to the CLI
   Design Standard check at the design gate. Full record: the

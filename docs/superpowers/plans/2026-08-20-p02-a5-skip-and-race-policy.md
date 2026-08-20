@@ -26,9 +26,26 @@ recorded in the register entry and are not restated here.
 One rule decides every case, and it is a question about *time*, not about file
 type:
 
-> A condition that was already present when the snapshot was taken is
-> **skipped**. A condition that appears after the snapshot is a **parent
+> A condition that was already present when the path was **observed** is
+> **skipped**. A condition that appears after that observation is a **parent
 > change**, and a parent change fails the fork.
+
+**Observation is per path, not global** (revised 2026-08-20 after the Codex
+review). There is no single instant at which the whole tree is snapshotted:
+`collect_inventory` enumerates paths, then `_manifest_entry` captures each one
+with an `lstat` followed by a later digest `open`. A path's recorded
+observation is whatever its own `_manifest_entry` saw. A permission change
+landing between enumeration and that capture therefore counts as
+**pre-existing**, and is skipped. This is accepted rather than fought: closing
+that gap would require locking a tree Git itself does not lock, and the
+consequence of the accepted case is a named skip, not a silent one.
+
+`_copy_entry` compares against the recorded observation rather than guessing
+from the failure site:
+
+- recorded unreadable, already dropped, never reaches transport;
+- recorded regular but now absent, non-regular, or unreadable, **parent
+  change, fail**.
 
 The snapshot is `capture_state` in `pipeline.py`, taken before the worktree
 exists. The rule follows from what the inventory means: it lists only paths
@@ -50,12 +67,23 @@ Applying the rule:
 
 ### (b) Skip unreadable entries, by default
 
-**Marking, not silence.** A path that cannot be read at snapshot time is
-marked skipped, removed from the carried inventory, and reported at the end of
-the run. Removing it from the inventory is what makes the skip coherent:
-A1 established that one path set drives both transport and verification, so a
-path skipped by transport but retained in the inventory would fail
-`content-match` on its absence and kill the fork anyway.
+**Marking, not silence.** A path that cannot be read at observation time is
+marked skipped and reported at the end of the run.
+
+**Shrinking the inventory is necessary but nowhere near sufficient** (revised
+2026-08-20 after the Codex review, which rated the original design a high
+finding). The verification contract resolves paths in three places that never
+consult the initial inventory, so the skip must be threaded through every one:
+
+| Site | Why the skip must reach it |
+|---|---|
+| Initial `capture_state` | Where the unreadable path is discovered and dropped. |
+| Transport in `materialize` | Staged and unstaged patches are repository-wide `diff-index` and `diff-files` calls that never consume `Inventory.staged` or `.unstaged`. A tracked path could otherwise be reported skipped while still being transported. |
+| Verify-phase re-capture | `verify_fork` re-resolves a fresh inventory and re-runs `capture_state` on the parent, which would **re-open the still-unreadable file and raise the same error at verification time**. |
+| `exact-copy-status` | It compares complete live porcelain from parent and child, not the inventory. A skipped untracked path still appears in the parent's status and is absent from the child, producing a mismatch and a rollback. Known-skipped paths must be filtered from both porcelains before comparison, minding the NUL-delimited format and the collapsed `?? d/` directory form. |
+
+The design is therefore an **original inventory plus an explicit skipped set**,
+carried through all four sites, rather than a quietly shrunk inventory.
 
 **Reporting.** Every skipped path is named — in `notices` for humans, and in a
 `skipped` array in the JSON output for machines. A count alone is not
@@ -63,6 +91,12 @@ sufficient.
 
 **Typed error.** The raw `runtime_error` carrying a bare errno string is
 replaced by a typed error naming the step and the path.
+
+**`.worktreeinclude` is scoped to a plain readability guard.** Its copies run
+after verification, so they have no snapshot to compare against and cannot
+carry race semantics. The minimal remediation is the readability guard
+`include.py` never had, matching the file-type guard beside it: skip with a
+notice. The pipeline ordering is left alone.
 
 **Shared primitive.** Pull request #53 consolidated duplicated primitives but
 left `_copy_entry` and the `.worktreeinclude` copy loop in `include.py`
@@ -80,11 +114,25 @@ fresh inventory, and a fresh `capture_state`. Re-running verification against
 the stale snapshot would be wrong, because the parent legitimately changed and
 the second attempt must adopt the new state.
 
-**Retry trigger is scoped to drift.** Retry only when parent drift was
-detected, that is when `parent-content` or `parent-untouched` fired. A
-`content-match` failure with no drift is an A1-class transport defect; a retry
-would fail identically and hide it. The existing `primary=not drift` field
-already distinguishes these two cases and is the trigger condition.
+**Retry is a classifier, and fires on any content or drift failure** (revised
+2026-08-20 after the Codex review). The earlier design retried only on
+observed parent drift, reasoning that a lone `content-match` failure must be
+an A1-class transport defect. A reverting writer refutes that: snapshot an
+already-modified file holding bytes A, let a writer change it to B before
+materialization so the child receives B, then let it restore A before
+verification. Porcelain never changes and the parent matches its snapshot, so
+no drift is observed, yet the child differs. The runtime cannot distinguish
+that genuine race from a transport defect, so the old trigger suppressed the
+retry for exactly the case retrying was meant to fix.
+
+Retrying does not mask a transport defect, because a deterministic defect
+**reproduces identically on the second attempt**. The retry is the diagnostic:
+
+| Second attempt | Classification | Reported as |
+|---|---|---|
+| Succeeds | transient parent drift | success, with a notice that a retry occurred |
+| Fails, drift observed | continuous writer | named cause plus the continuous-writer message |
+| Fails, same content-only mismatch | probable transport defect | failure identifying it as reproducible, not a race |
 
 **Messages.** The failure names the cause — the parent changed during the fork
 and nothing was lost — rather than only the check that fired. A retry that
@@ -139,7 +187,8 @@ recorded as a problem only where a probe demonstrated one.
 | Regular untracked file (control) | yes | 0 | kept | pass |
 | **Unreadable untracked file** | yes | 1 | none | **fails in `capture_state`** |
 | **Unreadable tracked, modified file** | n/a (tracked) | 1 | none | **fails in `capture_state`** |
-| Unreadable directory, mode 000 | **no** — Git cannot traverse it | 0 | kept | **silent omission, see N2** |
+| Readable directory, mode 755 (control) | yes | 0 | kept | child **has** the file |
+| **Unreadable directory, mode 000** | **no** — Git cannot traverse it | 0 | kept | child **lacks** the file, see N2 |
 | FIFO | no | 0 | kept | pass, unreachable as predicted |
 | Unix socket | no | 0 | kept | pass, unreachable as predicted |
 | Symlink to regular file (control) | yes | 0 | kept | pass |
@@ -147,6 +196,21 @@ recorded as a problem only where a probe demonstrated one.
 | Unreadable ignored file, `--with-ignored` | yes | 1 | none | **fails; the flag widens exposure** |
 | Unreadable ignored file, default mode | not carried | 0 | kept | pass |
 | **Unreadable file matched by `.worktreeinclude`** | n/a | 1 | none | **fails after verification, see N3** |
+
+The mode-000 directory row was re-probed on 2026-08-20 with a control, after
+the Codex review correctly objected that the first harness recorded only the
+exit code and never asserted the omission. One permission bit is the sole
+difference between these two runs:
+
+| | `git ls-files --others` | parent `status --porcelain` | fork exit | child has `d/secret.txt` | notices |
+|---|---|---|---|---|---|
+| Readable, 0755 | `d/secret.txt` | `?? d/` | 0 | **yes** | none |
+| Unreadable, 0000 | *(empty)* | **`(clean)`** | 0 | **no** | none |
+
+Git cannot traverse the directory, so it reports nothing. The parent's own
+status is equally blind, so `exact-copy-status` compares two identical clean
+listings and verification passes. The fork reports success while the child is
+missing data.
 
 ### Mid-window shapes, applied between snapshot and copy
 
@@ -192,7 +256,7 @@ Recorded as gaps rather than passes, following the precedent A2 set for
 
 | ID | Finding | Routing |
 |---|---|---|
-| N1 | An unreadable **tracked** file kills the fork identically. A5's title, "One bad **untracked** filesystem entry", is too narrow: the defect is in `capture_state`, which digests every carried path regardless of tracking state. | **Absorbed into A5.** Same site, same fix. |
+| N1 | An unreadable **tracked** file kills the fork identically. Skip semantics for a tracked path: exclude it from the `diff-index` and `diff-files` patches with `:(exclude,literal)`, the pathspec pattern A13's T13E established, so the child keeps the last-committed content and the entry is reported as "modification not carried". Gate 4 must verify that Git can generate a repository-wide patch at all with an unreadable file present. A5's title, "One bad **untracked** filesystem entry", is too narrow: the defect is in `capture_state`, which digests every carried path regardless of tracking state. | **Absorbed into A5.** Same site, same fix. |
 | N2 | A mode-000 **directory** makes Git blind to its contents, so the fork reports success and the child silently lacks the data, with no notice. Parent `git status` is equally blind, so verification passes. | **Route to an issue.** Opposite failure mode — silent, not loud — and detecting it requires walking the tree independently of Git, which is a scope increase. |
 | N3 | An unreadable file matched by `.worktreeinclude` kills the fork *after* verification, then rolls back. `include.py` skips on unsupported **type** but has no guard for **readability**, so it is not the clean policy exemplar the register claimed. | **Absorbed into A5.** The shared copy primitive must handle both conditions. |
 | N4 | An unreadable directory inside a fork worktree makes `cleanup` fail with an untyped `runtime_error` carrying raw Git output, leaving the worktree and its registry entry behind. | **Route to an issue**, noted against A7, which covers uncleanable registry entries. |
@@ -203,4 +267,20 @@ To be completed at gates 5 and 6.
 
 ## Review outcomes
 
-To be completed at gates 4 and 6.
+### Gate 1 — Codex second lens, 2026-08-20
+
+Verdict: **needs-attention**, four findings, one high. Codex session
+`01a02185-d0e0-7971-9a67-2945217efaeb`. All four were accepted after
+independent verification against the source. None reopened an owner decision,
+because every fix is mechanism rather than policy.
+
+| Finding | Accepted | Resolution |
+|---|---|---|
+| **High.** Shrinking `Inventory` cannot deliver the skip: `exact-copy-status` uses live porcelain, the content rungs re-resolve fresh inventories, and tracked transport ignores `Inventory.staged` and `.unstaged`. | yes, confirmed by reading `verify.py` and `materialize.py` | D1 redesigned as an original inventory plus an explicit skipped set threaded through four sites. Verifying the finding surfaced a fifth consequence the review did not name: the verify-phase re-capture would re-open the unreadable file and raise at verification time. |
+| A lone `content-match` failure can still be caused by parent drift, via a reverting writer, so the drift-only retry trigger suppresses the retry for a real race. | yes, counterexample traced and found sound | Retry redesigned as a classifier firing on any content or drift failure. |
+| No single observable snapshot instant: a mid-capture permission change raises at the same site as a pre-existing one, and `.worktreeinclude` has no snapshot at all. | yes | Boundary redefined as per-path observation time, with the residual gap stated and accepted. `.worktreeinclude` scoped to a plain readability guard. |
+| The N2 cell was a false problem under the gate's evidence standard, because the probe never asserted the omission. | yes, correct about the committed record | Re-probed with a readable-directory control; evidence recorded above. The finding stands and is now demonstrated. |
+
+### Gates 4 and 6
+
+To be completed.
