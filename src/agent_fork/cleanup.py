@@ -12,6 +12,7 @@ from agent_fork.models import RegistryEntry
 from agent_fork.registry import (
     find_candidates,
     is_live,
+    match_live,
     registry_lock,
     registry_path,
     remove_locked,
@@ -30,16 +31,59 @@ class CleanupTargetError(AgentForkError):
 
 
 @dataclass(frozen=True)
-class CleanupPlan:
-    entry: RegistryEntry
+class ConfirmedFork:
+    """A fork that was observed to exist, with the values Git will be given.
+
+    Every field here comes from a fresh observation, never from a registry
+    record. `confirm_fork` is the only way to build one, and it cannot do so
+    without having enumerated the repository's live worktrees — so a caller
+    that holds this type is holding evidence, not a claim.
+
+    This exists because seven separate defects in this item had one shape: a
+    check confirmed a record, and then a destructive command was handed a
+    value read back out of that record. Keeping the two apart by discipline
+    failed repeatedly; keeping them apart by construction is what this type
+    is for. Nothing below should reintroduce a field sourced from a record.
+    """
+
     worktree: Path
     branch: str
+    #: Git common directory of the anchor repository — where commands run.
     git_root: Path
+    #: A working directory inside the anchor, for re-enumerating later. The
+    #: common directory cannot enumerate worktrees, so it cannot serve here.
+    anchor: Path
+
+    @classmethod
+    def from_observation(
+        cls, observed: tuple[str, str], *, anchor: Path, git_root: Path
+    ) -> ConfirmedFork:
+        """Build from one element of a live worktree listing."""
+        path, branch = observed
+        return cls(Path(path), branch, git_root, anchor)
+
+
+@dataclass(frozen=True)
+class CleanupPlan:
+    entry: RegistryEntry
+    fork: ConfirmedFork
     owned: bool
-    # Working directory the repository was identified from, kept so the plan
-    # can be revalidated against the same repository it was built against.
-    # `git_root` is a Git common directory and cannot enumerate worktrees.
-    anchor: Path | None = None
+
+    @property
+    def worktree(self) -> Path:
+        return self.fork.worktree
+
+    @property
+    def branch(self) -> str:
+        return self.fork.branch
+
+    @property
+    def git_root(self) -> Path:
+        return self.fork.git_root
+
+    @property
+    def anchor(self) -> Path:
+        return self.fork.anchor
 
     def render(self, *, keep_branch: bool = False) -> str:
         branch = (
@@ -198,24 +242,31 @@ def resolve_cleanup_target(
     live: frozenset[tuple[str, str]] = frozenset()
     if anchor_path is not None:
         live = live_worktree_pairs(anchor_path, env=env)
+    # Each surviving candidate is paired with what was actually observed, so
+    # the values below can only have come from the observation.
     actionable = [
-        entry
+        (entry, observed)
         for entry in candidates
-        if is_live(entry, live) and _owns(entry, anchor_common_dir)
+        for observed in [match_live(entry, live)]
+        if observed is not None and _owns(entry, anchor_common_dir)
     ]
     if len(actionable) > 1:
-        paths = ", ".join(_escape_terminal_text(entry.worktree) for entry in actionable)
+        paths = ", ".join(
+            _escape_terminal_text(observed[0]) for _, observed in actionable
+        )
         raise PreconditionError(
             "cleanup_registry_ambiguous",
             f"several registry records claim {_escape_terminal_text(target)}: {paths}",
         )
     if actionable:
-        owned = actionable[0]
-        worktree = Path(owned.worktree).resolve()
-        # The mutation root is the anchor, never the record's stored path.
-        assert anchor_common_dir is not None
+        owned, observed = actionable[0]
+        assert anchor_path is not None and anchor_common_dir is not None
         return CleanupPlan(
-            owned, worktree, owned.branch, anchor_common_dir, True, anchor_path
+            owned,
+            ConfirmedFork.from_observation(
+                observed, anchor=anchor_path, git_root=anchor_common_dir
+            ),
+            True,
         )
     if candidates:
         # Not overridable by --force: this is the only evidence that the
@@ -248,7 +299,18 @@ def resolve_cleanup_target(
             entry = RegistryEntry.create(
                 name=path.name, branch=branch, worktree=path, agent="unknown"
             )
-            return CleanupPlan(entry, path, branch, _git_root(path, env=env), False)
+            # Unregistered targeting: `path` and `branch` came from a live
+            # enumeration a moment ago, not from a record, so they satisfy the
+            # same contract. The synthesized entry is for display only.
+            return CleanupPlan(
+                entry,
+                ConfirmedFork.from_observation(
+                    (str(path), branch),
+                    anchor=path,
+                    git_root=_git_root(path, env=env),
+                ),
+                False,
+            )
     raise CleanupTargetError(f"cleanup target not found: {target!r}")
 
 

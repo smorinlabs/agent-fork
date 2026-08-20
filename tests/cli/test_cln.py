@@ -364,6 +364,7 @@ def test_human_cleanup_details_escape_terminal_controls(repo_scenario):
     from agent_fork.cleanup import (
         CleanupDetails,
         CleanupPlan,
+        ConfirmedFork,
         DirtyPath,
         UnpushedCommit,
         _refusal_message,
@@ -405,7 +406,15 @@ def test_human_cleanup_details_escape_terminal_controls(repo_scenario):
         worktree=unsafe_worktree,
         agent=None,
     )
-    plan = CleanupPlan(entry, unsafe_worktree, unsafe, Path("/tmp/repo"), True)
+    plan = CleanupPlan(
+        entry,
+        ConfirmedFork.from_observation(
+            (str(unsafe_worktree), unsafe),
+            anchor=unsafe_worktree,
+            git_root=Path("/tmp/repo"),
+        ),
+        True,
+    )
     rendered_details = CleanupDetails(
         dirty=(DirtyPath("??", unsafe),),
         dirty_count=1,

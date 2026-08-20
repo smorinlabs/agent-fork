@@ -103,6 +103,21 @@ def read_registry(*, env: Mapping[str, str] | None = None) -> list[RegistryEntry
     return _ordered(_decode(registry_path(env)))
 
 
+def match_live(entry: RegistryEntry, live: LivePairs) -> tuple[str, str] | None:
+    """The observed pair this record corresponds to, or None.
+
+    Returns the element *from the observation* rather than a boolean, so a
+    caller that needs the worktree and branch takes them from what was seen
+    rather than from the record. That is the whole difference between a
+    confirmed fork and a remembered one.
+    """
+    wanted = (str(Path(entry.worktree).resolve()), entry.branch)
+    for observed in live:
+        if observed == wanted:
+            return observed
+    return None
+
+
 def is_live(entry: RegistryEntry, live: LivePairs) -> bool:
     """The actionability predicate.
 
