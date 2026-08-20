@@ -606,38 +606,166 @@ Every production change follows a demonstrated failing test. Add each ID to
 asserted row-count line only after the rows exist. IDs below are current as of
 the 2026-08-20 revalidation against `origin/main` (commit `46201c1`); confirm
 against `docs/testing/TEST-MATRIX.md` again immediately before implementation,
-since other in-flight work can claim IDs first. Next free IDs at that
-revalidation: `T-CPI-40`, `T-SES-48`, `T-CLI-36`, `T-CLN-25` (the P05
-session-transcript-path item had already claimed `T-SES-39..47`, and other
-landed work had claimed `T-CPI-37..39`, `T-CLI-33..35`, and `T-CLN-24`).
+since other in-flight work can claim IDs first.
+
+Steps run in the order below; step 1 through step 4 are one dependency chain
+(each depends on the previous step's production code), steps 5 and 6 are
+independent of that chain and of each other, and step 7 depends on steps 1 and
+5 only for the store/cache path names it discloses. This mirrors the
+"Sequencing" table above at test-by-test granularity.
+
+### Step 1 — RED and GREEN: freshness assessment, mandatory corroboration, and relocation
+
+Add to `tests/unit/test_lineage_inference_store.py`:
+
+| Test ID | Required proof |
+|---|---|
+| `T-CPI-40` | The full status/evidence mapping table (section 1), one row per status, including `changed_sources` for target-only, parent, and mixed mismatches. |
+| `T-CPI-41` | Deleting the freshness index yields `freshness_unknown`, not `current_at_last_analysis` — the exact gate-1 revival repro. |
+| `T-CPI-42` | A present index whose `targets` lacks this child yields `freshness_unknown`; an invalid, symlinked, or oversized index yields `freshness_unknown`. |
+| `T-CPI-43` | Appending one blank line to the target transcript yields `stale_sources` with `changed_sources == ("target",)`; the record is still readable and its parent ID unchanged. |
+| `T-CPI-45` | A record with more than `MAX_SOURCE_FINGERPRINTS` entries is rejected as an invalid store. |
+| `T-CPI-50` | `index_freshness_path` resolves under `XDG_STATE_HOME`; `update_index_freshness` writes there via `atomic_write_json` and, when a legacy `XDG_CACHE_HOME` file for the same session exists, deletes it after the successful write. |
+| `T-CPI-51` | `assess_inference` reads a state-path entry when present; when the state path is absent, it falls back to reading a legacy cache-only entry and evaluates it identically (not `freshness_unknown`); when both exist for the same child, the state-path entry wins. |
+
+Run the focused file and capture RED before touching production code. Then in
+`src/agent_fork/lineage_inference_store.py` (section 1, 2, and 2a above):
+
+1. add `FreshnessStatus`, `EvidenceStatus`, `ChangedSource`, `InferenceAssessment`,
+   and `assess_inference()`, in the fixed five-step evaluation order (section 2);
+2. re-express `inference_freshness()` as `assess_inference(...).status` and
+   `inference_is_current()` as `assess_inference(...).satisfies_strict_parent`,
+   keeping both signatures so no existing caller changes;
+3. add `MAX_SOURCE_FINGERPRINTS = 1_024` and its rejection in `_decode`;
+4. change `index_freshness_path()` to call `xdg_path(env, "XDG_STATE_HOME",
+   ".local/state", "agent-fork", "claude-lineage-freshness.json")`; add
+   `_legacy_index_freshness_path()` with the old `XDG_CACHE_HOME` arguments;
+5. in `assess_inference`'s freshness-index step, read the new path first, fall
+   back to the legacy path only when the new path is absent;
+6. in `update_index_freshness`, after a successful `atomic_write_json` to the
+   new path, best-effort-delete the legacy file for that session (swallow
+   `OSError`).
+
+Run `tests/unit/test_lineage_inference_store.py` until GREEN. No other file
+changes in this step.
+
+### Step 2 — RED and GREEN: complete freshness-entry deletion
+
+Add to `tests/unit/test_lineage_inference_store.py`:
+
+| Test ID | Required proof |
+|---|---|
+| `T-CPI-44` | `remove_index_freshness` removes only the named key from the state path, is a no-op returning `False` for an absent file or key, and leaves mode `0o600`. |
+| `T-CPI-52` | `remove_index_freshness` removes the entry from the state path if present there, else from the legacy cache path if present there; a no-op (`False`) only when absent from both. |
+
+Add `remove_index_freshness()` to `lineage_inference_store.py` per section 6:
+`registry_lock`, decode, pop the key, write via `atomic_write_json`; check the
+state path first, the legacy path second. Run until GREEN.
+
+### Step 3 — RED and GREEN: session `parent_inference` surfacing
+
+Add to `tests/unit/test_session.py`:
+
+| Test ID | Required proof |
+|---|---|
+| `T-SES-48` | A stale-source record produces `parent_inference.status == "last_known_good"` with the recorded parent ID, while `parent_session` stays null and `lineage.status` stays `not_found`. |
+| `T-SES-49` | The `parent_inference` object is present for all seven statuses with the exact documented field shape, including `not_consulted` when a planned claim exists and for Codex, and coexists with the existing `transcript` object without displacing it. |
+| `T-SES-50` | `session validate --has-parent` still fails with only a `last_known_good` or `freshness_unknown` record, and passes after a re-inference makes it `current`. This is the strict-validation guarantee. |
+
+In `session.py` (section 3): add `parent_inference` to `SessionInspection`
+(alongside the existing `transcript` field, at every construction site, per
+the 2026-08-20 revalidation note above); rewrite the Claude branch's stale
+handling to call `assess_inference()` instead of discarding the record; add
+`document()`'s `parent_inference` key. Do not touch `validate_session()` —
+`T-SES-50` proves it needs no change, since `parent_session` stays null for
+every non-`current` status.
+
+### Step 4 — RED and GREEN: session and delete CLI output
+
+Add:
 
 | Test ID | File | Required proof |
 |---|---|---|
-| `T-CPI-40` | `tests/unit/test_lineage_inference_store.py` | The full status/evidence mapping table, one row per status, including `changed_sources` for target-only, parent, and mixed mismatches. |
-| `T-CPI-41` | same | Deleting the freshness index yields `freshness_unknown`, not `current_at_last_analysis` — the exact gate-1 revival repro. |
-| `T-CPI-42` | same | A present index whose `targets` lacks this child yields `freshness_unknown`; an invalid, symlinked, or oversized index yields `freshness_unknown`. |
-| `T-CPI-43` | same | Appending one blank line to the target transcript yields `stale_sources` with `changed_sources == ("target",)`; the record is still readable and its parent ID unchanged. |
-| `T-CPI-44` | same | `remove_index_freshness` removes only the named key, is a no-op returning `False` for an absent file or key, and leaves mode `0o600`. |
-| `T-CPI-45` | same | A record with more than `MAX_SOURCE_FINGERPRINTS` entries is rejected as an invalid store. |
-| `T-CPI-46` | `tests/unit/test_claude_lineage_inference.py` | Three successive appends plus re-inference leave exactly one shard for that stem; the shard name is `{stem}.json`. |
-| `T-CPI-47` | same | The sweep removes the legacy v2 tree once, removes orphan stems, honors the age and byte caps oldest-first, respects the marker interval, counts failures without raising, and never touches the freshness index or the state store. |
-| `T-CPI-48` | same | Each of `max_files`, `max_entries`, `max_total_bytes`, and `max_candidates` raises `CorpusLimitError` with exact `limit`, `allowed`, `observed`, and `scope`. |
-| `T-CPI-49` | same | A freshness-index write failure increments `freshness_write_failures`, not `cache_write_failures`, and still returns a result. |
-| `T-CPI-50` | `tests/unit/test_lineage_inference_store.py` | `index_freshness_path` resolves under `XDG_STATE_HOME`; `update_index_freshness` writes there via `atomic_write_json` and, when a legacy `XDG_CACHE_HOME` file for the same session exists, deletes it after the successful write. |
-| `T-CPI-51` | same | `assess_inference` reads a state-path entry when present; when the state path is absent, it falls back to reading a legacy cache-only entry and evaluates it identically (not `freshness_unknown`); when both exist for the same child, the state-path entry wins. |
-| `T-CPI-52` | same | `remove_index_freshness` removes the entry from the state path if present there, else from the legacy cache path if present there; a no-op (`False`) only when absent from both. |
-| `T-SES-48` | `tests/unit/test_session.py` | A stale-source record produces `parent_inference.status == "last_known_good"` with the recorded parent ID, while `parent_session` stays null and `lineage.status` stays `not_found`. |
-| `T-SES-49` | same | The `parent_inference` object is present for all seven statuses with the exact documented field shape, including `not_consulted` when a planned claim exists and for Codex, and coexists with the existing `transcript` object without displacing it. |
-| `T-SES-50` | same | `session validate --has-parent` still fails with only a `last_known_good` or `freshness_unknown` record, and passes after a re-inference makes it `current`. This is the strict-validation guarantee. |
 | `T-CLI-36` | `tests/cli/test_session.py` | Human and JSON session output for `last_known_good` and `freshness_unknown`, including the exact notice and the rerun command, with no corpus discovery, no cache write, and no freshness write during `session`. |
 | `T-CLI-37` | `tests/cli/test_claude_parent.py` | `delete --source inferred` reports every additive field and actually removes the freshness entry; `delete --source planned` with a surviving inferred record retains the freshness entry and says so. |
-| `T-CLI-38` | `tests/cli/test_claude_parent.py` | Exceeding `max_files` with `infer --current`, `--session-id`, `--all`, and `--record` exits 3 with `claude_parent_incomplete_analysis`, emits one JSON error on stderr and nothing on stdout, and writes no inference, freshness, or registry state. |
-| `T-CLN-25` | `tests/cli/test_cleanup.py` | Real and `--dry-run` cleanup of a fork with a lineage claim disclose the retained claim, inferred record, freshness entry, store paths, and the exact removal command, and remove none of them. |
-| `T-CLN-26` | same | Cleanup of a target with no matching claim, and cleanup when a store read fails, both succeed with the neutral notice. |
 
-Run each focused file RED before its production change, then GREEN, then the
-repository gates: `just all`, `just check-matrix`, `just strict-collect`,
-`just clean-install`.
+In `cli.py`: add the `parent_inference` human-output line after `transcript:`
+(section 3); compose `remove_index_freshness` into the `delete` action per the
+rule in section 6 (`inferred` always removes it, `planned` only when no
+inferred record survives); add the additive result fields; extend `emit()`'s
+human branch to print list-valued keys one per line for `notices`.
+
+### Step 5 — RED and GREEN: bounded screen cache
+
+Add to `tests/unit/test_claude_lineage_inference.py`:
+
+| Test ID | Required proof |
+|---|---|
+| `T-CPI-46` | Three successive appends plus re-inference leave exactly one shard for that stem; the shard name is `{stem}.json`. |
+| `T-CPI-47` | The sweep removes the legacy v2 tree once, removes orphan stems, honors the age and byte caps oldest-first, respects the marker interval, counts failures without raising, and never touches the freshness index or the state store. |
+| `T-CPI-49` | A freshness-index write failure increments `freshness_write_failures`, not `cache_write_failures`, and still returns a result. |
+
+In `claude_lineage_inference.py` (section 4): move `_cache_root()` to
+`claude-lineage-index-v3`; flatten the shard filename to `{path.stem}.json`;
+add `sweep_cache()` with the marker-gated, bounded, six-step sweep; call it
+once from `ClaudeLineageCorpus.__init__` after `discover()`; split
+`work.cache_write_failures` into a distinct `work.freshness_write_failures`
+for the freshness-index write path in `infer_one().finish()`; add the six new
+`Work` counters. Independent of steps 1-4; may run before or after them.
+
+### Step 6 — RED and GREEN: structured corpus-limit refusal
+
+Add:
+
+| Test ID | File | Required proof |
+|---|---|---|
+| `T-CPI-48` | `tests/unit/test_claude_lineage_inference.py` | Each of `max_files`, `max_entries`, `max_total_bytes`, and `max_candidates` raises `CorpusLimitError` with exact `limit`, `allowed`, `observed`, and `scope`. |
+| `T-CLI-38` | `tests/cli/test_claude_parent.py` | Exceeding `max_files` with `infer --current`, `--session-id`, `--all`, and `--record` exits 3 with `claude_parent_incomplete_analysis`, emits one JSON error on stderr and nothing on stdout, and writes no inference, freshness, or registry state. |
+
+In `claude_lineage_inference.py` (section 7): add `class CorpusLimitError(ValueError)`;
+raise it at the four bare-`ValueError` limit sites in `discover()` and
+`infer_one()`. In `errors.py`: add `claude_parent_incomplete_analysis` to
+`ERROR_CATALOG` and `ClaudeParentIncompleteAnalysisError(ClaudeParentError)`,
+matching the existing `ClaudeParentNotRecordableError` subclass pattern
+exactly. In `cli.py`: catch `CorpusLimitError` (and the `TimeoutError` from
+`max_seconds`) around the unguarded `ClaudeLineageCorpus(environment)`
+construction and around `infer_one`, and raise the typed error with the
+`analysis`/`limit`/`remediation` document from section 7. Independent of every
+other step.
+
+### Step 7 — RED and GREEN: cleanup disclosure
+
+Add to `tests/cli/test_cleanup.py`:
+
+| Test ID | Required proof |
+|---|---|
+| `T-CLN-25` | Real and `--dry-run` cleanup of a fork with a lineage claim disclose the retained claim, inferred record, freshness entry, store paths, and the exact removal command, and remove none of them. |
+| `T-CLN-26` | Cleanup of a target with no matching claim, and cleanup when a store read fails, both succeed with the neutral notice. |
+
+In `cleanup.py` (section 5): correlate `read_lineage()` claims by resolved
+`worktree == plan.worktree`; for each matched `child_session_id`, check
+`read_inferences()` and the freshness index (state path, then legacy);
+preserve the existing generic notice verbatim as the first notice, then append
+the disclosure notices; add `CleanupResult.retained_metadata`. Depends on step
+1 for the state-path helper and step 5 for the `v3` cache-directory name used
+in the disclosure sentence about shared cache shards.
+
+### Step 8 — Documentation, conformance, and repository gates
+
+Apply the "Documentation and conformance delta" section below. Run focused
+tests after each GREEN step above, then:
+
+```bash
+just all
+just check-matrix
+just strict-collect
+just clean-install
+```
+
+Then obtain the gate-6 adversarial implementation review and an independent
+Codex second lens against the complete A10 diff. Absorb only findings promised
+by this design or introduced by A10; route unrelated findings under P02 Gate
+6.
 
 ## Documentation and conformance delta
 
