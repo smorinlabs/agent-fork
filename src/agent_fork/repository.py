@@ -10,6 +10,7 @@ from pathlib import Path
 from agent_fork.errors import PreconditionError
 from agent_fork.git import GitCommandError, run_git
 from agent_fork.text import escape_terminal_text
+from agent_fork.worktree_list import parse_worktree_list
 
 
 @dataclass(frozen=True)
@@ -121,12 +122,9 @@ def _worktree_branches(
 ) -> dict[str, Path]:
     result = run_git(parent, ["worktree", "list", "--porcelain"], env=env)
     branches: dict[str, Path] = {}
-    current_path: Path | None = None
-    for line in result.stdout.decode(errors="surrogateescape").splitlines():
-        if line.startswith("worktree "):
-            current_path = Path(line.removeprefix("worktree ")).resolve()
-        elif line.startswith("branch refs/heads/") and current_path is not None:
-            branches[line.removeprefix("branch refs/heads/")] = current_path
+    for record in parse_worktree_list(result.stdout):
+        if record.branch is not None:
+            branches[record.branch] = record.path
     return branches
 
 

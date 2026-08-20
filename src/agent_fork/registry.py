@@ -9,10 +9,11 @@ import time
 from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 from agent_fork.errors import RegistryBusyError
 from agent_fork.models import RegistryEntry
+from agent_fork.storage import atomic_write_json
+from agent_fork.xdg import xdg_path
 
 REGISTRY_VERSION = 1
 DEFAULT_LOCK_TIMEOUT = 5.0
@@ -20,10 +21,9 @@ DEFAULT_LOCK_TIMEOUT = 5.0
 
 def registry_path(env: Mapping[str, str] | None = None) -> Path:
     environment = os.environ if env is None else env
-    base = environment.get("XDG_STATE_HOME")
-    if base is None:
-        base = str(Path(environment.get("HOME", "~")).expanduser() / ".local/state")
-    return Path(base).expanduser() / "agent-fork" / "forks.json"
+    return xdg_path(
+        environment, "XDG_STATE_HOME", ".local/state", "agent-fork", "forks.json"
+    )
 
 
 def _decode(path: Path) -> list[RegistryEntry]:
@@ -72,27 +72,7 @@ def _atomic_write(path: Path, entries: list[RegistryEntry]) -> None:
         "version": REGISTRY_VERSION,
         "forks": [item.to_dict() for item in _ordered(entries)],
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_name: str | None = None
-    try:
-        with NamedTemporaryFile(
-            "w", encoding="utf-8", dir=path.parent, prefix=".forks-", delete=False
-        ) as temporary:
-            temporary_name = temporary.name
-            json.dump(document, temporary, sort_keys=True, separators=(",", ":"))
-            temporary.write("\n")
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        os.replace(temporary_name, path)
-        temporary_name = None
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        if temporary_name is not None:
-            Path(temporary_name).unlink(missing_ok=True)
+    atomic_write_json(path, document, prefix=".forks-")
 
 
 def read_registry(*, env: Mapping[str, str] | None = None) -> list[RegistryEntry]:

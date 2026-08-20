@@ -91,6 +91,13 @@ class SessionRepository:
 
 @dataclass(frozen=True)
 class SessionForkCommand:
+    """Native fork command availability for one inspected session.
+
+    Intentionally separate from ``SessionResumeCommand``: resume was added
+    alongside fork so the two command shapes can evolve independently with
+    distinct error messages.
+    """
+
     status: SessionForkStatus
     command: str | None
     child_session_id: str | None = None
@@ -117,6 +124,13 @@ class SessionForkCommand:
 
 @dataclass(frozen=True)
 class SessionResumeCommand:
+    """Native resume command availability for one inspected session.
+
+    Intentionally separate from ``SessionForkCommand``: resume was added
+    alongside fork so the two command shapes can evolve independently with
+    distinct error messages.
+    """
+
     status: SessionForkStatus
     command: str | None
 

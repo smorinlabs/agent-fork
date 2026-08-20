@@ -582,6 +582,7 @@ def _assert_completion_semantics(script):
         "config",
         "view",
         "validate",
+        "-o",
         "--worktree-base-dir",
         "--worktree-name",
         "--parent-session",
@@ -596,7 +597,11 @@ def _assert_completion_semantics(script):
         "zsh",
         "fish",
     ):
-        assert token in script or token.removeprefix("--") in script
+        if token in script or token.removeprefix("--") in script:
+            continue
+        if len(token) == 2 and token.startswith("-") and f"-s '{token[1:]}'" in script:
+            continue
+        raise AssertionError(f"missing completion token: {token!r}")
     assert "table" not in script
 
 

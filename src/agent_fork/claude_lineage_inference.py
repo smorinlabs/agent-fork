@@ -7,7 +7,6 @@ import json
 import os
 import re
 import stat as stat_module
-import tempfile
 import time
 from collections import deque
 from collections.abc import Iterator, Mapping
@@ -16,6 +15,9 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO, cast
+
+from agent_fork.storage import atomic_write_json
+from agent_fork.xdg import xdg_path
 
 UUID = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -267,8 +269,9 @@ def discover(env: Mapping[str, str], limits: Limits, work: Work) -> list[Path]:
 
 
 def _cache_root(env: Mapping[str, str]) -> Path:
-    base = Path(env.get("XDG_CACHE_HOME", Path(env.get("HOME", "~")) / ".cache"))
-    return base / "agent-fork" / "claude-lineage-index-v2"
+    return xdg_path(
+        env, "XDG_CACHE_HOME", ".cache", "agent-fork", "claude-lineage-index-v2"
+    )
 
 
 def _screen_record(raw: bytes) -> tuple[set[str], bool]:
@@ -469,47 +472,27 @@ def _screen(path: Path, env: Mapping[str, str], work: Work) -> Screen:
         always_candidate = True
     if always_candidate:
         work.screen_wildcards += 1
-    payload = (
-        json.dumps(
-            {
-                "schema": SCREEN_SCHEMA,
-                "version": SCREEN_SCHEMA_VERSION,
-                "scanner_version": SCANNER_VERSION,
-                "source": {"session_id": path.stem, "fingerprint": fp},
-                "mode": "always_candidate" if always_candidate else "exact",
-                "uuid_sha256": sorted(values),
-            },
-            separators=(",", ":"),
-        )
-        + "\n"
-    )
-    tmp_path: Path | None = None
+    document = {
+        "schema": SCREEN_SCHEMA,
+        "version": SCREEN_SCHEMA_VERSION,
+        "scanner_version": SCANNER_VERSION,
+        "source": {"session_id": path.stem, "fingerprint": fp},
+        "mode": "always_candidate" if always_candidate else "exact",
+        "uuid_sha256": sorted(values),
+    }
     try:
         if not cache_safe:
             raise OSError("unsafe Claude lineage cache root")
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(root, 0o700)
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=root,
+        atomic_write_json(
+            shard,
+            document,
+            fsync=False,
             prefix=f".{shard.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as stream:
-            tmp_path = Path(stream.name)
-            os.chmod(tmp_path, 0o600)
-            stream.write(payload)
-        os.replace(tmp_path, shard)
-        tmp_path = None
+        )
     except OSError:
         work.cache_write_failures += 1
-    finally:
-        if tmp_path is not None:
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError:
-                work.cache_write_failures += 1
     return Screen(frozenset(values), always_candidate)
 
 

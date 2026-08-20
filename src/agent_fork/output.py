@@ -15,11 +15,25 @@ STABLE_ERROR_CODES = tuple(ERROR_CATALOG)
 
 
 def json_line(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    """Render one machine-readable line with every non-ASCII codepoint escaped.
+
+    ``ensure_ascii=True`` is a safety property here, not a formatting
+    preference. Repository-controlled strings reach this function — branch
+    names, paths, session names — and JSON escapes only the C0 controls on its
+    own. Without this, C1 controls and bidi overrides such as U+202E would
+    reach the terminal verbatim and reorder the text a reader sees.
+    """
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
 
 def terminal_text(value: object) -> str:
-    """Render one untrusted scalar without terminal control characters."""
+    """Render one untrusted scalar without terminal control characters.
+
+    Intentionally separate from ``text.escape_terminal_text``: this path is
+    ASCII-only via a ``json.dumps`` trick and serves compact CLI table output,
+    while ``escape_terminal_text`` is surrogate-aware for repository-controlled
+    strings elsewhere.
+    """
     return json.dumps(str(value), ensure_ascii=True)[1:-1]
 
 

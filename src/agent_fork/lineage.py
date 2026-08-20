@@ -8,9 +8,10 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 from agent_fork.registry import registry_lock
+from agent_fork.storage import atomic_write_json
+from agent_fork.xdg import xdg_path
 
 LINEAGE_VERSION = 1
 
@@ -50,32 +51,35 @@ class LineageClaim:
 
 def lineage_path(env: Mapping[str, str] | None = None) -> Path:
     environment = os.environ if env is None else env
-    base = environment.get("XDG_STATE_HOME")
-    if base is None:
-        base = str(Path(environment.get("HOME", "~")).expanduser() / ".local/state")
-    return Path(base).expanduser() / "agent-fork" / "session-lineage.json"
+    return xdg_path(
+        environment,
+        "XDG_STATE_HOME",
+        ".local/state",
+        "agent-fork",
+        "session-lineage.json",
+    )
 
 
 def _decode(path: Path) -> list[LineageClaim]:
     if not path.exists():
         return []
-    document = json.loads(path.read_text())
-    if document.get("version") != LINEAGE_VERSION:
-        raise ValueError(f"invalid agent-fork lineage store: {path}")
-    return [LineageClaim(**item) for item in document["claims"]]
+    try:
+        document = json.loads(path.read_text())
+        if document.get("version") != LINEAGE_VERSION:
+            raise ValueError(f"invalid agent-fork lineage store: {path}")
+        return [LineageClaim(**item) for item in document["claims"]]
+    except (OSError, TypeError, KeyError, json.JSONDecodeError) as error:
+        raise ValueError(f"invalid agent-fork lineage store: {path}") from error
 
 
 def read_lineage(*, env: Mapping[str, str] | None = None) -> tuple[LineageClaim, ...]:
     path = lineage_path(env)
-    try:
-        return tuple(
-            sorted(
-                _decode(path),
-                key=lambda item: (item.created_at, item.agent, item.child_session_id),
-            )
+    return tuple(
+        sorted(
+            _decode(path),
+            key=lambda item: (item.created_at, item.agent, item.child_session_id),
         )
-    except (OSError, TypeError, KeyError, json.JSONDecodeError) as error:
-        raise ValueError(f"invalid agent-fork lineage store: {path}") from error
+    )
 
 
 def add_lineage(claim: LineageClaim, *, env: Mapping[str, str] | None = None) -> None:
@@ -94,27 +98,7 @@ def add_lineage(claim: LineageClaim, *, env: Mapping[str, str] | None = None) ->
             key=lambda item: (item.created_at, item.agent, item.child_session_id)
         )
         document = {"version": LINEAGE_VERSION, "claims": [asdict(x) for x in claims]}
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary_name: str | None = None
-        try:
-            with NamedTemporaryFile(
-                "w", encoding="utf-8", dir=path.parent, prefix=".lineage-", delete=False
-            ) as temporary:
-                temporary_name = temporary.name
-                json.dump(document, temporary, sort_keys=True, separators=(",", ":"))
-                temporary.write("\n")
-                temporary.flush()
-                os.fsync(temporary.fileno())
-            os.replace(temporary_name, path)
-            temporary_name = None
-            directory = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-        finally:
-            if temporary_name is not None:
-                Path(temporary_name).unlink(missing_ok=True)
+        atomic_write_json(path, document, prefix=".lineage-")
 
 
 def find_lineage(
@@ -140,21 +124,4 @@ def remove_lineage(
             if not (item.agent == agent and item.child_session_id == child_session_id)
         ]
         document = {"version": LINEAGE_VERSION, "claims": [asdict(x) for x in claims]}
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with NamedTemporaryFile(
-            "w", encoding="utf-8", dir=path.parent, prefix=".lineage-", delete=False
-        ) as temporary:
-            temporary_name = temporary.name
-            json.dump(document, temporary, sort_keys=True, separators=(",", ":"))
-            temporary.write("\n")
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        try:
-            os.replace(temporary_name, path)
-            directory = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-        finally:
-            Path(temporary_name).unlink(missing_ok=True)
+        atomic_write_json(path, document, prefix=".lineage-")

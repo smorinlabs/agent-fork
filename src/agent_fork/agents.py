@@ -471,6 +471,13 @@ def preflight_git(
 
 
 def _terminal_safe(value: str) -> bool:
+    """Reject command inputs that carry controls or bidi overrides.
+
+    Intentionally separate from ``output.terminal_text`` and
+    ``text.escape_terminal_text``: this is a predicate for native command
+    construction, not a renderer, and it also rejects bidi controls neither
+    escaper handles.
+    """
     return all(
         not (ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F)
         and character not in _BIDI_CONTROLS
