@@ -50,3 +50,16 @@ def test_empty_xdg_value_is_treated_as_unset():
     )
     assert resolved == Path("/home/example/.local/state/agent-fork")
     assert resolved.is_absolute()
+
+
+@pytest.mark.matrix("T-CFG-23")
+def test_empty_home_is_treated_as_unset():
+    """An empty HOME must not produce a relative state path either.
+
+    `env.get("HOME", "~")` returns the empty string when HOME is set but
+    empty, so the default never applies and `Path("")` yields a relative
+    result — state would land under the process working directory.
+    """
+    resolved = xdg_path({"HOME": ""}, "XDG_STATE_HOME", ".local/state", "agent-fork")
+    assert resolved.is_absolute()
+    assert str(resolved).endswith("/.local/state/agent-fork")
