@@ -292,7 +292,7 @@ repository-controlled text raw).
     ```
 
     `Inventory.untracked` is exactly that listing (`content.py:160`), so the
-    `unsupported untracked file type` raise (`materialize.py:60-63`) is
+    `unsupported untracked file type` raise (`materialize.py:56-59`) is
     unreachable from an entry that existed when the fork started. It is
     reachable only if a listed regular file is *replaced* by a non-regular
     one inside the fork window — which is case (c), not a file-type fault.
@@ -305,7 +305,7 @@ repository-controlled text raw).
     `_digest` (`content.py:165-170`) opens every carried path with no guard.
     There is therefore nothing to roll back on the default path; the original
     "rolls back the whole worktree" holds only under `--no-verify`, which
-    skips the snapshot and reaches `_copy_entry` (`materialize.py:45-63`).
+    skips the snapshot and reaches `_copy_entry` (`materialize.py:41-59`).
 
     ```bash
     echo secret > locked.txt && chmod 000 locked.txt
@@ -320,16 +320,16 @@ repository-controlled text raw).
     situation — notice and skip (`include.py:80-85`) — so the defect is two
     code paths answering one question differently. "Mid-copy deleted file" is
     **not** part of this case: it is case (c) reaching a different tripwire
-    (`_copy_entry`'s `lstat`, `materialize.py:48`).
+    (`_copy_entry`'s `lstat`, `materialize.py:44`).
 
   - **(c) Parent edited mid-fork — confirmed, deterministically reproduced;
     the rollback is correct and must stay.** The window runs from the status
     snapshot (`pipeline.py:113-115`) through the content snapshot
     (`pipeline.py:122-126`), worktree creation, and materialization
-    (`pipeline.py:132-139`) to the final parent re-read (`verify.py:149-153`)
+    (`pipeline.py:132-139`) to the final parent re-read (`verify.py:146-150`)
     — measured at roughly 0.5 s to 0.7 s of a 1.1 s command, and it widens
     with repository size because untracked entries are copied one at a time
-    (`materialize.py:187-188`). Sweeping the delay of a single background
+    (`materialize.py:177-178`). Sweeping the delay of a single background
     write pins the edges:
 
     ```bash
@@ -343,10 +343,10 @@ repository-controlled text raw).
     ```
 
     A write that changes a path's *status class* trips `parent-untouched`
-    (`verify.py:149-153`); a write that only changes bytes in an
-    already-modified path trips `parent-content` (`verify.py:140-147`), the
+    (`verify.py:146-150`); a write that only changes bytes in an
+    already-modified path trips `parent-content` (`verify.py:137-139`), the
     rung A1 added. When the write lands *before* transport reads the path,
-    `content-match` (`verify.py:143-147`) fires alongside it — re-validated
+    `content-match` (`verify.py:140-144`) fires alongside it — re-validated
     2026-08-17 against `722e1fd`:
     `parent-content (f1.txt: content differs), content-match (f1.txt: content
     differs)`. That second rung is the torn copy made visible: the child holds
@@ -362,6 +362,26 @@ repository-controlled text raw).
     writer — a dev-server log, a watch build, or another agent session working
     in the parent — which fails every attempt until the writer stops. That is
     what the original "or warn" half must cover.
+
+  **Re-validated 2026-08-20 against `46201c1`**, 51 commits later — A9, A13's
+  remediations, the P04/P05 session work, release plumbing, and PR #53's
+  consolidation of duplicated primitives. All three cases reproduce unchanged:
+  `_copy_entry` and every verification rung are behaviourally identical, so
+  only the line numbers cited above moved (`materialize.py` by 4 and 10 lines,
+  `verify.py` by 3; `content.py`, `pipeline.py`, and `include.py` unmoved).
+  The window re-measured on *fresh* repositories at roughly 0.45–0.8 s of a
+  ~1.0 s command, with run-to-run jitter large enough that a single trial
+  proves little. Direct evidence for the size-dependence claim: a parent
+  already carrying several fork worktrees stayed vulnerable past a 1.15 s
+  delay, where a fresh parent had closed the window before 0.8 s.
+
+  One re-evaluation finding for the fix design: PR #53 consolidated three
+  duplicated primitive families but left `_copy_entry` and the
+  `.worktreeinclude` copy loop (`include.py:74-86`) unmerged — a near-duplicate
+  pair whose *only* substantive divergence is the policy A5(b) is about, raise
+  versus notice-and-skip. The (b) remedy should therefore land as one shared
+  copy primitive taking the policy as a parameter, matching #53's pattern,
+  rather than as a second independent edit.
 
   Revised impact: **(a) none** (refuted); **(b) medium** — one unreadable
   carried path makes the repository unforkable, with an unattributable error;
