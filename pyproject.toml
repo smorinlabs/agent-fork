@@ -1,6 +1,6 @@
 [project]
 name = "agent-fork"
-version = "1.1.0"
+version = "1.2.0"
 description = "Fork a running coding-agent session: new branch + worktree carrying the current file state, verified, plus the exact paste command to continue (Claude Code, Codex)"
 readme = "README.md"
 authors = [

@@ -17,6 +17,7 @@ from agent_fork.agents import (
     assess_agent_signals,
     build_session_fork_command,
     build_session_resume_command,
+    codex_rollout_path,
 )
 from agent_fork.errors import PreconditionError, SessionValidationError
 from agent_fork.lineage import find_lineage
@@ -30,6 +31,7 @@ from agent_fork.repository import (
 
 CLAUDE_TRANSCRIPT_LIMIT = 1_048_576
 CLAUDE_RECORD_LIMIT = 10_000
+SAFE_SESSION_ID = re.compile(r"[A-Za-z0-9-]+")
 SessionForkStatus = Literal["available", "not_detected", "ambiguous", "unsafe_input"]
 
 
@@ -137,6 +139,22 @@ class SessionResumeCommand:
 
 
 @dataclass(frozen=True)
+class SessionTranscript:
+    path: Path | None
+    exists: bool
+
+    def __post_init__(self) -> None:
+        if self.path is None and self.exists:
+            raise ValueError("an unlocated transcript cannot exist")
+
+    def document(self) -> dict[str, object]:
+        return {
+            "path": str(self.path) if self.path is not None else None,
+            "exists": self.exists,
+        }
+
+
+@dataclass(frozen=True)
 class SessionInspection:
     agent: str | None
     current_session: SessionEvidence | None
@@ -146,6 +164,7 @@ class SessionInspection:
     repository: SessionRepository | None
     fork_command: SessionForkCommand
     resume_command: SessionResumeCommand
+    transcript: SessionTranscript
     notices: tuple[str, ...] = ()
     agent_signal: AgentSignalAssessment = field(
         default_factory=lambda: assess_agent_signals({})
@@ -172,6 +191,7 @@ class SessionInspection:
             ),
             "fork_command": self.fork_command.document(),
             "resume_command": self.resume_command.document(),
+            "transcript": self.transcript.document(),
         }
 
 
@@ -184,15 +204,35 @@ class SessionAssertions:
 
 
 def _claude_transcript(env: Mapping[str, str], cwd: Path, session_id: str) -> Path:
-    root = Path(env.get("CLAUDE_CONFIG_DIR", Path(env.get("HOME", "~")) / ".claude"))
+    # Absolute is part of the reported contract: a relative CLAUDE_CONFIG_DIR,
+    # or an absent HOME leaving the literal "~" fallback, would otherwise emit
+    # a relative transcript path.
+    root = (
+        Path(env.get("CLAUDE_CONFIG_DIR", Path(env.get("HOME", "~")) / ".claude"))
+        .expanduser()
+        .resolve()
+    )
     encoded = re.sub(r"[^a-zA-Z0-9]", "-", str(cwd.resolve()))
     return root / "projects" / encoded / f"{session_id}.jsonl"
+
+
+def _session_transcript(
+    agent: str, session_id: str, env: Mapping[str, str], directory: Path
+) -> SessionTranscript:
+    """Locate the session's on-disk transcript without reading its contents."""
+    if SAFE_SESSION_ID.fullmatch(session_id) is None:
+        return SessionTranscript(None, False)
+    if agent == "claude":
+        path = _claude_transcript(env, directory, session_id)
+        return SessionTranscript(path, path.is_file())
+    rollout = codex_rollout_path(AgentContext("codex", session_id), env)
+    return SessionTranscript(rollout, rollout is not None)
 
 
 def _claude_name(
     env: Mapping[str, str], cwd: Path, session_id: str
 ) -> tuple[str | None, str]:
-    if re.fullmatch(r"[A-Za-z0-9-]+", session_id) is None:
+    if SAFE_SESSION_ID.fullmatch(session_id) is None:
         return None, "not_found"
     path = _claude_transcript(env, cwd, session_id)
     root = Path(
@@ -285,6 +325,7 @@ def inspect_session(
             repository=repository,
             fork_command=SessionForkCommand("ambiguous", None),
             resume_command=SessionResumeCommand("ambiguous", None),
+            transcript=SessionTranscript(None, False),
             notices=tuple(notices),
             agent_signal=assessment,
         )
@@ -300,6 +341,7 @@ def inspect_session(
             repository=repository,
             fork_command=SessionForkCommand("not_detected", None),
             resume_command=SessionResumeCommand("not_detected", None),
+            transcript=SessionTranscript(None, False),
             notices=tuple(notices),
             agent_signal=assessment,
         )
@@ -328,6 +370,8 @@ def inspect_session(
     except UnsafeCommandInputError:
         resume_command = SessionResumeCommand("unsafe_input", None)
 
+    transcript = _session_transcript(agent, current_id, env, directory)
+
     def _inspection(
         agent: str,
         current_session: SessionEvidence,
@@ -343,6 +387,7 @@ def inspect_session(
             repository=repository,
             fork_command=fork_command,
             resume_command=resume_command,
+            transcript=transcript,
             notices=tuple(notices),
             agent_signal=assessment,
         )
