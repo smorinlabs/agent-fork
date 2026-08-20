@@ -878,3 +878,81 @@ with its rationale.
   `src/agent_fork/git.py:50-78`, `src/agent_fork/cli.py:1257-1268`
 - Contract text A12 closes: `REQUIREMENTS.md:132` (`REQ-22`),
   `REQUIREMENTS.md:134` (`REQ-24`), `README.md:526-527`
+
+---
+
+## Reevaluation against `origin/main` (2026-08-20)
+
+This branch was rebased onto `origin/main` (`46201c1`, the `refactor/src-
+duplication` merge, PR #53) — 31 commits landed since this plan's baseline.
+The rebase applied cleanly with zero conflicts. This section is the result of
+re-checking every load-bearing claim above against the post-rebase code and
+docs; it revises citations and numbering only. **No finding below changes the
+recommendation, the contracts, or the test plan's content.**
+
+**The fault surface this plan targets is untouched.** The refactor's own
+commit message lists its touched files (`agents.py`, `claude_lineage_
+inference.py`, `cleanup.py`, `cli.py`, `completion.py`, `config.py`,
+`lineage.py`, `lineage_inference_store.py`, `materialize.py`, `output.py`,
+`registry.py`, `repository.py`) — `include.py` is not among them, and its
+`run_setup_hook()` is byte-identical to the version this plan was written
+against. `git.py`'s `_signal_process_group()` / `run_git()` process-group
+pattern (the reuse target for Axis A) is unchanged. `rollback.py:19`'s
+`OperationInterrupted(BaseException)` is unchanged. `cli.py`'s `main()` still
+catches only `Exception`, so `OperationInterrupted` still escapes uncaught —
+Gate-1 fact 7 (the REQ-22 130/143 conformance gap) is still real and still
+open. A new regression test, `T-RBK-07`, landed in the interim for a related
+but distinct mechanism (macOS `EPERM` on an already-exited process during
+Git's own interrupted cleanup) — it does not cover the CLI-boundary gap this
+plan closes, and its presence confirms the reused process-group pattern is
+itself already trusted enough to have a dedicated regression test.
+
+**Citation drift (cosmetic, not substantive).** A few line numbers moved with
+the surrounding file's growth; the referenced code is unchanged in every case:
+`cli.py`'s `except Exception` clause is now at line **1229** (was 1257);
+`README.md`'s "Interrupts are handled" line is now **553** (was 526-527);
+`output.py`'s `DryRunOutput` is now at line **97** (was ~84); `config.py`'s
+`_FORK_KEYS` is now at line **22** (was ~21). These will self-correct during
+Step 1's RED pass against current `HEAD` and are not worth a standalone edit
+before then.
+
+**Test-matrix ID collisions (mechanical, must fix before Step 1).** The matrix
+grew from 404 rows at this plan's baseline to **441** today — other P02/P05
+work (A13(b)'s output/completion-parity rows, the bidi-escaping regression,
+the shared XDG resolver rows) claimed IDs in the ranges this plan reserved.
+Confirmed by direct check of `docs/testing/TEST-MATRIX.md`:
+
+| Prefix | Plan reserved | Now taken by unrelated rows | Actual next-free |
+|---|---|---|---|
+| `T-INC` | 08-16 | — (still free) | **08-16, unchanged** |
+| `T-RBK` | 08-09 | — (still free) | **08-09, unchanged** |
+| `T-CLI` | 32-34 | `T-CLI-32/33/34` (A13(b), completion parity) | **36-38** |
+| `T-OUT` | 23-24 | `T-OUT-23` (bidi-escaping regression) | **24-25** |
+| `T-CFG` | 18-20 | `T-CFG-18/19/20` (A13(b), XDG resolver) | **24-26** |
+
+Renumber `T-CLI-32/33/34 → 36/37/38`, `T-OUT-23/24 → 24/25`, and
+`T-CFG-18/19/20 → 24/25/26` when Step 1 actually adds rows to the matrix; the
+`T-INC` and `T-RBK` reservations need no change. This is expected churn from
+six P02 items having worktrees in flight concurrently, not a defect in this
+plan.
+
+**Finding outside this plan's scope, flagged for the owner.** The `P02-TS12`
+CONFIRMED-WITH-CORRECTION verdict this plan's Gate-1 evidence section
+reproduces verbatim was never committed to any branch —
+`git log --all -S "P02-TS12" -- projects/P02-agent-fork-fault-remediation.md`
+returns only the register's original creation commit. It existed solely as an
+uncommitted edit in the live main checkout as of 2026-08-18 (along with the
+supporting handoff doc, `docs/handoffs/2026-08-17-p02-a7-a13-validation.md`,
+which no commit on any branch has ever added). Neither is present in the live
+main checkout as of this reevaluation; the committed register still reads
+`- [ ] [P02-TS12] A12 adversarial verification (incl. Codex): hang/interrupt
+and untracked-hook execution repros`, pre-verdict. This design document is
+now the only durable, committed record of that verdict's substance. This is a
+register-file / process concern for the owner to resolve — out of scope for
+this planning worktree, which was instructed not to touch
+`projects/P02-agent-fork-fault-remediation.md`.
+
+**Conclusion.** The design, its recommendation, and its contracts stand
+unchanged. Before Step 1 begins: renumber the five collided test IDs per the
+table above, and separately decide how the TS12 verdict gets a durable
+committed home.
