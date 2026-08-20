@@ -7,7 +7,7 @@ verification verdict through implementation sign-off.
 |---|---|
 | 1. Adversarial verification | **CONFIRMED-WITH-CORRECTIONS** (2026-08-17) — matrices below; Codex second lens returned CONFIRM-WITH-CORRECTIONS, findings 5 and 6 narrow the verdict wording |
 | 3. Design doc | this document |
-| 4. Plan + adversarial plan review (incl. Codex) | **NOT IMPLEMENTATION-READY** on first pass (2026-08-17) — nine findings, four high; all absorbed below; **re-review required before gate 5** |
+| 4. Plan + adversarial plan review (incl. Codex) | **NOT IMPLEMENTATION-READY** on first pass (2026-08-17) — nine findings, four high; all absorbed below; **re-review required before gate 5**. Re-validated against main 2026-08-20 after 51 commits: fault unchanged, design holds, one new requirement (pathspec `:(literal)`) |
 | 5. Implementation (TDD, subagent-driven) | blocked on gate 4 re-review |
 | 6. Adversarial implementation review (incl. Codex) | pending |
 
@@ -130,6 +130,51 @@ parent — but that holds only with the semantic pins added under finding 4 belo
 The `--ignore-submodules` work from matrix 1 survives as the semantics of the
 opt-out path, not the default.
 
+## Re-validation against main, 2026-08-20
+
+The branch was rebased onto `origin/main` after **51 commits** landed —
+including the `refactor/src-duplication` consolidation (PR #53), A9 (PR #43),
+A13's targeted remediations (PR #49), A8 closed will-not-fix, P05's session
+transcript work, and version consolidation. Build on the rebased branch:
+`just all` green, **511 passed, 1 skipped** (was 430). What that changed for A6:
+
+**The fault is unchanged.** Matrix 1 re-run against the rebased build
+(`agent-fork 1.2.0`) reproduces byte for byte: the same four cells fail and roll
+back, the same two pass, every `stderr` string is identical to the 2026-08-17
+capture, and passing runs still emit `submodules copied opaquely: vendor/module`
+over an empty directory. Nothing in 51 commits touched the behaviour A6 targets.
+
+**Every cited call site survives; line numbers drifted.** `status_args`
+`verify.py:106` → **`verify.py:103`**; the `parent-untouched` capture
+`verify.py:150` → **`verify.py:146`**; the cleanup status probe
+`cleanup.py:185` → **`cleanup.py:170`**. Unmoved: `pipeline.py:114`,
+`content.py:158`, `materialize.py:109` (notice), and the forced worktree
+removals at `rollback.py:73` and `cleanup.py:393`. Semantics unchanged in all of
+them, so the design's reasoning holds.
+
+**One new hard requirement: A13's pathspec doctrine** (see recipe step 2).
+`materialize` now passes `:(literal)` and `:(exclude,literal)` operands, and
+`content.py:8-10` documents the rule. A6's recipe hands recorded submodule paths
+back to Git and predates it. Reproduced over-match, and the resulting divergence
+is invisible to verification.
+
+**Two structural changes to fold into implementation.** `_worktree_pairs`
+(`verify.py`) and `_worktrees` (`cleanup.py`) now delegate to the new
+`worktree_list.list_worktrees`, and the worktree-list rung compares
+`creation.path.resolve()`. Recursive verification should read worktrees through
+that helper rather than re-parsing porcelain.
+
+**Ordering and neighbours.** A5 (parent race, skip-with-notice) is still open, so
+the `parent-untouched` interactions this design assumes are still against
+unmodified code — but A6 now runs ahead of A3, A5, and A7. A8 closed
+**will-not-fix**, so no plan-token/immutable-plan remedy is coming from that
+item: A6's recursive snapshot has to stand on its own, which is how it is
+already specified. `just all` now runs `sync_versions.py --check`, so this PR
+must not touch version literals.
+
+**Nothing in the re-validation invalidates the design.** The gate-4 corrections
+stand, the flag decision stands, and the recipe changes by one prefix.
+
 ## Design
 
 ### Flag
@@ -183,7 +228,17 @@ state transport. Mirrors the existing `with_state` / `with_ignored` coupling at
 1. **Skip what the parent left cold** — if `<parent>/<path>/.git` is absent, the
    child stays uninitialized. Cell `g`.
 2. **Initialize from the parent's own checkout, never the remote:**
-   `git -c protocol.file.allow=always -c submodule.<name>.url=<parent>/<path> submodule update --init --checkout -- <path>`
+   `git -c protocol.file.allow=always -c submodule.<name>.url=<parent>/<path> submodule update --init --checkout -- :(literal)<path>`
+   **The `:(literal)` prefix is required** (re-validation 2026-08-20, inherited
+   from A13's pathspec doctrine, which landed after this plan was written —
+   `content.py:8-10` now states that recorded paths must never be handed back to
+   Git as bare pathspec operands). Reproduced on git 2.50.1: a parent holding
+   submodules `vendor/x*` and `vendor/xy`, with `vendor/xy` deliberately
+   deinitialized, ran `submodule update --init --checkout -- vendor/x*` in the
+   child and initialized **both** — the child gained a populated submodule the
+   parent keeps cold, and `git status` reported clean on both sides, so no rung
+   would catch it. The `:(literal)` form initialized only the target. Every
+   pathspec operand in this recipe takes the same treatment.
    Offline, and the only source guaranteed to hold commits the parent made
    locally and never pushed — which is what makes cell `c` carriable.
    `protocol.file.allow` is command-scoped for the path URL agent-fork computes
