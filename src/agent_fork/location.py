@@ -14,13 +14,22 @@ def _branch_escaped(branch: str) -> str:
 
 
 def validate_worktree_name(value: str) -> str:
-    """Validate an explicit worktree leaf without rewriting it."""
+    """Validate an explicit worktree leaf without rewriting it.
+
+    Control characters are refused alongside the separators. A newline is the
+    one that matters: it is legal in a POSIX filename but ambiguous in Git's
+    newline-delimited porcelain, so a worktree carrying one can be misread.
+    Refusing it here reports the problem against the argument the caller
+    actually passed, rather than surfacing later as a verification failure.
+    This is a guard, not the fix — ``worktree_list`` handles paths this
+    function never sees, such as those from ``--worktree-dir``.
+    """
     if (
         not value.strip()
         or value in {".", ".."}
-        or "\0" in value
         or "/" in value
         or "\\" in value
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
         or Path(value).is_absolute()
     ):
         raise PreconditionError(

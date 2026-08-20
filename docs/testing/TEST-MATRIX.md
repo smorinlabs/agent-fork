@@ -45,6 +45,11 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 | T-CFG-16 | invalid configured agent mode is rejected as `config_error` | baseline | U | live | REQ-45; D16 |
 | T-CFG-17 | Codex session-name resolution defaults on and obeys CLI > config precedence | agent=codex | U | live | REQ-46; D17 |
 | T-CFG-18 | output defaults to `text`; only `text` and `json` are valid effective values; an explicit fork output overrides an invalid lower-precedence `AGENT_FORK_OUTPUT` value | baseline | U | live | P02 A13(b); REQ-14; R5.1 |
+| T-CFG-19 | shared XDG resolver uses an explicit base and needs no `HOME` | baseline | U | live | REQ-41 |
+| T-CFG-20 | shared XDG resolver expands the `HOME` default rather than emitting a literal tilde | baseline | U | live | REQ-41 |
+| T-CFG-21 | shared XDG resolver returns the base itself when no trailing segments are given | baseline | U | live | REQ-41 |
+| T-CFG-22 | an empty XDG value counts as unset per the specification, so state never resolves relative to the current working directory | baseline | U | live | REQ-41 |
+| T-CFG-23 | an empty `HOME` counts as unset too — `env.get("HOME", "~")` returns the empty string when the variable is set but empty, so the default never applies | baseline | U | live | REQ-41 |
 
 ---
 
@@ -178,6 +183,12 @@ Varying axes: topology (the full set: plain@branch, plain@main, detached, linked
 | T-ANC-06 | bare@wt (invoked from a worktree of a bare project) — anchor == the invoking worktree's `HEAD^{commit}` | topology=bare@wt | F | live | REQ-20; RESEARCH §2.3/§4 |
 | T-ANC-07 | dot-bare@wt (`.bare/` layout, invoked from a worktree) — anchor == the invoking worktree's `HEAD^{commit}` | topology=dot-bare@wt | F | live | REQ-20; RESEARCH §2.3 |
 | T-ANC-08 | nested-bare — anchor == `HEAD^{commit}` resolved through the nested bare child | topology=nested-bare | F | live | REQ-20; RESEARCH §2.3 |
+| T-ANC-09 | shared porcelain parser resolves worktree paths and flushes the final record | baseline | U | live | REQ-20 |
+| T-ANC-10 | shared porcelain parser flushes a record that has no trailing blank line | baseline | U | live | REQ-20 |
+| T-ANC-11 | shared porcelain parser reports a detached worktree with no branch | baseline | U | live | REQ-20 |
+| T-ANC-12 | NUL-delimited porcelain preserves a newline-bearing worktree path, which the newline-delimited form truncates into a different location | baseline | U | live | P02 A13(d); REQ-20 |
+| T-ANC-13 | `-z` rejected with exit 129 on Git below 2.36 falls back to the newline-delimited request; rejection rather than silent ignoring is what makes the retry safe | baseline | U | live | P02 A13(d); REQ-20 |
+| T-ANC-14 | `-z` accepted issues no second invocation and yields the newline-safe path | baseline | U | live | P02 A13(d); REQ-20 |
 
 ---
 
@@ -231,6 +242,7 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 | T-LOC-15 | linked mirror-parent result accepts partial override after derivation | topology=linked-worktree | F | live | D15; REQ-44 |
 | T-LOC-16 | bare-at-root result accepts partial override after derivation | topology=bare@bare | F | live | D15; REQ-44 |
 | T-LOC-17 | symlinked base resolves once and remains contained | baseline | F | live | D15; REQ-44 |
+| T-LOC-18 | explicit worktree leaf rejects control characters, so a newline-bearing name is refused before any mutation rather than failing verification afterwards | baseline | U | live | P02 A13(d); REQ-44 |
 
 ---
 
@@ -353,6 +365,11 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-06 | registry ownership check feeds cleanup — `cleanup` refuses a target it didn't create unless `--force` | baseline | F | live | REQ-31; D12 |
 | T-REG-07 | `list` renders registry entries (name, branch, worktree path, agent, worktree-still-exists) in creation-time order; `-o json` emits the stable schema | baseline | C | live | REQ-31; D10; REQ-17 |
 | T-REG-08 | registry records mode and reads legacy records without mode as agent mode | baseline | U | live | REQ-45; D16 |
+| T-REG-09 | shared atomic writer round-trips a document through its same-directory rename | baseline | U | live | REQ-41 |
+| T-REG-10 | store stays owner-only (0600) under a restrictive umask — the explicit chmod is load-bearing because NamedTemporaryFile only requests the mode | baseline | U | live | REQ-41 |
+| T-REG-11 | no temporary file survives a successful atomic write | baseline | U | live | REQ-41 |
+| T-REG-12 | temporary file is removed when serialization fails mid-write | baseline | U | live | REQ-41 |
+| T-REG-13 | `fsync=False` still writes the document and still applies owner-only mode — the disposable-cache path | baseline | U | live | REQ-41 |
 
 ---
 
@@ -470,6 +487,7 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-20 | renamed Codex dry-run reports the resolution notice and UUID-based paste command | agent=codex | C | live | REQ-46; D17 |
 | T-OUT-21 | `fork --dry-run -o json` and `fork --dry-run --json` emit the same parseable preview object with every planned mutation and perform no mutation | baseline | C | live | REQ-17; REQ-18; issue #14; R4.2; R8.6 |
 | T-OUT-22 | `agent_signal_incomplete` is cataloged at exit 3 and emits exact non-secret `status`, `present`, and `missing` machine details | agent-signal=incomplete-marker | C | live | P02 A9; REQ-17; R7.8; R7.12 |
+| T-OUT-23 | bidirectional formatting characters are escaped by the renderer and rejected by the command-safety predicate, which share one control set | baseline | U | live | REQ-17 |
 
 ---
 
@@ -514,6 +532,9 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-30 | strict real fork refuses incomplete Claude input with exit 3 and exact JSON details | agent-signal=incomplete-id; agent-mode=strict | C | live | P02 A9; REQ-17; REQ-45 |
 | T-CLI-31 | automatic incomplete dry-run refusal emits one stderr JSON error and creates no Git or Agent Fork artifact | agent-signal=incomplete-marker; agent-mode=auto | C | live | P02 A9; REQ-18; REQ-29; R8.6 |
 | T-CLI-32 | every output parser accepts only `text` and `json`; all human-result defaults equal explicit `text`; `table` is rejected; completions omit it; invalid environment output follows each command's existing config-resolution contract | baseline | C | live | P02 A13(b); REQ-10; R4.2; R5.1 |
+| T-CLI-33 | every option argparse declares for each subcommand reaches the completion vocabulary — the parity invariant that replaces hand-maintained option lists | baseline | U | live | REQ-10 |
+| T-CLI-34 | every subcommand argparse declares reaches the completion vocabulary | baseline | U | live | REQ-10 |
+| T-CLI-35 | completion output choices are exactly those the parser accepts, so a removed alias cannot linger in completions | baseline | U | live | P02 A13(b); REQ-10 |
 
 ---
 
@@ -621,6 +642,9 @@ Varying axes: relationship (parent/child/sibling/unrelated), cache (cold/warm), 
 | T-CPI-34 | bulk projection caps candidate detail, notices, and scalar lengths explicitly | output+memory | U | live | REQ-48; D19 |
 | T-CPI-35 | deferred bulk spool uses restrictive private permissions | output+privacy | U | live | REQ-48; D19 |
 | T-CPI-36 | `infer --current` preserves absent/Codex-only behavior, refuses incomplete and ambiguous signals before discovery, and uses complete Claude context | agent-signal=absent/detected-codex/incomplete-marker/incomplete-id/ambiguous-partial-marker/ambiguous-partial-id/ambiguous-complete/detected-claude | C | live | P02 A9; REQ-48 |
+| T-CPI-37 | `read_lineage` normalizes a malformed store to the typed `invalid agent-fork lineage store` error | baseline | U | live | REQ-48 |
+| T-CPI-38 | `add_lineage` normalizes the same malformed store to the same typed error, so every entry point shares one contract | baseline | U | live | REQ-48 |
+| T-CPI-39 | invalid UTF-8 bytes normalize to the same typed error rather than escaping as a decoder-specific `UnicodeDecodeError` | baseline | U | live | REQ-48 |
 
 ---
 

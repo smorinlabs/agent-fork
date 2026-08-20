@@ -1,115 +1,121 @@
-"""Deterministic shell completion renderers for the static CLI grammar."""
+"""Deterministic shell completion renderers derived from the live CLI parser."""
 
 from __future__ import annotations
 
-COMMANDS = (
-    "fork",
-    "session",
-    "cleanup",
-    "list",
-    "doctor",
-    "config",
-    "completion",
-    "help",
-)
-GLOBAL_OPTIONS = (
-    "-h",
-    "--help",
-    "-V",
-    "--version",
-    "-v",
-    "--verbose",
-    "-q",
-    "--quiet",
-    "--config",
-    "--debug",
-)
-CONFIG_ACTIONS = ("view", "get", "set", "validate")
-OUTPUTS = ("text", "json")
-AGENTS = ("claude", "codex")
-SHELLS = ("bash", "zsh", "fish")
+import argparse
+from functools import lru_cache
+from typing import cast
 
-FORK_OPTIONS = (
-    "--agent",
-    "--parent-session",
-    "--codex-session-name-resolution",
-    "--no-codex-session-name-resolution",
-    "--require-agent",
-    "--no-agent",
-    "--branch",
-    "--worktree-dir",
-    "--worktree-base-dir",
-    "--worktree-name",
-    "--with-state",
-    "--no-with-state",
-    "--with-ignored",
-    "--no-with-ignored",
-    "--verify",
-    "--no-verify",
-    "--force",
-    "--dry-run",
-    "--copy",
-    "--no-copy",
-    "--output",
-    "--json",
-)
-CLEANUP_OPTIONS = (
-    "--force",
-    "--allow-dirty",
-    "--allow-unpushed",
-    "--keep-branch",
-    "--yes",
-    "--no-input",
-    "--dry-run",
-    "--output",
-    "--json",
-)
-SESSION_OPTIONS = (
-    "validate",
-    "claude-parent",
-    "list",
-    "show",
-    "infer",
-    "delete",
-    "--agent",
-    "--session-id",
-    "--parent-session-id",
-    "--has-parent",
-    "--no-parent",
-    "--current",
-    "--all",
-    "--source",
-    "--record",
-    "--record-all",
-    "--yes",
-    "--no-input",
-    "--output",
-    "--json",
-)
+
+@lru_cache(maxsize=1)
+def _vocabulary() -> dict[str, tuple[str, ...]]:
+    from agent_fork.cli import _parser
+
+    root = _parser()
+    commands = _subparser_choices(root)
+    config_actions = _subparser_choices(commands["config"])
+    completion_parser = commands["completion"]
+    shells = _choice_values(completion_parser, "shell")
+    outputs = _collect_choice_values(root, "output") or ("text", "json")
+    agents = _collect_choice_values(root, "agent") or ("claude", "codex")
+    return {
+        "commands": tuple(sorted(commands)),
+        "global_options": _option_strings(root),
+        "config_actions": tuple(sorted(config_actions)),
+        "fork_options": _parser_words(commands["fork"], include_choices=False),
+        "cleanup_options": _parser_words(commands["cleanup"], include_choices=False),
+        "session_options": _parser_words(commands["session"], include_choices=False),
+        "list_options": _parser_words(commands["list"], include_choices=False),
+        "doctor_options": _parser_words(commands["doctor"], include_choices=False),
+        "config_options": _parser_words(commands["config"], include_choices=False),
+        "outputs": outputs,
+        "agents": agents,
+        "shells": shells,
+    }
+
+
+def _subparser_choices(
+    parser: argparse.ArgumentParser,
+) -> dict[str, argparse.ArgumentParser]:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return cast(dict[str, argparse.ArgumentParser], dict(action.choices))
+    return {}
+
+
+def _option_strings(parser: argparse.ArgumentParser) -> tuple[str, ...]:
+    values: set[str] = set()
+    for action in parser._actions:
+        values.update(action.option_strings)
+    return tuple(sorted(values, key=lambda item: (not item.startswith("--"), item)))
+
+
+def _choice_values(parser: argparse.ArgumentParser, dest: str) -> tuple[str, ...]:
+    for action in parser._actions:
+        if action.dest == dest and action.choices is not None:
+            return tuple(str(value) for value in action.choices)
+    return ()
+
+
+def _collect_choice_values(
+    parser: argparse.ArgumentParser, dest: str
+) -> tuple[str, ...]:
+    values: set[str] = set(_choice_values(parser, dest))
+    for subparser in _subparser_choices(parser).values():
+        values.update(_collect_choice_values(subparser, dest))
+    return tuple(sorted(values))
+
+
+def _parser_words(
+    parser: argparse.ArgumentParser,
+    *,
+    include_choices: bool,
+) -> tuple[str, ...]:
+    words: set[str] = set(_option_strings(parser))
+    for action in parser._actions:
+        if include_choices and action.choices is not None:
+            words.update(str(value) for value in action.choices)
+    for name, subparser in _subparser_choices(parser).items():
+        words.add(name)
+        words.update(_parser_words(subparser, include_choices=include_choices))
+    return tuple(sorted(words, key=lambda item: (not item.startswith("-"), item)))
 
 
 def _words(values: tuple[str, ...]) -> str:
     return " ".join(values)
 
 
+def _joined(*parts: tuple[str, ...]) -> str:
+    return " ".join(_words(part) for part in parts)
+
+
 def _bash() -> str:
+    words = _vocabulary()
+    top_level = _joined(words["commands"], words["global_options"])
+    fork_words = _joined(words["fork_options"], words["agents"], words["outputs"])
+    session_words = _joined(words["session_options"], words["agents"], words["outputs"])
+    cleanup_words = _joined(words["cleanup_options"], words["outputs"])
+    list_words = _joined(words["list_options"], words["outputs"])
+    doctor_words = _joined(words["doctor_options"], words["outputs"])
+    config_words = _joined(
+        words["config_actions"], words["config_options"], words["outputs"]
+    )
     return f"""_agent_fork_complete() {{
     local cur command words
     cur="${{COMP_WORDS[COMP_CWORD]}}"
     command="${{COMP_WORDS[1]}}"
     if (( COMP_CWORD == 1 )); then
-        words="{_words(COMMANDS)} {_words(GLOBAL_OPTIONS)}"
+        words="{top_level}"
     else
         case "$command" in
-            fork) words="{_words(FORK_OPTIONS)} {_words(AGENTS)} {_words(OUTPUTS)}" ;;
-            session) words="{_words(SESSION_OPTIONS)} {_words(AGENTS)} \
-{_words(OUTPUTS)}" ;;
-            cleanup) words="{_words(CLEANUP_OPTIONS)} {_words(OUTPUTS)}" ;;
-            list|doctor) words="--output --json {_words(OUTPUTS)}" ;;
-            config) words="{_words(CONFIG_ACTIONS)} --output --json \
-{_words(OUTPUTS)}" ;;
-            completion) words="{_words(SHELLS)}" ;;
-            help) words="{_words(COMMANDS)}" ;;
+            fork) words="{fork_words}" ;;
+            session) words="{session_words}" ;;
+            cleanup) words="{cleanup_words}" ;;
+            list) words="{list_words}" ;;
+            doctor) words="{doctor_words}" ;;
+            config) words="{config_words}" ;;
+            completion) words="{_words(words["shells"])}" ;;
+            help) words="{_words(words["commands"])}" ;;
             *) words="" ;;
         esac
     fi
@@ -120,22 +126,35 @@ complete -F _agent_fork_complete agent-fork
 
 
 def _zsh() -> str:
+    words = _vocabulary()
+    top_level = _joined(words["commands"], words["global_options"])
+    fork_choices = _joined(words["fork_options"], words["agents"], words["outputs"])
+    session_choices = _joined(
+        words["session_options"], words["agents"], words["outputs"]
+    )
+    cleanup_choices = _joined(words["cleanup_options"], words["outputs"])
+    list_choices = _joined(words["list_options"], words["outputs"])
+    doctor_choices = _joined(words["doctor_options"], words["outputs"])
+    config_choices = _joined(
+        words["config_actions"], words["config_options"], words["outputs"]
+    )
     return f"""#compdef agent-fork
 _agent_fork() {{
   local -a commands choices
-  commands=({_words(COMMANDS)} {_words(GLOBAL_OPTIONS)})
+  commands=({top_level})
   if (( CURRENT == 2 )); then
     _describe 'command' commands
     return
   fi
   case $words[2] in
-    fork) choices=({_words(FORK_OPTIONS)} {_words(AGENTS)} {_words(OUTPUTS)}) ;;
-    session) choices=({_words(SESSION_OPTIONS)} {_words(AGENTS)} {_words(OUTPUTS)}) ;;
-    cleanup) choices=({_words(CLEANUP_OPTIONS)} {_words(OUTPUTS)}) ;;
-    list|doctor) choices=(--output --json {_words(OUTPUTS)}) ;;
-    config) choices=({_words(CONFIG_ACTIONS)} --output --json {_words(OUTPUTS)}) ;;
-    completion) choices=({_words(SHELLS)}) ;;
-    help) choices=({_words(COMMANDS)}) ;;
+    fork) choices=({fork_choices}) ;;
+    session) choices=({session_choices}) ;;
+    cleanup) choices=({cleanup_choices}) ;;
+    list) choices=({list_choices}) ;;
+    doctor) choices=({doctor_choices}) ;;
+    config) choices=({config_choices}) ;;
+    completion) choices=({_words(words["shells"])}) ;;
+    help) choices=({_words(words["commands"])}) ;;
   esac
   _describe 'argument' choices
 }}
@@ -143,47 +162,55 @@ compdef _agent_fork agent-fork
 """
 
 
+def _fish_option_lines(command: str, options: tuple[str, ...]) -> list[str]:
+    lines: list[str] = []
+    condition = f"__fish_seen_subcommand_from {command}"
+    for option in options:
+        if option.startswith("--"):
+            lines.append(
+                f"complete -c agent-fork -n '{condition}' "
+                f"-l '{option.removeprefix('--')}'"
+            )
+        elif len(option) == 2 and option.startswith("-"):
+            lines.append(f"complete -c agent-fork -n '{condition}' -s '{option[1:]}'")
+    return lines
+
+
 def _fish() -> str:
+    words = _vocabulary()
     lines = ["complete -c agent-fork -f"]
-    for option in GLOBAL_OPTIONS:
+    for option in words["global_options"]:
         if option.startswith("--"):
             lines.append(f"complete -c agent-fork -l '{option.removeprefix('--')}'")
         elif len(option) == 2:
             lines.append(f"complete -c agent-fork -s '{option[1:]}'")
-    for command in COMMANDS:
+    for command in words["commands"]:
         lines.append(
             f"complete -c agent-fork -n '__fish_use_subcommand' -a '{command}'"
         )
-    for action in CONFIG_ACTIONS:
+    for action in words["config_actions"]:
         lines.append(
             "complete -c agent-fork -n '__fish_seen_subcommand_from config' "
             f"-a '{action}'"
         )
-    for option in FORK_OPTIONS:
-        lines.append(
-            "complete -c agent-fork -n '__fish_seen_subcommand_from fork' "
-            f"-l '{option.removeprefix('--')}'"
-        )
-    for option in SESSION_OPTIONS:
-        if option.startswith("--"):
-            lines.append(
-                "complete -c agent-fork -n '__fish_seen_subcommand_from session' "
-                f"-l '{option.removeprefix('--')}'"
-            )
-    for option in CLEANUP_OPTIONS:
-        lines.append(
-            "complete -c agent-fork -n '__fish_seen_subcommand_from cleanup' "
-            f"-l '{option.removeprefix('--')}'"
-        )
+    for command, options in (
+        ("fork", words["fork_options"]),
+        ("session", words["session_options"]),
+        ("cleanup", words["cleanup_options"]),
+        ("list", words["list_options"]),
+        ("doctor", words["doctor_options"]),
+        ("config", words["config_options"]),
+    ):
+        lines.extend(_fish_option_lines(command, options))
     lines.extend(
         (
             "complete -c agent-fork -n '__fish_seen_subcommand_from fork' "
-            f"-a '{_words(AGENTS)} {_words(OUTPUTS)}'",
+            f"-a '{_words(words['agents'])} {_words(words['outputs'])}'",
             "complete -c agent-fork -n "
             "'__fish_seen_subcommand_from list doctor config' "
-            f"-a '{_words(OUTPUTS)}'",
+            f"-a '{_words(words['outputs'])}'",
             "complete -c agent-fork -n '__fish_seen_subcommand_from completion' "
-            f"-a '{_words(SHELLS)}'",
+            f"-a '{_words(words['shells'])}'",
         )
     )
     return "\n".join(lines) + "\n"

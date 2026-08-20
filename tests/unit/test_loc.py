@@ -201,3 +201,24 @@ def test_template_destination_can_replace_parent_and_leaf(repo_scenario):
         )
         == base / "leaf"
     )
+
+
+@pytest.mark.matrix("T-LOC-18")
+def test_worktree_name_rejects_control_characters():
+    """A newline is legal in a POSIX filename but ambiguous in Git porcelain.
+
+    Refusing it here reports the problem against the argument the caller
+    passed, before any branch or worktree is created, instead of surfacing
+    later as a verification failure that rolls a valid fork back. This is a
+    guard rather than the fix: paths reaching Git by other routes, such as
+    `--worktree-dir`, are handled by the NUL-delimited parser instead.
+    """
+    from agent_fork.errors import PreconditionError
+    from agent_fork.location import validate_worktree_name
+
+    for value in ("wt\nname", "wt\tname", "wt\rname", "wt\x00name", "wt\x7fname"):
+        with pytest.raises(PreconditionError) as caught:
+            validate_worktree_name(value)
+        assert caught.value.code == "invalid_worktree_name"
+
+    assert validate_worktree_name("ordinary-name") == "ordinary-name"

@@ -8,9 +8,10 @@ import os
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 from agent_fork.registry import registry_lock
+from agent_fork.storage import atomic_write_json
+from agent_fork.xdg import xdg_path
 
 VERSION = 2
 MAX_STORE_BYTES = 8 * 1024 * 1024
@@ -39,18 +40,24 @@ class InferenceRecord:
 
 def inference_path(env: Mapping[str, str] | None = None) -> Path:
     environment = os.environ if env is None else env
-    base = environment.get("XDG_STATE_HOME")
-    if base is None:
-        base = str(Path(environment.get("HOME", "~")).expanduser() / ".local/state")
-    return Path(base).expanduser() / "agent-fork" / "session-lineage-inferences.json"
+    return xdg_path(
+        environment,
+        "XDG_STATE_HOME",
+        ".local/state",
+        "agent-fork",
+        "session-lineage-inferences.json",
+    )
 
 
 def index_freshness_path(env: Mapping[str, str] | None = None) -> Path:
     environment = os.environ if env is None else env
-    base = environment.get("XDG_CACHE_HOME")
-    if base is None:
-        base = str(Path(environment.get("HOME", "~")).expanduser() / ".cache")
-    return Path(base).expanduser() / "agent-fork" / "claude-lineage-freshness.json"
+    return xdg_path(
+        environment,
+        "XDG_CACHE_HOME",
+        ".cache",
+        "agent-fork",
+        "claude-lineage-freshness.json",
+    )
 
 
 def update_index_freshness(
@@ -78,29 +85,11 @@ def update_index_freshness(
             "analysis_index_generation": analysis_index_generation,
         }
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        temporary_name: str | None = None
-        try:
-            with NamedTemporaryFile(
-                "w",
-                encoding="utf-8",
-                dir=path.parent,
-                prefix=".freshness-",
-                delete=False,
-            ) as stream:
-                temporary_name = stream.name
-                os.chmod(temporary_name, 0o600)
-                json.dump(
-                    {"version": 1, "targets": entries},
-                    stream,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-                stream.write("\n")
-            os.replace(temporary_name, path)
-            temporary_name = None
-        finally:
-            if temporary_name is not None:
-                Path(temporary_name).unlink(missing_ok=True)
+        atomic_write_json(
+            path,
+            {"version": 1, "targets": entries},
+            prefix=".freshness-",
+        )
 
 
 def _decode(path: Path) -> list[InferenceRecord]:
@@ -216,23 +205,7 @@ def _write(path: Path, records: list[InferenceRecord]) -> None:
             for x in sorted(records, key=lambda y: (y.analyzed_at, y.child_session_id))
         ],
     }
-    temporary_name: str | None = None
-    try:
-        with NamedTemporaryFile(
-            "w", encoding="utf-8", dir=path.parent, prefix=".inferences-", delete=False
-        ) as stream:
-            temporary_name = stream.name
-            os.chmod(temporary_name, 0o600)
-            json.dump(document, stream, sort_keys=True, separators=(",", ":"))
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_name, path)
-        temporary_name = None
-        os.chmod(path, 0o600)
-    finally:
-        if temporary_name is not None:
-            Path(temporary_name).unlink(missing_ok=True)
+    atomic_write_json(path, document, prefix=".inferences-")
 
 
 def add_inference(

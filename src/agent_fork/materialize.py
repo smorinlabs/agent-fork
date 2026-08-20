@@ -28,10 +28,6 @@ class MaterializeResult:
     notices: tuple[str, ...]
 
 
-def _nul_paths(data: bytes) -> list[str]:
-    return [os.fsdecode(value) for value in data.split(b"\0") if value]
-
-
 def _safe_destination(root: Path, relative: str) -> Path:
     candidate = (root / relative).resolve(strict=False)
     resolved_root = root.resolve()
@@ -79,20 +75,6 @@ def _apply_patch(
         input_bytes=patch,
     )
     return True
-
-
-def _intent_to_add_paths(parent: Path, *, env: Mapping[str, str] | None) -> list[str]:
-    visible = run_git(
-        parent,
-        ["diff", "--cached", "--ita-visible-in-index", "--name-only", "-z"],
-        env=env,
-    )
-    hidden = run_git(
-        parent,
-        ["diff", "--cached", "--ita-invisible-in-index", "--name-only", "-z"],
-        env=env,
-    )
-    return sorted(set(_nul_paths(visible.stdout)) - set(_nul_paths(hidden.stdout)))
 
 
 def _submodule_notices(
