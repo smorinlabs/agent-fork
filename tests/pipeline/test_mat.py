@@ -42,6 +42,46 @@ def _status(world, path=None):
     ).stdout
 
 
+def _fork_materialized(world, *, name):
+    """Run the public pipeline and prove its failure path rolls back cleanly."""
+    import subprocess
+
+    from agent_fork.pipeline import ForkRequest, fork
+
+    destination = world.parent_path.parent / f"fork-child-{name}"
+    branch = f"fork/{name}"
+    try:
+        result = fork(
+            ForkRequest(
+                parent=world.parent_path,
+                destination=destination,
+                name=name,
+                branch=branch,
+                agent=None,
+                git_version_output="git version 2.43.0",
+            ),
+            env=world.env,
+        )
+    except Exception:
+        assert not destination.exists()
+        branch_lookup = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(world.parent_path),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+            ],
+            env=world.env,
+        )
+        assert branch_lookup.returncode != 0
+        raise
+    world.child_path = result.creation.path
+    return world
+
+
 @pytest.mark.matrix("T-MAT-01")
 def test_staged_only_file_transported_byte_identical(repo_scenario):
     """T-MAT-01 — a staged-only file transports with index/worktree status A and
@@ -255,18 +295,85 @@ def test_rename_and_edit_transported_correctly(repo_scenario):
 
 @pytest.mark.matrix("T-MAT-12")
 def test_intent_to_add_file_transported_as_ita(repo_scenario):
-    """T-MAT-12 — an intent-to-add file transports as ITA, not as an untracked file.
+    """T-MAT-12 — intent-to-add filenames are literal Git operands.
 
-    Given:  a file staged with `git add -N` (intent-to-add)
-    Expect: cached diff uses `--ita-invisible-in-index`, the working-tree patch is
-            applied before `git add -N`; child shows ` A` not `??` (ITA-aware oracle)
-    Source: REQ-21 (A3)
+    Given:  a normal ITA file, two ITA pattern names overlapping an ordinary changed
+            file, and an ITA filename beginning with `:(glob)`
+    Expect: each filename is handled literally; child bytes, status, and full index
+            match the parent; a materialization regression rolls back branch/worktree
+    Source: REQ-21 (A3); P02 A13(e); issue #29
     """
-    from conftest import intent_to_add
+    import subprocess
+
+    from conftest import intent_to_add, unstaged
 
     world = _materialized(repo_scenario, states=(intent_to_add("intent.txt"),))
     assert _status(world) == b" A intent.txt\0"
     assert world.index_diff(world.parent_path, world.child_path) == []
+    assert (world.child_path / "intent.txt").read_bytes() == b"intent\n"
+
+    overlap = repo_scenario(
+        "plain@main",
+        states=(unstaged("src/a.txt"),),
+    )
+    expected = {
+        "src/[a].txt": b"first ita\n",
+        "src/[ab].txt": b"second ita\n",
+        "src/a.txt": b"unstaged\n",
+    }
+    for relative in ("src/[a].txt", "src/[ab].txt"):
+        path = overlap.parent_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(expected[relative])
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(overlap.parent_path),
+                "add",
+                "--intent-to-add",
+                "--",
+                f":(literal){relative}",
+            ],
+            env=overlap.env,
+            capture_output=True,
+            check=True,
+        )
+    overlap_parent_before = overlap.parent_snapshot()
+    _fork_materialized(overlap, name="literal-overlap")
+    assert overlap.parent_snapshot() == overlap_parent_before
+    assert _status(overlap) == (b" A src/[a].txt\0 A src/[ab].txt\0 M src/a.txt\0")
+    assert overlap.index_diff(overlap.parent_path, overlap.child_path) == []
+    for relative, content in expected.items():
+        assert (overlap.child_path / relative).read_bytes() == content
+
+    leading_magic = repo_scenario("plain@main")
+    relative = ":(glob)leading*.txt"
+    content = b"leading pathspec magic is a literal filename\n"
+    (leading_magic.parent_path / relative).write_bytes(content)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(leading_magic.parent_path),
+            "add",
+            "--intent-to-add",
+            "--",
+            f":(literal){relative}",
+        ],
+        env=leading_magic.env,
+        capture_output=True,
+        check=True,
+    )
+    leading_parent_before = leading_magic.parent_snapshot()
+    _fork_materialized(leading_magic, name="literal-leading-magic")
+    assert leading_magic.parent_snapshot() == leading_parent_before
+    assert _status(leading_magic) == b" A :(glob)leading*.txt\0"
+    assert (
+        leading_magic.index_diff(leading_magic.parent_path, leading_magic.child_path)
+        == []
+    )
+    assert (leading_magic.child_path / relative).read_bytes() == content
 
 
 @pytest.mark.matrix("T-MAT-13")

@@ -15,19 +15,103 @@ from typing import Literal
 from agent_fork.errors import (
     AgentDetectionError,
     AgentPreflightError,
+    AgentSignalIncompleteError,
     PreconditionError,
     SessionNameAmbiguousError,
     SessionResolutionUnavailableError,
 )
 from agent_fork.git import PRODUCT_GIT_MIN
+from agent_fork.text import BIDI_CONTROLS
 
 AgentName = Literal["claude", "codex"]
+AgentSignalStatus = Literal["absent", "incomplete", "detected", "ambiguous"]
+AgentSignalName = Literal[
+    "CLAUDECODE=1",
+    "CLAUDE_CODE_SESSION_ID",
+    "CODEX_THREAD_ID",
+]
 
 
 @dataclass(frozen=True)
 class AgentContext:
     agent: AgentName
     parent_session_id: str
+
+
+@dataclass(frozen=True)
+class AgentSignalAssessment:
+    status: AgentSignalStatus
+    context: AgentContext | None
+    present: tuple[AgentSignalName, ...]
+    missing: tuple[AgentSignalName, ...]
+
+    def document(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "present": list(self.present),
+            "missing": list(self.missing),
+        }
+
+    def diagnosis(self) -> str:
+        if self.status == "absent":
+            return "no agent signal is present"
+        if self.status == "incomplete":
+            return f"incomplete Claude signal; missing {', '.join(self.missing)}"
+        if self.status == "ambiguous":
+            if not self.missing:
+                return "both Claude and Codex signals are present"
+            return (
+                "Claude and Codex signals are present; incomplete Claude signal is "
+                f"missing {', '.join(self.missing)}"
+            )
+        assert self.context is not None
+        return f"detected {self.context.agent} signal"
+
+
+def assess_agent_signals(env: Mapping[str, str]) -> AgentSignalAssessment:
+    """Classify supported ambient agent signals without performing I/O."""
+    claude_marker = env.get("CLAUDECODE") == "1"
+    claude_id = env.get("CLAUDE_CODE_SESSION_ID")
+    claude_session = bool(claude_id)
+    codex_id = env.get("CODEX_THREAD_ID")
+    codex_thread = bool(codex_id)
+
+    present_values: list[AgentSignalName] = []
+    if claude_marker:
+        present_values.append("CLAUDECODE=1")
+    if claude_session:
+        present_values.append("CLAUDE_CODE_SESSION_ID")
+    if codex_thread:
+        present_values.append("CODEX_THREAD_ID")
+
+    missing_values: list[AgentSignalName] = []
+    if claude_marker != claude_session:
+        missing_values.append(
+            "CLAUDE_CODE_SESSION_ID" if claude_marker else "CLAUDECODE=1"
+        )
+
+    if codex_thread and (claude_marker or claude_session):
+        status: AgentSignalStatus = "ambiguous"
+        context = None
+    elif claude_marker != claude_session:
+        status = "incomplete"
+        context = None
+    elif claude_marker and claude_session:
+        status = "detected"
+        context = AgentContext("claude", claude_id or "")
+    elif codex_thread:
+        status = "detected"
+        context = AgentContext("codex", codex_id or "")
+    else:
+        status = "absent"
+        context = None
+
+    return AgentSignalAssessment(
+        status=status,
+        context=context,
+        present=tuple(present_values),
+        missing=tuple(missing_values),
+    )
 
 
 @dataclass(frozen=True)
@@ -81,22 +165,6 @@ _HELP_ARGS: dict[str, tuple[str, ...]] = {
     "codex": ("fork", "--help"),
 }
 _VERSION = re.compile(r"(?<![\d.])(\d+)\.(\d+)(?:\.(\d+))?")
-_BIDI_CONTROLS = frozenset(
-    {
-        "\u061c",
-        "\u200e",
-        "\u200f",
-        "\u202a",
-        "\u202b",
-        "\u202c",
-        "\u202d",
-        "\u202e",
-        "\u2066",
-        "\u2067",
-        "\u2068",
-        "\u2069",
-    }
-)
 
 
 def parse_version(output: str) -> tuple[int, int, int]:
@@ -191,9 +259,19 @@ def _codex_home(env: Mapping[str, str]) -> Path:
     return Path(env.get("HOME", "~")).expanduser() / ".codex"
 
 
-def codex_rollout_exists(context: AgentContext, env: Mapping[str, str]) -> bool:
+def codex_rollout_path(context: AgentContext, env: Mapping[str, str]) -> Path | None:
+    """Locate one thread's rollout file; the newest match wins when several exist."""
     pattern = f"sessions/*/*/*/rollout-*-{context.parent_session_id}.jsonl"
-    return any(_codex_home(env).glob(pattern))
+    # Absolute is part of the reported contract and a configured CODEX_HOME (or
+    # the HOME fallback) may be relative. Resolve here rather than in
+    # _codex_home() so the preflight existence check keeps its exact behavior.
+    root = _codex_home(env).resolve()
+    matches = sorted(match for match in root.glob(pattern) if match.is_file())
+    return matches[-1] if matches else None
+
+
+def codex_rollout_exists(context: AgentContext, env: Mapping[str, str]) -> bool:
+    return codex_rollout_path(context, env) is not None
 
 
 def preflight_agent(
@@ -378,9 +456,16 @@ def preflight_git(
 
 
 def _terminal_safe(value: str) -> bool:
+    """Reject command inputs that carry controls or bidi overrides.
+
+    Intentionally separate from ``output.terminal_text`` and
+    ``text.escape_terminal_text``: this is a predicate for native command
+    construction, not a renderer, and it also rejects bidi controls neither
+    escaper handles.
+    """
     return all(
         not (ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F)
-        and character not in _BIDI_CONTROLS
+        and character not in BIDI_CONTROLS
         for character in value
     )
 
@@ -392,6 +477,7 @@ def _render_native_command(
     child_session_id: str | None,
     name: str | None,
     extra_args: tuple[str, ...],
+    mode: Literal["fork", "resume"] = "fork",
 ) -> str:
     """Render the shared native-command grammar with one quoting boundary."""
     values = [str(directory), context.parent_session_id, *extra_args]
@@ -406,6 +492,19 @@ def _render_native_command(
 
     quote = shlex.quote
     suffix = "".join(f" {quote(value)}" for value in extra_args)
+    if mode == "resume":
+        if child_session_id is not None:
+            raise ValueError("resume command must not carry a child session ID")
+        if context.agent == "claude":
+            command = (
+                f"cd {quote(str(directory))} && claude "
+                f"--resume {quote(context.parent_session_id)}{suffix}"
+            )
+            return command.rstrip()
+        return (
+            f"codex resume {quote(context.parent_session_id)} "
+            f"-C {quote(str(directory))}{suffix}"
+        )
     if context.agent == "claude":
         if child_session_id is None:
             raise ValueError("Claude native command requires a child session ID")
@@ -466,6 +565,21 @@ def build_session_fork_command(
     return LaunchCommand(command, child, ())
 
 
+def build_session_resume_command(
+    context: AgentContext, *, directory: Path
+) -> LaunchCommand:
+    """Construct the read-only in-place resume command: no fork, no new session."""
+    command = _render_native_command(
+        context,
+        directory=directory,
+        child_session_id=None,
+        name=None,
+        extra_args=(),
+        mode="resume",
+    )
+    return LaunchCommand(command, None, ())
+
+
 def detect_agent(
     env: Mapping[str, str],
     *,
@@ -496,23 +610,14 @@ def detect_agent(
     if explicit_parent_session is not None:
         raise AgentDetectionError("--parent-session requires an explicit --agent")
 
-    claude_id = env.get("CLAUDE_CODE_SESSION_ID")
-    claude = env.get("CLAUDECODE") == "1" and bool(claude_id)
-    codex_id = env.get("CODEX_THREAD_ID")
-    codex = bool(codex_id)
-
-    if claude == codex:
-        state = (
-            "both Claude and Codex signals are present"
-            if claude
-            else "no agent signal is present"
-        )
+    assessment = assess_agent_signals(env)
+    if assessment.status == "incomplete":
+        raise AgentSignalIncompleteError(assessment.present, assessment.missing)
+    if assessment.context is None:
         raise AgentDetectionError(
-            f"{state}; pass --agent and --parent-session explicitly"
+            f"{assessment.diagnosis()}; pass --agent and --parent-session explicitly"
         )
-    if claude:
-        return AgentContext(agent="claude", parent_session_id=claude_id or "")
-    return AgentContext(agent="codex", parent_session_id=codex_id or "")
+    return assessment.context
 
 
 def resolve_agent_mode(
@@ -538,8 +643,17 @@ def resolve_agent_mode(
             explicit_agent=explicit_agent,
             explicit_parent_session=explicit_parent_session,
         )
-    claude = env.get("CLAUDECODE") == "1" and bool(env.get("CLAUDE_CODE_SESSION_ID"))
-    codex = bool(env.get("CODEX_THREAD_ID"))
-    if mode == "auto" and not claude and not codex:
+    assessment = assess_agent_signals(env)
+    if mode == "auto" and assessment.status == "absent":
         return None
-    return detect_agent(env)
+    if assessment.status == "incomplete":
+        raise AgentSignalIncompleteError(
+            assessment.present,
+            assessment.missing,
+            allow_git_only=True,
+        )
+    if assessment.context is None:
+        raise AgentDetectionError(
+            f"{assessment.diagnosis()}; pass --agent and --parent-session explicitly"
+        )
+    return assessment.context

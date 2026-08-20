@@ -19,9 +19,42 @@ _CONTROL_ESCAPES = {
     "\r": r"\r",
 }
 
+# Bidirectional formatting characters reorder how text is displayed without
+# being control bytes, so the C0/C1 ranges below do not cover them. A branch
+# name carrying U+202E can make the rendered line read differently from the
+# name that is actually stored. `agents` imports this set for its own
+# terminal-safety predicate rather than keeping a second copy.
+#
+# Spelled as escapes, never as literal characters. These codepoints are
+# invisible in an editor and in a diff, so a literal set cannot be reviewed:
+# nobody could tell a correct entry from a substituted or missing one. That
+# is the very property this module exists to neutralize, and Ruff's PLE2502
+# flags it (not enabled here, which is why the lint gate stayed green).
+BIDI_CONTROLS = frozenset(
+    {
+        "\u061c",  # ARABIC LETTER MARK
+        "\u200e",  # LEFT-TO-RIGHT MARK
+        "\u200f",  # RIGHT-TO-LEFT MARK
+        "\u202a",  # LEFT-TO-RIGHT EMBEDDING
+        "\u202b",  # RIGHT-TO-LEFT EMBEDDING
+        "\u202c",  # POP DIRECTIONAL FORMATTING
+        "\u202d",  # LEFT-TO-RIGHT OVERRIDE
+        "\u202e",  # RIGHT-TO-LEFT OVERRIDE
+        "\u2066",  # LEFT-TO-RIGHT ISOLATE
+        "\u2067",  # RIGHT-TO-LEFT ISOLATE
+        "\u2068",  # FIRST STRONG ISOLATE
+        "\u2069",  # POP DIRECTIONAL ISOLATE
+    }
+)
+
 
 def escape_terminal_text(value: str) -> str:
-    """Render ``value`` printable: control bytes and surrogates become escapes."""
+    """Render ``value`` printable: control bytes and surrogates become escapes.
+
+    Bidirectional formatting characters are escaped too. They are not control
+    bytes, so the C0/C1 ranges miss them, but they reorder displayed text and
+    are therefore a spoofing vector in any repository-controlled string.
+    """
     escaped: list[str] = []
     for character in value:
         codepoint = ord(character)
@@ -31,6 +64,8 @@ def escape_terminal_text(value: str) -> str:
             escaped.append(_CONTROL_ESCAPES[character])
         elif codepoint < 0x20 or 0x7F <= codepoint <= 0x9F:
             escaped.append(f"\\x{codepoint:02x}")
+        elif character in BIDI_CONTROLS:
+            escaped.append(f"\\u{codepoint:04x}")
         elif 0xDC80 <= codepoint <= 0xDCFF:
             escaped.append(f"\\x{codepoint - 0xDC00:02x}")
         elif 0xD800 <= codepoint <= 0xDFFF:

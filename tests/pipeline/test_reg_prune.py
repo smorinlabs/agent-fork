@@ -33,7 +33,7 @@ def _worktree_of(stdout):
     )
 
 
-@pytest.mark.matrix("T-REG-13")
+@pytest.mark.matrix("T-REG-18")
 def test_cleanup_refuses_when_the_worktree_was_removed_by_hand(repo_scenario):
     from conftest import run_cli
 
@@ -48,7 +48,7 @@ def test_cleanup_refuses_when_the_worktree_was_removed_by_hand(repo_scenario):
     assert len(_rows(world.env)) == 1, "a refusal must not remove the record"
 
 
-@pytest.mark.matrix("T-REG-14")
+@pytest.mark.matrix("T-REG-19")
 def test_cleanup_refuses_when_the_branch_was_recreated_elsewhere(repo_scenario):
     """The pair must match: a live path on a different branch is not the row."""
     from conftest import run_cli
@@ -70,7 +70,7 @@ def test_cleanup_refuses_when_the_branch_was_recreated_elsewhere(repo_scenario):
     assert b"cleanup_registry_stale" in result.stderr
 
 
-@pytest.mark.matrix("T-REG-15")
+@pytest.mark.matrix("T-REG-20")
 def test_prune_removes_only_records_whose_worktree_is_gone(repo_scenario):
     from conftest import run_cli
 
@@ -92,7 +92,7 @@ def test_prune_removes_only_records_whose_worktree_is_gone(repo_scenario):
     assert [row["name"] for row in rows] == ["kept"]
 
 
-@pytest.mark.matrix("T-REG-16")
+@pytest.mark.matrix("T-REG-21")
 def test_prune_keeps_a_record_whose_path_another_repository_occupies(repo_scenario):
     """Path reuse is reported, never pruned: the work may belong to someone."""
     from conftest import run_cli
@@ -121,7 +121,7 @@ def test_prune_keeps_a_record_whose_path_another_repository_occupies(repo_scenar
     assert len(_rows(shared)) == 1, "the record must survive"
 
 
-@pytest.mark.matrix("T-REG-23")
+@pytest.mark.matrix("T-REG-28")
 def test_prune_reports_path_reuse_even_on_a_matching_branch_name(repo_scenario):
     """The dangerous variant: same path AND same branch, other repository."""
     from conftest import run_cli
@@ -153,7 +153,7 @@ def test_prune_reports_path_reuse_even_on_a_matching_branch_name(repo_scenario):
     assert len(_rows(shared)) == 1
 
 
-@pytest.mark.matrix("T-REG-18")
+@pytest.mark.matrix("T-REG-23")
 def test_v1_record_without_a_repository_is_still_cleanable(repo_scenario):
     """Migration keeps pre-1.1 records usable: liveness, not identity, decides."""
     from agent_fork.registry import registry_path
@@ -183,7 +183,7 @@ def test_v1_record_without_a_repository_is_still_cleanable(repo_scenario):
     assert _rows(world.env) == []
 
 
-@pytest.mark.matrix("T-REG-19")
+@pytest.mark.matrix("T-REG-24")
 def test_forking_backfills_a_repository_onto_a_live_legacy_record(repo_scenario):
     """Backfill takes its evidence from live enumeration, not a stored path."""
     from agent_fork.registry import registry_path
@@ -210,7 +210,7 @@ def test_forking_backfills_a_repository_onto_a_live_legacy_record(repo_scenario)
     assert b"legacy" in listed.stdout
 
 
-@pytest.mark.matrix("T-REG-17")
+@pytest.mark.matrix("T-REG-22")
 def test_prune_reports_nothing_to_do_on_a_healthy_registry(repo_scenario):
     from conftest import run_cli
 

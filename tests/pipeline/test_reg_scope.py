@@ -25,7 +25,7 @@ def _fork(env, cwd, *args):
     return run_cli(["fork", *args, "--no-agent"], env, cwd)
 
 
-@pytest.mark.matrix("T-REG-09")
+@pytest.mark.matrix("T-REG-14")
 def test_same_name_fork_in_two_repositories_keeps_both_rows(repo_scenario):
     """Repro 1: add_entry must not delete another repository's same-named row."""
     first = repo_scenario()
@@ -41,7 +41,7 @@ def test_same_name_fork_in_two_repositories_keeps_both_rows(repo_scenario):
     assert len({row["worktree"] for row in rows}) == 2
 
 
-@pytest.mark.matrix("T-REG-10")
+@pytest.mark.matrix("T-REG-15")
 def test_cleanup_by_name_cannot_resolve_another_repositorys_fork(repo_scenario):
     """Repro 2: a bare name must not select a fork belonging elsewhere."""
     first = repo_scenario()
@@ -64,7 +64,7 @@ def test_cleanup_by_name_cannot_resolve_another_repositorys_fork(repo_scenario):
     assert _rows(shared) == before
 
 
-@pytest.mark.matrix("T-REG-11")
+@pytest.mark.matrix("T-REG-16")
 def test_auto_named_forks_in_two_repositories_keep_both_rows(repo_scenario):
     """Repro 3: the default path derives one name from the branch and date."""
     first = repo_scenario("plain@main")
@@ -81,7 +81,7 @@ def test_auto_named_forks_in_two_repositories_keep_both_rows(repo_scenario):
     assert len(rows) == 2, f"the second auto-named fork clobbered the first: {rows}"
 
 
-@pytest.mark.matrix("T-REG-12")
+@pytest.mark.matrix("T-REG-17")
 def test_cleanup_after_auto_name_collision_stays_in_its_repository(repo_scenario):
     """Repro 4: the destructive consequence of the clobber."""
     first = repo_scenario("plain@main")

@@ -6,14 +6,18 @@ import json
 import re
 import shutil
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 from agent_fork.agents import (
     AgentContext,
+    AgentSignalAssessment,
     UnsafeCommandInputError,
+    assess_agent_signals,
     build_session_fork_command,
+    build_session_resume_command,
+    codex_rollout_path,
 )
 from agent_fork.errors import PreconditionError, SessionValidationError
 from agent_fork.lineage import find_lineage
@@ -27,6 +31,7 @@ from agent_fork.repository import (
 
 CLAUDE_TRANSCRIPT_LIMIT = 1_048_576
 CLAUDE_RECORD_LIMIT = 10_000
+SAFE_SESSION_ID = re.compile(r"[A-Za-z0-9-]+")
 SessionForkStatus = Literal["available", "not_detected", "ambiguous", "unsafe_input"]
 
 
@@ -86,6 +91,13 @@ class SessionRepository:
 
 @dataclass(frozen=True)
 class SessionForkCommand:
+    """Native fork command availability for one inspected session.
+
+    Intentionally separate from ``SessionResumeCommand``: resume was added
+    alongside fork so the two command shapes can evolve independently with
+    distinct error messages.
+    """
+
     status: SessionForkStatus
     command: str | None
     child_session_id: str | None = None
@@ -111,6 +123,52 @@ class SessionForkCommand:
 
 
 @dataclass(frozen=True)
+class SessionResumeCommand:
+    """Native resume command availability for one inspected session.
+
+    Intentionally separate from ``SessionForkCommand``: resume was added
+    alongside fork so the two command shapes can evolve independently with
+    distinct error messages.
+    """
+
+    status: SessionForkStatus
+    command: str | None
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            "available",
+            "not_detected",
+            "ambiguous",
+            "unsafe_input",
+        }:
+            raise ValueError(f"unknown session resume command status: {self.status}")
+        if self.status == "available":
+            if not self.command:
+                raise ValueError("available session resume command must be non-empty")
+        elif self.command is not None:
+            raise ValueError("unavailable session resume command must be null")
+
+    def document(self) -> dict[str, object]:
+        return {"status": self.status, "command": self.command}
+
+
+@dataclass(frozen=True)
+class SessionTranscript:
+    path: Path | None
+    exists: bool
+
+    def __post_init__(self) -> None:
+        if self.path is None and self.exists:
+            raise ValueError("an unlocated transcript cannot exist")
+
+    def document(self) -> dict[str, object]:
+        return {
+            "path": str(self.path) if self.path is not None else None,
+            "exists": self.exists,
+        }
+
+
+@dataclass(frozen=True)
 class SessionInspection:
     agent: str | None
     current_session: SessionEvidence | None
@@ -119,11 +177,17 @@ class SessionInspection:
     directory: Path
     repository: SessionRepository | None
     fork_command: SessionForkCommand
+    resume_command: SessionResumeCommand
+    transcript: SessionTranscript
     notices: tuple[str, ...] = ()
+    agent_signal: AgentSignalAssessment = field(
+        default_factory=lambda: assess_agent_signals({})
+    )
 
     def document(self) -> dict[str, object]:
         return {
             "agent": self.agent,
+            "agent_signal": self.agent_signal.document(),
             "current_session": (
                 self.current_session.document() if self.current_session else None
             ),
@@ -140,6 +204,8 @@ class SessionInspection:
                 self.repository.document() if self.repository is not None else None
             ),
             "fork_command": self.fork_command.document(),
+            "resume_command": self.resume_command.document(),
+            "transcript": self.transcript.document(),
         }
 
 
@@ -152,15 +218,35 @@ class SessionAssertions:
 
 
 def _claude_transcript(env: Mapping[str, str], cwd: Path, session_id: str) -> Path:
-    root = Path(env.get("CLAUDE_CONFIG_DIR", Path(env.get("HOME", "~")) / ".claude"))
+    # Absolute is part of the reported contract: a relative CLAUDE_CONFIG_DIR,
+    # or an absent HOME leaving the literal "~" fallback, would otherwise emit
+    # a relative transcript path.
+    root = (
+        Path(env.get("CLAUDE_CONFIG_DIR", Path(env.get("HOME", "~")) / ".claude"))
+        .expanduser()
+        .resolve()
+    )
     encoded = re.sub(r"[^a-zA-Z0-9]", "-", str(cwd.resolve()))
     return root / "projects" / encoded / f"{session_id}.jsonl"
+
+
+def _session_transcript(
+    agent: str, session_id: str, env: Mapping[str, str], directory: Path
+) -> SessionTranscript:
+    """Locate the session's on-disk transcript without reading its contents."""
+    if SAFE_SESSION_ID.fullmatch(session_id) is None:
+        return SessionTranscript(None, False)
+    if agent == "claude":
+        path = _claude_transcript(env, directory, session_id)
+        return SessionTranscript(path, path.is_file())
+    rollout = codex_rollout_path(AgentContext("codex", session_id), env)
+    return SessionTranscript(rollout, rollout is not None)
 
 
 def _claude_name(
     env: Mapping[str, str], cwd: Path, session_id: str
 ) -> tuple[str | None, str]:
-    if re.fullmatch(r"[A-Za-z0-9-]+", session_id) is None:
+    if SAFE_SESSION_ID.fullmatch(session_id) is None:
         return None, "not_found"
     path = _claude_transcript(env, cwd, session_id)
     root = Path(
@@ -239,14 +325,11 @@ def inspect_session(
 ) -> SessionInspection:
     """Inspect ambient identity and bounded local evidence without mutation."""
     directory = (Path.cwd() if cwd is None else cwd).resolve()
+    assessment = assess_agent_signals(env)
     repository, repository_notices = _session_repository(directory, env)
     notices = list(repository_notices)
-    claude_id = env.get("CLAUDE_CODE_SESSION_ID")
-    claude = env.get("CLAUDECODE") == "1" and bool(claude_id)
-    codex_id = env.get("CODEX_THREAD_ID")
-    codex = bool(codex_id)
-    if claude and codex:
-        notices.append("both Claude and Codex session signals are present")
+    if assessment.status == "ambiguous":
+        notices.append(assessment.diagnosis())
         return SessionInspection(
             agent=None,
             current_session=None,
@@ -255,9 +338,14 @@ def inspect_session(
             directory=directory,
             repository=repository,
             fork_command=SessionForkCommand("ambiguous", None),
+            resume_command=SessionResumeCommand("ambiguous", None),
+            transcript=SessionTranscript(None, False),
             notices=tuple(notices),
+            agent_signal=assessment,
         )
-    if not claude and not codex:
+    if assessment.status in {"absent", "incomplete"}:
+        if assessment.status == "incomplete":
+            notices.append(assessment.diagnosis())
         return SessionInspection(
             agent=None,
             current_session=None,
@@ -266,12 +354,16 @@ def inspect_session(
             directory=directory,
             repository=repository,
             fork_command=SessionForkCommand("not_detected", None),
+            resume_command=SessionResumeCommand("not_detected", None),
+            transcript=SessionTranscript(None, False),
             notices=tuple(notices),
+            agent_signal=assessment,
         )
 
-    agent = "claude" if claude else "codex"
-    current_id = claude_id if claude else codex_id
-    assert current_id is not None
+    context = assessment.context
+    assert context is not None
+    agent = context.agent
+    current_id = context.parent_session_id
     try:
         built = build_session_fork_command(
             AgentContext(agent, current_id),
@@ -284,8 +376,38 @@ def inspect_session(
     except UnsafeCommandInputError:
         fork_command = SessionForkCommand("unsafe_input", None)
 
-    if claude:
-        assert claude_id is not None
+    try:
+        resume_built = build_session_resume_command(
+            AgentContext(agent, current_id), directory=directory
+        )
+        resume_command = SessionResumeCommand("available", resume_built.command)
+    except UnsafeCommandInputError:
+        resume_command = SessionResumeCommand("unsafe_input", None)
+
+    transcript = _session_transcript(agent, current_id, env, directory)
+
+    def _inspection(
+        agent: str,
+        current_session: SessionEvidence,
+        parent_session: SessionEvidence | None,
+        lineage_status: str,
+    ) -> SessionInspection:
+        return SessionInspection(
+            agent=agent,
+            current_session=current_session,
+            parent_session=parent_session,
+            lineage_status=lineage_status,
+            directory=directory,
+            repository=repository,
+            fork_command=fork_command,
+            resume_command=resume_command,
+            transcript=transcript,
+            notices=tuple(notices),
+            agent_signal=assessment,
+        )
+
+    if agent == "claude":
+        claude_id = current_id
         name, name_status = _claude_name(env, directory, claude_id)
         try:
             claim = find_lineage("claude", claude_id, env=env)
@@ -345,38 +467,25 @@ def inspect_session(
             if inference is not None
             else None
         )
-        return SessionInspection(
-            agent="claude",
-            current_session=current,
-            parent_session=parent,
-            lineage_status="claimed"
+        return _inspection(
+            "claude",
+            current,
+            parent,
+            "claimed"
             if claim is not None
             else inference.status
             if inference
             else "not_found",
-            directory=directory,
-            repository=repository,
-            fork_command=fork_command,
-            notices=tuple(notices),
         )
 
-    assert codex_id is not None
+    codex_id = current_id
     binary = shutil.which("codex", path=env.get("PATH"))
     if binary is None:
         notices.append("Codex CLI is unavailable; name and lineage were not looked up")
         current = SessionEvidence(
             codex_id, "CODEX_THREAD_ID", name_status="unavailable"
         )
-        return SessionInspection(
-            agent="codex",
-            current_session=current,
-            parent_session=None,
-            lineage_status="unavailable",
-            directory=directory,
-            repository=repository,
-            fork_command=fork_command,
-            notices=tuple(notices),
-        )
+        return _inspection("codex", current, None, "unavailable")
     try:
         from agent_fork.codex_app_server import read_thread
 
@@ -386,28 +495,10 @@ def inspect_session(
         current = SessionEvidence(
             codex_id, "CODEX_THREAD_ID", name_status="unavailable"
         )
-        return SessionInspection(
-            agent="codex",
-            current_session=current,
-            parent_session=None,
-            lineage_status="unavailable",
-            directory=directory,
-            repository=repository,
-            fork_command=fork_command,
-            notices=tuple(notices),
-        )
+        return _inspection("codex", current, None, "unavailable")
     if thread is None:
         current = SessionEvidence(codex_id, "CODEX_THREAD_ID", name_status="not_found")
-        return SessionInspection(
-            agent="codex",
-            current_session=current,
-            parent_session=None,
-            lineage_status="not_found",
-            directory=directory,
-            repository=repository,
-            fork_command=fork_command,
-            notices=tuple(notices),
-        )
+        return _inspection("codex", current, None, "not_found")
     current = SessionEvidence(
         codex_id,
         "CODEX_THREAD_ID",
@@ -435,16 +526,7 @@ def inspect_session(
             "codex-app-server",
             "resolved",
         )
-    return SessionInspection(
-        agent="codex",
-        current_session=current,
-        parent_session=parent,
-        lineage_status="resolved" if parent else "not_found",
-        directory=directory,
-        repository=repository,
-        fork_command=fork_command,
-        notices=tuple(notices),
-    )
+    return _inspection("codex", current, parent, "resolved" if parent else "not_found")
 
 
 def validate_session(
@@ -486,6 +568,10 @@ def validate_session(
             actual == assertions.parent_session_id,
         )
     if assertions.has_parent is not None:
+        if inspection.lineage_status == "unavailable":
+            raise SessionValidationError(
+                "session assertion has_parent failed: parent evidence is unavailable"
+            )
         actual = inspection.parent_session is not None
         check(
             "has_parent", assertions.has_parent, actual, actual == assertions.has_parent

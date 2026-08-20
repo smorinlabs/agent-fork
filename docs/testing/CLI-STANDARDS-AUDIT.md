@@ -5,6 +5,11 @@
 **Mode:** audit of the built `agent-fork 1.0.0` console script
 **Profile:** Small-CLI, verb-first, publishable tier
 
+> **Current-branch status:** This historical P01-T19 audit passed on
+> 2026-08-10. P02 A13(B) later removed `table`; the follow-up below records
+> current R4.1 and R9.3 `MUST` failures. The current branch is not conforming
+> and must not be released while they remain unresolved.
+
 ## Authority and method
 
 The standalone `cli-standards` skill/package was unavailable in this execution
@@ -90,3 +95,19 @@ late security review of PR #17 nevertheless found that Git-controlled paths and
 commit subjects could inject terminal control bytes into human diagnostics.
 T-CLN-23 protects the product fix: human output uses visible C-style escapes,
 while the stable JSON values remain unchanged.
+
+## P02 A13(B) output-value follow-up
+
+- **Date:** 2026-08-18
+- **Scope:** owner-approved removal of the byte-identical `table` output value
+- **Mode:** implementation audit against CLI Design Standard v1.4.14
+
+| Rule | Result | Evidence and consequence |
+|---|---|---|
+| R4.1 | **nonconforming MUST; release blocker** | `-o/--output` now accepts `text` and `json`, with `text` as the default. T-CFG-18 and T-CLI-32 protect the intended behavior, but the pinned standard requires `table` as the default human format. |
+| R9.3 | **nonconforming MUST; release blocker** | `table` was an accepted value under the repository's declared `1.0.0` Production/Stable interface. Removing it requires an approved compatibility or version transition before release. |
+
+Neither result is a waiver. Release remains blocked until the governing
+standard and compatibility contract are satisfied or the removed interface is
+restored. The companion skill is unaffected because it invokes only JSON; its
+Markdown presentation tables are not CLI output-format values.

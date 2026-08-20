@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shlex
 import signal
@@ -20,15 +19,11 @@ from agent_fork.config import (
     resolve_discovered_config,
     set_user_value,
 )
+from agent_fork.xdg import xdg_path
 
 
 def _user_config_path(environment: dict[str, str]) -> Path:
-    base = Path(
-        environment.get(
-            "XDG_CONFIG_HOME", Path(environment.get("HOME", "~")) / ".config"
-        )
-    ).expanduser()
-    return base / XDG_RELATIVE_PATH
+    return xdg_path(environment, "XDG_CONFIG_HOME", ".config", *XDG_RELATIVE_PATH.parts)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -67,6 +62,32 @@ def _parser() -> argparse.ArgumentParser:
         "--debug", action="store_true", help="Include debugging diagnostics"
     )
     commands = parser.add_subparsers(dest="command")
+
+    def output_options(action, *, default: str | None = "text", suppress: bool = False):
+        """Declare the shared ``-o/--output`` and ``--json`` pair.
+
+        ``suppress`` gives both arguments ``argparse.SUPPRESS`` so a subcommand
+        leaves the attribute absent unless the flag is passed, letting the
+        parent parser's value stand. Only ``session validate`` and the
+        ``claude-parent`` actions need that.
+        """
+        action.add_argument(
+            "-o",
+            "--output",
+            choices=("text", "json"),
+            default=argparse.SUPPRESS if suppress else default,
+            help="Select result format",
+        )
+        action.add_argument(
+            "--json",
+            action="store_true",
+            default=argparse.SUPPRESS if suppress else False,
+            help="Alias for --output json",
+        )
+
+    def parent_output(action):
+        output_options(action, suppress=True)
+
     fork = commands.add_parser(
         "fork",
         allow_abbrev=False,
@@ -162,38 +183,28 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Copy the paste command to the clipboard",
     )
-    fork.add_argument(
-        "-o",
-        "--output",
-        choices=("table", "text", "json"),
-        default=None,
-        help="Select result format",
-    )
-    fork.add_argument("--json", action="store_true", help="Alias for --output json")
+    output_options(fork, default=None)
     session = commands.add_parser(
         "session",
         allow_abbrev=False,
         help="Inspect or validate the current agent session",
         description=(
-            "Report agent-neutral current-session evidence and construct its native "
-            "fork command without executing it."
+            "Report agent-neutral current-session evidence, locate its transcript "
+            "file, and construct its native fork command and resume (rehydrate) "
+            "command without executing either."
         ),
         epilog=(
             "Examples:\n"
-            "  agent-fork session          # human inspection and fork command\n"
-            "  agent-fork session --json   # exact command in fork_command.command\n\n"
-            "Command availability means constructible, not preflighted."
+            "  agent-fork session          # human inspection, transcript, commands\n"
+            "  agent-fork session --json   # exact commands in fork_command.command "
+            "and resume_command.command; transcript file in transcript.path\n\n"
+            "Command availability means constructible, not preflighted.\n"
+            "A transcript path is reported even when the file is not yet on disk; "
+            "transcript.exists says which."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    session.add_argument(
-        "-o",
-        "--output",
-        choices=("table", "text", "json"),
-        default="table",
-        help="Select result format",
-    )
-    session.add_argument("--json", action="store_true", help="Alias for --output json")
+    output_options(session)
     session_actions = session.add_subparsers(dest="session_action")
     session_validate = session_actions.add_parser(
         "validate", allow_abbrev=False, help="Assert detected session facts"
@@ -204,30 +215,13 @@ def _parser() -> argparse.ArgumentParser:
     parent_assertion = session_validate.add_mutually_exclusive_group()
     parent_assertion.add_argument("--has-parent", action="store_true")
     parent_assertion.add_argument("--no-parent", action="store_true")
-    session_validate.add_argument(
-        "-o",
-        "--output",
-        choices=("table", "text", "json"),
-        default="table",
-        help="Select result format",
-    )
-    session_validate.add_argument(
-        "--json", action="store_true", help="Alias for --output json"
-    )
+    output_options(session_validate, suppress=True)
     claude_parent = session_actions.add_parser(
         "claude-parent", allow_abbrev=False, help="Manage Claude parent evidence"
     )
     parent_actions = claude_parent.add_subparsers(
         dest="claude_parent_action", required=True
     )
-
-    def parent_output(action):
-        action.add_argument(
-            "-o", "--output", choices=("table", "text", "json"), default="table"
-        )
-        action.add_argument(
-            "--json", action="store_true", help="Alias for --output json"
-        )
 
     parent_list = parent_actions.add_parser("list", allow_abbrev=False)
     parent_list.add_argument(
@@ -258,14 +252,7 @@ def _parser() -> argparse.ArgumentParser:
         help="List forks created by agent-fork",
         description="List registered forks in deterministic creation order.",
     )
-    listing.add_argument(
-        "-o",
-        "--output",
-        choices=("table", "text", "json"),
-        default="table",
-        help="Select result format",
-    )
-    listing.add_argument("--json", action="store_true", help="Alias for --output json")
+    output_options(listing)
     pruning = commands.add_parser(
         "prune",
         allow_abbrev=False,
@@ -282,7 +269,7 @@ def _parser() -> argparse.ArgumentParser:
     pruning.add_argument(
         "--yes", action="store_true", help="Confirm removal non-interactively"
     )
-    parent_output(pruning)
+    output_options(pruning)
     cleanup = commands.add_parser(
         "cleanup",
         allow_abbrev=False,
@@ -322,27 +309,13 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Inspect safety and print the removal plan without changing anything",
     )
-    cleanup.add_argument(
-        "-o",
-        "--output",
-        choices=("table", "text", "json"),
-        default="table",
-        help="Select result format",
-    )
-    cleanup.add_argument("--json", action="store_true", help="Alias for --output json")
+    output_options(cleanup)
     doctor = commands.add_parser(
         "doctor",
         allow_abbrev=False,
         help="Diagnose Git, agent, config, and XDG readiness",
     )
-    doctor.add_argument(
-        "-o",
-        "--output",
-        choices=("table", "text", "json"),
-        default="table",
-        help="Select result format",
-    )
-    doctor.add_argument("--json", action="store_true", help="Alias for --output json")
+    output_options(doctor)
     doctor_mode = doctor.add_mutually_exclusive_group()
     doctor_mode.add_argument("--require-agent", action="store_true")
     doctor_mode.add_argument("--no-agent", action="store_true")
@@ -363,14 +336,7 @@ def _parser() -> argparse.ArgumentParser:
     viewer = actions.add_parser(
         "view", allow_abbrev=False, help="Show effective configuration"
     )
-    viewer.add_argument(
-        "-o",
-        "--output",
-        choices=("table", "text", "json"),
-        default="table",
-        help="Select result format",
-    )
-    viewer.add_argument("--json", action="store_true", help="Alias for --output json")
+    output_options(viewer)
     getter = actions.add_parser(
         "get", allow_abbrev=False, help="Get one effective configuration value"
     )
@@ -390,9 +356,7 @@ def _path_for_name(info, config, name, branch, environment, args=None, cwd=None)
     from agent_fork.location import compose_worktree_destination, derive_worktree_path
 
     root = info.worktree_root or info.common_dir
-    data = Path(
-        environment.get("XDG_DATA_HOME", Path(environment["HOME"]) / ".local/share")
-    )
+    data = xdg_path(environment, "XDG_DATA_HOME", ".local/share")
     derived = derive_worktree_path(
         root,
         branch,
@@ -761,6 +725,7 @@ def main(argv: list[str] | None = None) -> int:
                     to_record,
                 )
                 from agent_fork.errors import (
+                    AgentSignalIncompleteError,
                     ClaudeParentError,
                     ClaudeParentNotRecordableError,
                     ClaudeParentPartialRecordError,
@@ -885,17 +850,31 @@ def main(argv: list[str] | None = None) -> int:
                         }
                     )
                     return 0
-                corpus = ClaudeLineageCorpus(environment)
                 ids = []
                 if args.current:
-                    if environment.get("CLAUDECODE") != "1" or not environment.get(
-                        "CLAUDE_CODE_SESSION_ID"
+                    from agent_fork.agents import assess_agent_signals
+
+                    assessment = assess_agent_signals(environment)
+                    if assessment.status == "incomplete":
+                        raise AgentSignalIncompleteError(
+                            assessment.present, assessment.missing
+                        )
+                    if assessment.status == "ambiguous":
+                        raise ClaudeParentError(
+                            "current agent signals are ambiguous: "
+                            f"{assessment.diagnosis()}",
+                            details=assessment.document(),
+                        )
+                    if (
+                        assessment.context is None
+                        or assessment.context.agent != "claude"
                     ):
                         raise ClaudeParentError("no current Claude session detected")
-                    ids = [environment["CLAUDE_CODE_SESSION_ID"]]
+                    ids = [assessment.context.parent_session_id]
                 elif args.session_id:
                     ids = [args.session_id]
-                else:
+                corpus = ClaudeLineageCorpus(environment)
+                if args.all:
                     ids = [
                         p.stem
                         for p in corpus.paths
@@ -1031,6 +1010,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(json_line(inspection.document()))
                 return 0
             if inspection.current_session is None:
+                if inspection.agent_signal.status == "incomplete":
+                    print("agent signal: incomplete")
                 print(f"session: {inspection.lineage_status}")
             else:
                 current = inspection.current_session
@@ -1099,6 +1080,18 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"fork command: {fork_command.command}")
             else:
                 print(f"fork command: unavailable ({fork_command.status})")
+            resume_command = inspection.resume_command
+            if resume_command.status == "available":
+                assert resume_command.command is not None
+                print(f"resume command: {resume_command.command}")
+            else:
+                print(f"resume command: unavailable ({resume_command.status})")
+            transcript = inspection.transcript
+            if transcript.path is None:
+                print("transcript: unavailable")
+            else:
+                state = "exists" if transcript.exists else "missing"
+                print(f"transcript: {terminal_text(transcript.path)} ({state})")
             return 0
         if args.command == "prune":
             from agent_fork.prune import apply_prune, plan_prune, render
@@ -1191,27 +1184,30 @@ def main(argv: list[str] | None = None) -> int:
                     print(notice)
             return 0
         if args.command == "list":
+            from agent_fork.output import json_line
             from agent_fork.registry import read_registry
+            from agent_fork.text import escape_terminal_text
 
             entries = read_registry(env=environment)
             if args.json or args.output == "json":
                 print(
-                    json.dumps(
+                    json_line(
                         {
                             "version": 1,
                             "forks": [
                                 item.to_dict(include_exists=True) for item in entries
                             ],
-                        },
-                        sort_keys=True,
+                        }
                     )
                 )
             else:
                 for item in entries:
                     exists = "yes" if Path(item.worktree).exists() else "no"
                     print(
-                        f"{item.name}\t{item.branch}\t{item.worktree}\t"
-                        f"{item.agent or item.mode}\t{exists}"
+                        f"{escape_terminal_text(item.name)}\t"
+                        f"{escape_terminal_text(item.branch)}\t"
+                        f"{escape_terminal_text(item.worktree)}\t"
+                        f"{escape_terminal_text(item.agent or item.mode)}\t{exists}"
                     )
             return 0
         if args.command == "config" and args.config_action == "set":

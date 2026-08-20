@@ -76,7 +76,7 @@ CLI call:
 | Skill form | CLI call | Result |
 |---|---|---|
 | The fork forms | `agent-fork fork ... --require-agent --json` | The branch, the worktree, and the paste command |
-| `--session` | `agent-fork session --json` | The session inspection plus its native fork command |
+| `--session` | `agent-fork session --json` | The session inspection plus its transcript path and its native fork and resume commands |
 | `--session-only` | `agent-fork session --json` | Only that native fork command |
 
 The fork's name comes from one of three places:
@@ -144,8 +144,8 @@ Or run it once without installing:
 uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
 ```
 
-> PyPI and Homebrew releases land with v1.0.0; after PyPI publication the
-> no-install command becomes simply `uvx agent-fork`.
+> After PyPI publication the no-install command becomes simply
+> `uvx agent-fork`.
 
 **Requirements:** Python 3.11+ and Git 2.19+. Forking an agent session
 additionally needs Claude Code 2.0.73+ or Codex 0.95+ (Codex's native `fork`
@@ -187,7 +187,8 @@ agent-fork --version
 readlink ~/.claude/skills/agent-fork ~/.agents/skills/agent-fork
 ```
 
-The version command must print `agent-fork 1.0.0`. Both symlinks must resolve
+The version command must print `agent-fork 1.2.0`. <!-- x-release-please-version -->
+Both symlinks must resolve
 to this repository's `.agents/skills/agent-fork` directory.
 
 ### Uninstall
@@ -209,7 +210,7 @@ direct-CLI equivalents:
 ```bash
 agent-fork doctor              # confirm Git, agent CLIs, config, and XDG paths
 agent-fork fork try-redis      # create the fork, print the paste command
-agent-fork session             # inspect context and print a native fork command
+agent-fork session             # inspect context and print native fork/resume commands
 agent-fork list                # see the forks you have created
 agent-fork cleanup try-redis --yes   # remove one when you are done
 ```
@@ -241,7 +242,7 @@ than starting a new one.
 | Command | Purpose |
 |---|---|
 | `agent-fork fork [NAME]` | Create a verified branch and worktree; print the paste command |
-| `agent-fork session [validate]` | Inspect session evidence, construct its native fork command, or assert expected identity and lineage |
+| `agent-fork session [validate]` | Inspect session evidence, construct its native fork and resume commands, or assert expected identity and lineage |
 | `agent-fork list` | List forks created by `agent-fork` |
 | `agent-fork cleanup <name\|branch\|worktree> --yes` | Remove a registered fork |
 | `agent-fork prune [--dry-run] --yes` | Remove registry records whose worktree no longer exists |
@@ -253,7 +254,8 @@ than starting a new one.
 Global options: `-V/--version`, `-v/--verbose`, `-q/--quiet`, `--debug`, and
 `--config PATH`. Commands that emit formatted results (`fork`, `list`,
 `session`, `cleanup`, `doctor`, and `config view`) accept
-`-o/--output {table,text,json}`; `--json` is an alias for `-o json`.
+`-o/--output {text,json}` and default to `text`; `--json` is an alias for
+`-o json`.
 
 `cleanup` acts only on a fork the invoking repository actually has. A registry
 record names a candidate; the repository's live worktree list decides whether
@@ -298,13 +300,56 @@ agent-fork session validate --agent codex --has-parent
 ```
 
 Inspection reports sourced evidence, the resolved invocation directory,
-nullable Git repository context, and `fork_command` — a shell-quoted native
-command for the one detected agent identity:
+nullable Git repository context, and two shell-quoted native commands for the
+one detected agent identity:
+
+- `fork_command` — creates a *new* session: a fresh session ID, a new Git
+  branch and worktree, carrying a copy of the current file state forward. The
+  original session keeps running untouched.
+- `resume_command` — re-enters the *same* session in place: same session ID,
+  same directory, same branch/worktree, continuing the same transcript. Use
+  this to pick a session back up after setting it aside ("rehydrate" it) —
+  nothing new is created.
 
 ```text
-cd '<resolved-directory>' && claude --session-id '<fresh-child-uuid>' --resume '<current-session-id>' --fork-session
-codex fork '<current-thread-id>' -C '<resolved-directory>'
+fork:   cd '<resolved-directory>' && claude --session-id '<fresh-child-uuid>' --resume '<current-session-id>' --fork-session
+        codex fork '<current-thread-id>' -C '<resolved-directory>'
+resume: cd '<resolved-directory>' && claude --resume '<current-session-id>'
+        codex resume '<current-thread-id>' -C '<resolved-directory>'
 ```
+
+Inspection also reports `transcript`: where this session's conversation is
+stored on disk.
+
+```text
+claude: <CLAUDE_CONFIG_DIR|~/.claude>/projects/<encoded-directory>/<session-id>.jsonl
+codex:  <CODEX_HOME|~/.codex>/sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<thread-id>.jsonl
+```
+
+`transcript.path` is the absolute path and `transcript.exists` says whether a
+file is there right now. The two agents store transcripts differently, and the
+difference is visible in the field. The Claude path is *derived* from the
+session ID and the resolved invocation directory — every non-alphanumeric
+character of that directory becomes `-` — so it can be reported before the
+file is flushed. Because the derivation keys on the directory `agent-fork`
+itself was invoked in, running it from somewhere other than the session's
+working directory derives a path that does not exist and reports
+`exists: false`. Claude Code re-keys its transcript folder when the session's
+directory changes, so an ordinary in-session invocation — including from a
+linked worktree the session moved into — resolves correctly. The Codex path is
+*discovered* by search, because the rollout filename embeds a timestamp, so a
+Codex `transcript.path` is null whenever no rollout matches. A session ID that
+is not `[A-Za-z0-9-]+` never reaches the filesystem and reports a null path.
+Inspection reports the location only; it never reads the transcript.
+
+JSON inspection also reports `agent_signal`, an additive object with
+`status`, `present`, and `missing`. Its status is `absent`, `incomplete`,
+`detected`, or `ambiguous`. The detail lists contain supported environment
+variable names, never session or thread values. An incomplete Claude signal
+remains observational in `session`: it reports no current session, retains
+`lineage.status: not_detected`, `fork_command.status: not_detected`, and
+`resume_command.status: not_detected`, and names the missing value in
+`notices`.
 
 Inspection never executes the returned command, mutates agent or repository
 state, or makes a network call; in an ordinary terminal it succeeds with
@@ -332,7 +377,7 @@ evidence labels — are documented in
 | `--yes` | Supply non-interactive consent; it does not override safety guards |
 | `--no-input` | Never prompt; fail unless required consent was supplied with `--yes` |
 | `--dry-run` | Run the full safety inspection and preview removal without mutating |
-| `-o/--output {table,text,json}` | Select the result format |
+| `-o/--output {text,json}` | Select the result format; default: `text` |
 | `--json` | Alias for `--output json` |
 
 Examples:
@@ -492,7 +537,6 @@ registry, earlier versions will not read it.
 | `agent_mode` | `"auto"` | `AGENT_FORK_AGENT_MODE` | `auto`, `strict`, or `git-only` |
 | `verify` | `true` | — | Run the verification ladder |
 | `copy` | `false` | — | Copy the paste command to the clipboard |
-| `output` | `"table"` | `AGENT_FORK_OUTPUT` | `table`, `text`, or `json` |
 
 Per-agent tables append arguments to the emitted command, each element
 individually shell-quoted:
@@ -507,6 +551,9 @@ session_name_resolution = true
 ```
 
 `AGENT_FORK_CONFIG` selects a config file, equivalent to `--config`.
+`AGENT_FORK_OUTPUT` selects `text` or `json` for commands that resolve effective
+configuration and defaults to `text`. The output setting is not a `[fork]`
+TOML key and cannot be changed with `config set`.
 
 An explicit flag beats config **and** suppresses dependent config settings — a
 config `with_ignored = true` combined with `--no-with-state` carries no state.
@@ -567,8 +614,13 @@ cleanup guard refusals use the cleanup schema shown above.
 | 0 | Success | — |
 | 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy` |
 | 2 | Usage error or required prompt disabled | `config_error` |
+<<<<<<< HEAD
 | 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown` |
 | 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `cleanup_registry_stale`, `cleanup_registry_ambiguous` |
+=======
+| 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown` |
+| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits` |
+>>>>>>> origin/main
 | 130 / 143 | Interrupted by SIGINT / SIGTERM | — |
 
 Exit 4 remains reserved because this local tool has no authentication failure

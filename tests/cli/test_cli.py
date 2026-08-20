@@ -1,5 +1,6 @@
 """G-CLI — full command-tree and doctor conformance."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -39,7 +40,7 @@ def test_standard_global_flags_present(repo_scenario):
     for flag in ("-V", "--version"):
         completed = run_cli([flag], world.env, world.parent_path)
         assert completed.returncode == 0
-        assert completed.stdout == b"agent-fork 1.0.0\n"
+        assert completed.stdout == b"agent-fork 1.2.0\n"  # x-release-please-version
     combined = run_cli(["-vv", "-q", "--debug"], world.env, world.parent_path)
     assert combined.returncode == 0 and b"usage: agent-fork" in combined.stdout
     path = world.parent_path.parent / "explicit.toml"
@@ -179,7 +180,7 @@ def test_doctor_content_reports_each_subject(repo_scenario, subject):
     expected = {
         "git-version": "git PRODUCT_GIT_MIN: 2.43.0 (minimum 2.19.0)",
         "agent-clis": "Claude CLI: 2.1.220",
-        "env-signals": "environment signals: CLAUDECODE=1",
+        "env-signals": "environment signals: status=detected",
         "config-validity": "config validity: valid",
         "xdg-paths": "XDG paths:",
         "recipe-flags": "agent recipe flags: claude: 4 documented",
@@ -220,6 +221,153 @@ def test_doctor_recipe_drift_fails_only_for_the_selected_agent(repo_scenario):
     failed = run_cli(["doctor"], environment, world.parent_path)
     assert failed.returncode != 0
     assert b"FAIL agent recipe flags" in failed.stdout
+
+
+def _with_agent_signals(environment, **signals):
+    result = {
+        key: value
+        for key, value in environment.items()
+        if key not in {"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"}
+    }
+    result.update(signals)
+    return result
+
+
+def _doctor_checks(completed):
+    document = json.loads(completed.stdout)
+    return document, {check["name"]: check for check in document["checks"]}
+
+
+def _signal_detail(status, present, missing, mode, selected):
+    present_text = ", ".join(present)
+    missing_text = ", ".join(missing)
+    return (
+        f"status={status}, present=[{present_text}], missing=[{missing_text}], "
+        f"mode={mode}, selected={selected}"
+    )
+
+
+@pytest.mark.matrix("T-CLI-27")
+def test_doctor_uses_shared_incomplete_and_ambiguous_assessment(repo_scenario):
+    """Auto and strict diagnostics must never reinterpret a partial signal."""
+    from conftest import run_cli
+
+    world = repo_scenario()
+    base = _doctor_env(world)
+    codex = Path(base["PATH"].split(os.pathsep)[0]) / "codex"
+    codex.write_text("#!/bin/sh\necho 'codex-cli 0.147.0'\n")
+    codex.chmod(0o755)
+    shapes = (
+        (
+            {"CLAUDECODE": "1"},
+            "incomplete",
+            ("CLAUDECODE=1",),
+            ("CLAUDE_CODE_SESSION_ID",),
+            "claude",
+        ),
+        (
+            {"CLAUDE_CODE_SESSION_ID": "claude-parent"},
+            "incomplete",
+            ("CLAUDE_CODE_SESSION_ID",),
+            ("CLAUDECODE=1",),
+            "claude",
+        ),
+        (
+            {"CLAUDECODE": "1", "CODEX_THREAD_ID": "codex-parent"},
+            "ambiguous",
+            ("CLAUDECODE=1", "CODEX_THREAD_ID"),
+            ("CLAUDE_CODE_SESSION_ID",),
+            "ambiguous",
+        ),
+        (
+            {
+                "CLAUDE_CODE_SESSION_ID": "claude-parent",
+                "CODEX_THREAD_ID": "codex-parent",
+            },
+            "ambiguous",
+            ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"),
+            ("CLAUDECODE=1",),
+            "ambiguous",
+        ),
+    )
+
+    for mode, mode_args in (("auto", []), ("strict", ["--require-agent"])):
+        for signals, status, present, missing, selected in shapes:
+            completed = run_cli(
+                ["doctor", "--json", *mode_args],
+                _with_agent_signals(base, **signals),
+                world.parent_path,
+            )
+
+            assert completed.returncode == 1
+            assert completed.stderr == b""
+            document, checks = _doctor_checks(completed)
+            assert document["ok"] is False
+            assert checks["environment signals"] == {
+                "name": "environment signals",
+                "ok": False,
+                "detail": _signal_detail(status, present, missing, mode, selected),
+            }
+            assert checks["agent recipe flags"]["ok"] is True
+            assert (
+                "codex: undocumented -C (unselected)"
+                in checks["agent recipe flags"]["detail"]
+            )
+            if status == "incomplete":
+                assert "(optional)" not in checks["Claude CLI"]["detail"]
+                assert checks["Codex CLI"]["detail"].endswith("(optional)")
+            else:
+                assert "(optional)" not in checks["Claude CLI"]["detail"]
+                assert "(optional)" not in checks["Codex CLI"]["detail"]
+
+
+@pytest.mark.matrix("T-CLI-28")
+def test_doctor_explicit_git_only_reports_signals_without_failing(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    base = _doctor_env(world)
+    codex = Path(base["PATH"].split(os.pathsep)[0]) / "codex"
+    codex.write_text("#!/bin/sh\necho 'codex-cli 0.147.0'\n")
+    codex.chmod(0o755)
+    shapes = (
+        (
+            {"CLAUDECODE": "1"},
+            "incomplete",
+            ("CLAUDECODE=1",),
+            ("CLAUDE_CODE_SESSION_ID",),
+        ),
+        (
+            {"CLAUDECODE": "1", "CODEX_THREAD_ID": "codex-parent"},
+            "ambiguous",
+            ("CLAUDECODE=1", "CODEX_THREAD_ID"),
+            ("CLAUDE_CODE_SESSION_ID",),
+        ),
+    )
+
+    for signals, status, present, missing in shapes:
+        completed = run_cli(
+            ["doctor", "--json", "--no-agent"],
+            _with_agent_signals(base, **signals),
+            world.parent_path,
+        )
+
+        assert completed.returncode == 0
+        assert completed.stderr == b""
+        document, checks = _doctor_checks(completed)
+        assert document["ok"] is True
+        assert checks["environment signals"] == {
+            "name": "environment signals",
+            "ok": True,
+            "detail": _signal_detail(status, present, missing, "git-only", "git-only"),
+        }
+        assert checks["Claude CLI"]["detail"].endswith("(optional)")
+        assert checks["Codex CLI"]["detail"].endswith("(optional)")
+        assert checks["agent recipe flags"]["ok"] is True
+        assert (
+            "codex: undocumented -C (unselected)"
+            in checks["agent recipe flags"]["detail"]
+        )
 
 
 @pytest.mark.matrix("T-CLI-11")
@@ -434,6 +582,7 @@ def _assert_completion_semantics(script):
         "config",
         "view",
         "validate",
+        "-o",
         "--worktree-base-dir",
         "--worktree-name",
         "--parent-session",
@@ -442,13 +591,18 @@ def _assert_completion_semantics(script):
         "--debug",
         "claude",
         "codex",
-        "table",
+        "text",
         "json",
         "bash",
         "zsh",
         "fish",
     ):
-        assert token in script or token.removeprefix("--") in script
+        if token in script or token.removeprefix("--") in script:
+            continue
+        if len(token) == 2 and token.startswith("-") and f"-s '{token[1:]}'" in script:
+            continue
+        raise AssertionError(f"missing completion token: {token!r}")
+    assert "table" not in script
 
 
 @pytest.mark.matrix("T-CLI-16")
@@ -483,6 +637,202 @@ def test_fish_completion_semantics_and_syntax(repo_scenario):
             [executable, "-n"], input=script, text=True, capture_output=True
         )
         assert completed.returncode == 0, completed.stderr
+
+
+def _output_route_arguments(output=None):
+    suffix = [] if output is None else ["-o", output]
+    return (
+        ["fork", "format", "--dry-run", "--no-agent", "--no-with-state", *suffix],
+        ["session", *suffix],
+        ["session", "validate", *suffix],
+        ["session", "claude-parent", "list", *suffix],
+        [
+            "session",
+            "claude-parent",
+            "show",
+            "--session-id",
+            "child",
+            *suffix,
+        ],
+        ["session", "claude-parent", "infer", "--current", *suffix],
+        [
+            "session",
+            "claude-parent",
+            "delete",
+            "--session-id",
+            "child",
+            "--no-input",
+            *suffix,
+        ],
+        ["list", *suffix],
+        ["cleanup", "missing", "--dry-run", "--yes", *suffix],
+        ["doctor", *suffix],
+        ["config", "view", *suffix],
+    )
+
+
+@pytest.mark.matrix("T-CLI-32")
+def test_a13b_text_is_only_human_output_across_cli_boundaries(repo_scenario, capsys):
+    """A13(B) removes the byte-identical table alias from every CLI boundary."""
+    from agent_fork.cli import _parser
+    from conftest import run_cli
+
+    parser = _parser()
+    defaults = [
+        parser.parse_args(arguments).output for arguments in _output_route_arguments()
+    ]
+    assert defaults == [None, *("text",) * 10]
+    for output in ("text", "json"):
+        assert all(
+            parser.parse_args(arguments).output == output
+            for arguments in _output_route_arguments(output)
+        )
+    nested_routes = (
+        ["validate"],
+        ["claude-parent", "list"],
+        ["claude-parent", "show", "--session-id", "child"],
+        ["claude-parent", "infer", "--current"],
+        [
+            "claude-parent",
+            "delete",
+            "--session-id",
+            "child",
+            "--no-input",
+        ],
+    )
+    for route in nested_routes:
+        for option in (("-o", "json"), ("--json",)):
+            before = parser.parse_args(["session", *option, *route])
+            after = parser.parse_args(["session", *route, *option])
+            assert ("json" if before.json else before.output) == "json"
+            assert ("json" if after.json else after.output) == "json"
+    for arguments in _output_route_arguments("table"):
+        with pytest.raises(SystemExit) as caught:
+            parser.parse_args(arguments)
+        assert caught.value.code == 2
+    capsys.readouterr()
+
+    world = repo_scenario("plain@main")
+    environment = {
+        key: value
+        for key, value in world.env.items()
+        if key not in {"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"}
+    }
+
+    created = run_cli(
+        ["fork", "format-cleanup", "--no-agent", "--no-with-state", "--json"],
+        environment,
+        world.parent_path,
+    )
+    assert created.returncode == 0, created.stderr.decode()
+
+    command_pairs = (
+        (
+            ["fork", "preview", "--dry-run", "--no-agent", "--no-with-state"],
+            [
+                "fork",
+                "preview",
+                "--dry-run",
+                "--no-agent",
+                "--no-with-state",
+                "-o",
+                "text",
+            ],
+            environment,
+        ),
+        (["session"], ["session", "-o", "text"], environment),
+        (["list"], ["list", "-o", "text"], environment),
+        (
+            ["cleanup", "format-cleanup", "--dry-run", "--yes"],
+            ["cleanup", "format-cleanup", "--dry-run", "--yes", "-o", "text"],
+            environment,
+        ),
+        (["doctor"], ["doctor", "-o", "text"], _doctor_env(world, agents=False)),
+        (["config", "view"], ["config", "view", "-o", "text"], environment),
+    )
+    for default_arguments, text_arguments, command_environment in command_pairs:
+        default = run_cli(default_arguments, command_environment, world.parent_path)
+        explicit = run_cli(text_arguments, command_environment, world.parent_path)
+        assert (default.returncode, default.stdout, default.stderr) == (
+            explicit.returncode,
+            explicit.stdout,
+            explicit.stderr,
+        )
+
+    invalid_environment = {**environment, "AGENT_FORK_OUTPUT": "table"}
+    for output_arguments in (("-o", "text"), ("-o", "json"), ("--json",)):
+        explicit_output = run_cli(
+            [
+                "fork",
+                "override",
+                "--dry-run",
+                "--no-agent",
+                "--no-with-state",
+                *output_arguments,
+            ],
+            invalid_environment,
+            world.parent_path,
+        )
+        assert explicit_output.returncode == 0, explicit_output.stderr.decode()
+
+    invalid_fork = run_cli(
+        ["fork", "invalid", "--dry-run", "--no-agent", "--no-with-state"],
+        invalid_environment,
+        world.parent_path,
+    )
+    assert invalid_fork.returncode == 2
+    assert invalid_fork.stdout == b""
+    assert invalid_fork.stderr == b"output must be text or json\n"
+
+    rejected_table = run_cli(["session", "-o", "table"], environment, world.parent_path)
+    assert rejected_table.returncode == 2
+    assert b"invalid choice: 'table'" in rejected_table.stderr
+
+    for arguments in (
+        ["session"],
+        ["list"],
+        ["cleanup", "format-cleanup", "--dry-run", "--yes"],
+    ):
+        baseline = run_cli(arguments, environment, world.parent_path)
+        ignored = run_cli(arguments, invalid_environment, world.parent_path)
+        assert (ignored.returncode, ignored.stdout, ignored.stderr) == (
+            baseline.returncode,
+            baseline.stdout,
+            baseline.stderr,
+        )
+
+    invalid_config = run_cli(
+        ["config", "view", "--json"], invalid_environment, world.parent_path
+    )
+    assert invalid_config.returncode == 2
+    assert json.loads(invalid_config.stderr) == {
+        "error": {
+            "code": "config_error",
+            "message": "output must be text or json",
+        }
+    }
+
+    doctor_environment = {
+        **_doctor_env(world),
+        "AGENT_FORK_OUTPUT": "table",
+    }
+    invalid_doctor = run_cli(
+        ["doctor", "--json"], doctor_environment, world.parent_path
+    )
+    assert invalid_doctor.returncode == 1
+    doctor_document, checks = _doctor_checks(invalid_doctor)
+    assert doctor_document["ok"] is False
+    assert checks["config validity"] == {
+        "name": "config validity",
+        "ok": False,
+        "detail": "output must be text or json",
+    }
+
+    for shell in ("bash", "zsh", "fish"):
+        script = _completion(repo_scenario, shell)
+        assert "text" in script
+        assert "json" in script
+        assert "table" not in script
 
 
 @pytest.mark.matrix("T-CLI-19")
@@ -548,8 +898,6 @@ def test_no_agent_conflicts_with_explicit_identity(repo_scenario):
 
 @pytest.mark.matrix("T-CLI-23")
 def test_default_auto_forks_git_only_without_session(repo_scenario):
-    import json
-
     from conftest import run_cli
 
     world = repo_scenario("plain@main")
@@ -614,3 +962,151 @@ def test_codex_session_name_resolution_surface(repo_scenario):
         world.parent_path,
     )
     assert read.returncode == 0 and read.stdout == b"false\n"
+
+
+def _assert_incomplete_error(completed, *, present, missing):
+    missing_text = ", ".join(missing)
+    assert completed.returncode == 3
+    assert completed.stdout == b""
+    assert json.loads(completed.stderr) == {
+        "error": {
+            "code": "agent_signal_incomplete",
+            "message": (
+                f"incomplete agent signal; missing {missing_text}; restore the "
+                "missing value or choose --no-agent intentionally"
+            ),
+            "details": {
+                "status": "incomplete",
+                "present": list(present),
+                "missing": list(missing),
+            },
+        }
+    }
+
+
+def _fork_state(world, environment, destination):
+    from agent_fork.git import run_git
+    from agent_fork.lineage import lineage_path
+    from agent_fork.lineage_inference_store import (
+        index_freshness_path,
+        inference_path,
+    )
+    from agent_fork.registry import registry_path
+
+    cache_home = Path(
+        environment.get("XDG_CACHE_HOME", Path(environment["HOME"]) / ".cache")
+    )
+    artifacts = (
+        registry_path(environment),
+        lineage_path(environment),
+        inference_path(environment),
+        index_freshness_path(environment),
+        cache_home / "agent-fork",
+    )
+    return {
+        "branches": run_git(
+            world.parent_path,
+            ["for-each-ref", "--format=%(refname)", "refs/heads"],
+            env=environment,
+        ).stdout,
+        "worktrees": run_git(
+            world.parent_path,
+            ["worktree", "list", "--porcelain"],
+            env=environment,
+        ).stdout,
+        "destination_exists": destination.exists(),
+        "artifact_exists": tuple(path.exists() for path in artifacts),
+    }
+
+
+@pytest.mark.matrix("T-CLI-29")
+def test_auto_fork_refuses_incomplete_signal_with_exact_json(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    environment = _with_agent_signals(world.env, CLAUDECODE="1")
+    destination = world.parent_path.parent / "incomplete-auto"
+    before = _fork_state(world, environment, destination)
+
+    completed = run_cli(
+        [
+            "fork",
+            "incomplete-auto",
+            "--json",
+            "--no-with-state",
+            "--worktree-dir",
+            str(destination),
+        ],
+        environment,
+        world.parent_path,
+    )
+
+    _assert_incomplete_error(
+        completed,
+        present=("CLAUDECODE=1",),
+        missing=("CLAUDE_CODE_SESSION_ID",),
+    )
+    assert _fork_state(world, environment, destination) == before
+
+
+@pytest.mark.matrix("T-CLI-30")
+def test_strict_fork_refuses_incomplete_signal_with_exact_json(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    environment = _with_agent_signals(world.env, CLAUDE_CODE_SESSION_ID="claude-parent")
+    destination = world.parent_path.parent / "incomplete-strict"
+    before = _fork_state(world, environment, destination)
+
+    completed = run_cli(
+        [
+            "fork",
+            "incomplete-strict",
+            "--require-agent",
+            "--json",
+            "--no-with-state",
+            "--worktree-dir",
+            str(destination),
+        ],
+        environment,
+        world.parent_path,
+    )
+
+    _assert_incomplete_error(
+        completed,
+        present=("CLAUDE_CODE_SESSION_ID",),
+        missing=("CLAUDECODE=1",),
+    )
+    assert _fork_state(world, environment, destination) == before
+
+
+@pytest.mark.matrix("T-CLI-31")
+def test_incomplete_dry_run_refuses_before_any_mutation(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    environment = _with_agent_signals(world.env, CLAUDECODE="1")
+    destination = world.parent_path.parent / "incomplete-dry-run"
+    before = _fork_state(world, environment, destination)
+    assert before["destination_exists"] is False
+    assert not any(before["artifact_exists"])
+
+    completed = run_cli(
+        [
+            "fork",
+            "incomplete-dry-run",
+            "--dry-run",
+            "--json",
+            "--worktree-dir",
+            str(destination),
+        ],
+        environment,
+        world.parent_path,
+    )
+
+    _assert_incomplete_error(
+        completed,
+        present=("CLAUDECODE=1",),
+        missing=("CLAUDE_CODE_SESSION_ID",),
+    )
+    assert _fork_state(world, environment, destination) == before

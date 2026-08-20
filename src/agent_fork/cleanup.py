@@ -19,6 +19,7 @@ from agent_fork.registry import (
 )
 from agent_fork.repository import inspect_repository, live_worktree_pairs
 from agent_fork.text import escape_terminal_text as _escape_terminal_text
+from agent_fork.worktree_list import list_worktrees
 
 DETAIL_LIMIT = 10
 
@@ -135,23 +136,7 @@ def _git_root(worktree: Path, *, env: Mapping[str, str]) -> Path:
 
 
 def _worktrees(cwd: Path, *, env: Mapping[str, str]) -> list[tuple[Path, str | None]]:
-    output = run_git(cwd, ["worktree", "list", "--porcelain"], env=env).stdout
-    records: list[tuple[Path, str | None]] = []
-    path: Path | None = None
-    branch: str | None = None
-    for line in output.decode(errors="surrogateescape").splitlines() + [""]:
-        if line.startswith("worktree "):
-            if path is not None:
-                records.append((path, branch))
-            path = Path(line.removeprefix("worktree ")).resolve()
-            branch = None
-        elif line.startswith("branch refs/heads/"):
-            branch = line.removeprefix("branch refs/heads/")
-        elif not line and path is not None:
-            records.append((path, branch))
-            path = None
-            branch = None
-    return records
+    return [(record.path, record.branch) for record in list_worktrees(cwd, env=env)]
 
 
 def _anchor(
@@ -333,6 +318,11 @@ def _unpushed_commits(
     return entries, count
 
 
+def _has_configured_remotes(plan: CleanupPlan, *, env: Mapping[str, str]) -> bool:
+    output = run_git(plan.worktree, ["remote"], env=env).stdout
+    return bool(output.strip())
+
+
 def _inspect(plan: CleanupPlan, *, env: Mapping[str, str]) -> CleanupDetails:
     dirty, dirty_count = _dirty_paths(plan, env=env)
     unpushed, unpushed_count = _unpushed_commits(plan, env=env)
@@ -370,7 +360,11 @@ def _unpushed_lines(details: CleanupDetails, heading: str) -> list[str]:
 
 
 def _refusal_message(
-    plan: CleanupPlan, details: CleanupDetails, *, code: str
+    plan: CleanupPlan,
+    details: CleanupDetails,
+    *,
+    code: str,
+    has_configured_remotes: bool = True,
 ) -> tuple[str, str]:
     if code == "cleanup_dirty_worktree":
         message = f"refusing to remove {plan.worktree}"
@@ -383,7 +377,16 @@ def _refusal_message(
     else:
         message = f"refusing to remove {plan.branch}"
         human_message = f"refusing to remove {_escape_terminal_text(plan.branch)}"
-        next_step = "  Override with --allow-unpushed (destroys them), or push first."
+        if has_configured_remotes:
+            next_step = (
+                "  Override with --allow-unpushed (destroys them), or push first."
+            )
+        else:
+            next_step = (
+                "  No Git remote is configured. Configure one before pushing these "
+                "commits (for example: git remote add REMOTE-NAME REMOTE-URL), or "
+                "override with --allow-unpushed (destroys them)."
+            )
     blocks = [human_message]
     if details.dirty_count:
         change = "change" if details.dirty_count == 1 else "changes"
@@ -434,7 +437,10 @@ def _validate(
         )
     if details.unpushed_count and not (force or allow_unpushed):
         message, human_message = _refusal_message(
-            plan, details, code="cleanup_unpushed_commits"
+            plan,
+            details,
+            code="cleanup_unpushed_commits",
+            has_configured_remotes=_has_configured_remotes(plan, env=env),
         )
         raise PreconditionError(
             "cleanup_unpushed_commits",

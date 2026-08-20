@@ -307,8 +307,25 @@ def test_clipboard_copy_failure_emits_notice_only(repo_scenario):
 
     completed = run_cli(["fork", "copy", "--copy"], environment, world.parent_path)
     assert completed.returncode == 0
-    assert b"clipboard copy failed" in completed.stderr
+    assert b"clipboard copy failed" not in completed.stdout
+    assert completed.stderr == (
+        b"clipboard copy failed; paste command remains available on stdout\n"
+    )
     assert completed.stdout.decode().splitlines()[-1].endswith("--fork-session -n copy")
+
+    machine = run_cli(
+        ["fork", "copy-json", "--copy", "--json"],
+        environment,
+        world.parent_path,
+    )
+    assert machine.returncode == 0
+    document = json.loads(machine.stdout)
+    assert document["notices"] == [
+        "clipboard copy failed; paste command remains available on stdout"
+    ]
+    assert machine.stderr == (
+        b"clipboard copy failed; paste command remains available on stdout\n"
+    )
 
 
 @pytest.mark.matrix("T-OUT-10")
@@ -540,3 +557,37 @@ def test_agent_json_preserves_identity_and_mode(repo_scenario):
     assert document["mode"] == "agent"
     assert document["agent"] == "claude"
     assert document["parent_session_id"] == PARENT
+
+
+@pytest.mark.matrix("T-OUT-22")
+def test_incomplete_agent_signal_error_has_stable_catalog_and_machine_details(
+    repo_scenario,
+):
+    """T-OUT-22 — the typed refusal is stable and machine details contain no IDs."""
+    from agent_fork.agents import resolve_agent_mode
+    from agent_fork.errors import ERROR_CATALOG, AgentSignalIncompleteError
+    from agent_fork.output import STABLE_ERROR_CODES, render_error
+
+    repo_scenario()
+    with pytest.raises(AgentSignalIncompleteError) as caught:
+        resolve_agent_mode("auto", {"CLAUDECODE": "1"})
+
+    error = caught.value
+    assert ERROR_CATALOG["agent_signal_incomplete"].exit_code == 3
+    assert "agent_signal_incomplete" in STABLE_ERROR_CODES
+    assert error.code == "agent_signal_incomplete"
+    assert error.exit_code == 3
+    assert json.loads(render_error(error, machine=True)) == {
+        "error": {
+            "code": "agent_signal_incomplete",
+            "message": str(error),
+            "details": {
+                "status": "incomplete",
+                "present": ["CLAUDECODE=1"],
+                "missing": ["CLAUDE_CODE_SESSION_ID"],
+            },
+        }
+    }
+    rendered = render_error(error, machine=True)
+    assert "claude-parent" not in rendered
+    assert PARENT not in rendered

@@ -28,10 +28,6 @@ class MaterializeResult:
     notices: tuple[str, ...]
 
 
-def _nul_paths(data: bytes) -> list[str]:
-    return [os.fsdecode(value) for value in data.split(b"\0") if value]
-
-
 def _safe_destination(root: Path, relative: str) -> Path:
     candidate = (root / relative).resolve(strict=False)
     resolved_root = root.resolve()
@@ -79,20 +75,6 @@ def _apply_patch(
         input_bytes=patch,
     )
     return True
-
-
-def _intent_to_add_paths(parent: Path, *, env: Mapping[str, str] | None) -> list[str]:
-    visible = run_git(
-        parent,
-        ["diff", "--cached", "--ita-visible-in-index", "--name-only", "-z"],
-        env=env,
-    )
-    hidden = run_git(
-        parent,
-        ["diff", "--cached", "--ita-invisible-in-index", "--name-only", "-z"],
-        env=env,
-    )
-    return sorted(set(_nul_paths(visible.stdout)) - set(_nul_paths(hidden.stdout)))
 
 
 def _submodule_notices(
@@ -162,12 +144,16 @@ def materialize(
                     "--no-color",
                     "--ita-invisible-in-index",
                     "--",
-                    path,
+                    f":(literal){path}",
                 ],
                 env=env,
             ).stdout
             _apply_patch(child, ita_patch, [], env=env)
-            run_git(child, ["add", "--intent-to-add", "--", path], env=env)
+            run_git(
+                child,
+                ["add", "--intent-to-add", "--", f":(literal){path}"],
+                env=env,
+            )
 
         unstaged_args = [
             "diff-files",
@@ -178,7 +164,11 @@ def materialize(
         ]
         if ita_paths:
             unstaged_args.extend(
-                ["--", ".", *(f":(exclude){path}" for path in ita_paths)]
+                [
+                    "--",
+                    ".",
+                    *(f":(exclude,literal){path}" for path in ita_paths),
+                ]
             )
         unstaged = run_git(parent, unstaged_args, env=env).stdout
         unstaged_applied = _apply_patch(child, unstaged, [], env=env)

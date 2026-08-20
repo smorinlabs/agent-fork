@@ -42,7 +42,7 @@ def _branch_of(stdout):
     )
 
 
-@pytest.mark.matrix("T-REG-20")
+@pytest.mark.matrix("T-REG-25")
 def test_path_reuse_on_the_same_branch_cannot_delete_the_other_repository(
     repo_scenario,
 ):
@@ -90,7 +90,7 @@ def test_path_reuse_on_the_same_branch_cannot_delete_the_other_repository(
     assert Path(worktree).exists(), "the other repository's worktree was removed"
 
 
-@pytest.mark.matrix("T-REG-24")
+@pytest.mark.matrix("T-REG-29")
 def test_a_foreign_record_cannot_authorize_deletion_in_the_occupying_repository(
     repo_scenario,
 ):
@@ -140,7 +140,7 @@ def test_a_foreign_record_cannot_authorize_deletion_in_the_occupying_repository(
     ), "the occupying repository's branch was deleted"
 
 
-@pytest.mark.matrix("T-REG-21")
+@pytest.mark.matrix("T-REG-26")
 def test_force_does_not_override_the_stale_refusal(repo_scenario):
     """--force overrides the dirty and unpushed guards, never ownership."""
     from conftest import run_cli
@@ -165,7 +165,7 @@ def test_force_does_not_override_the_stale_refusal(repo_scenario):
     assert len(_rows(shared)) == 1
 
 
-@pytest.mark.matrix("T-REG-22")
+@pytest.mark.matrix("T-REG-27")
 def test_registered_fork_is_cleanable_by_absolute_path_from_outside_a_repository(
     repo_scenario, tmp_path
 ):

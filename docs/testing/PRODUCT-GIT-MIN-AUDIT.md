@@ -37,11 +37,35 @@ regression gate passes with host Apple Git 2.50.1 and Flox GNU Git 2.54.0.
 | worktree lifecycle | `worktree add -b`, `list --porcelain`, `remove --force`, `prune` | before 2.19 | supported |
 | guard state | `ls-files -u -z`; operation sentinels resolved below the Git dir | before 2.19 | supported |
 | staged transport | `diff --binary --no-color --cached --ita-invisible-in-index`; `apply --binary --index` | `--ita-invisible-in-index` documented by 2.17 | supported |
-| ITA transport | `diff --ita-invisible-in-index`; plain `apply --binary`; `add --intent-to-add -- <path>` | before 2.19 | supported; avoids vendor-divergent `apply --intent-to-add` |
+| ITA transport | `diff --ita-invisible-in-index`; plain `apply --binary`; `add --intent-to-add -- <path>`; `:(literal)<path>` and `:(exclude,literal)<path>` pathspecs | before 2.19 | supported; literal pathspecs prevent recorded filenames from being reinterpreted as patterns |
 | unstaged transport | `diff --binary --no-color`; `apply --binary` | before 2.19 | supported |
 | untracked/ignored transport | `ls-files --others -z --exclude-standard`; second pass with `--ignored` | before 2.19 | supported |
 | verification/cleanup | `status --porcelain=v1 -z` (optionally `--ignored`), `worktree list --porcelain`, `branch -D` | before 2.19 | supported |
-| unpushed cleanup guard | `rev-list`/`log` exclusions via `--remotes`; bounded `log -z --max-count` detail | before 2.19 | supported |
+| unpushed cleanup guard | `rev-list`/`log` exclusions via `--remotes`; bounded `log -z --max-count` detail; read-only `git remote` configured-name probe | before 2.19 | supported |
+
+## A13(e/f) floor evidence
+
+The A13(e) operand correction uses only pathspec syntax documented at the
+product floor. The versioned
+[Git 2.19 glossary](https://git-scm.com/docs/gitglossary/2.19.0.html) defines
+the long pathspec form as a comma-separated list of magic words. It defines
+`literal` as treating wildcard characters literally and `exclude` as removing
+matching paths after inclusion. Therefore `:(literal)<path>` and the combined
+`:(exclude,literal)<path>` form are supported by Git 2.19.
+
+The A13(f) guidance correction uses `git remote` without a subcommand only to
+read configured remote names. The versioned
+[Git 2.18 remote manual](https://git-scm.com/docs/git-remote/2.18.0) documents
+that invocation and states that it lists existing remotes. The same manual's
+version history reports no changes from Git 2.18.1 through 2.22.5, which
+includes the Git 2.19 product floor. The probe reads local configuration; it
+does not contact a remote.
+
+The retained `T-MAT-12` cross-Git gate exercises the literal include and
+exclude forms with overlapping pattern-shaped filenames and a filename
+beginning `:(glob)`. It runs once with host Apple Git and once with the Flox
+Git toolchain through `just test-git-matrix`. `T-CLN-18` and `T-CLN-24`
+exercise configured and empty `git remote` results in the normal suite.
 
 The implementation deliberately does not depend on newer conveniences such as
 `git branch --show-current` (2.22), `rev-parse --path-format` (2.31), or

@@ -130,6 +130,8 @@ def test_validation_constraints_compose(repo_scenario):
         SessionEvidence,
         SessionForkCommand,
         SessionInspection,
+        SessionResumeCommand,
+        SessionTranscript,
         validate_session,
     )
 
@@ -144,6 +146,10 @@ def test_validation_constraints_compose(repo_scenario):
         fork_command=SessionForkCommand(
             status="available", command="codex fork child -C /tmp"
         ),
+        resume_command=SessionResumeCommand(
+            status="available", command="codex resume child -C /tmp"
+        ),
+        transcript=SessionTranscript(None, False),
     )
     result = validate_session(
         inspection,
@@ -169,6 +175,8 @@ def test_validation_mismatch_is_typed(repo_scenario):
         SessionAssertions,
         SessionForkCommand,
         SessionInspection,
+        SessionResumeCommand,
+        SessionTranscript,
         validate_session,
     )
 
@@ -183,6 +191,10 @@ def test_validation_mismatch_is_typed(repo_scenario):
                 directory=world.parent_path,
                 repository=None,
                 fork_command=SessionForkCommand(status="not_detected", command=None),
+                resume_command=SessionResumeCommand(
+                    status="not_detected", command=None
+                ),
+                transcript=SessionTranscript(None, False),
             ),
             SessionAssertions(),
         )
@@ -476,6 +488,89 @@ def test_fork_command_status_uses_identity_and_safety_not_lineage(
         session_module.SessionForkCommand("ambiguous", "unexpected")
 
 
+@pytest.mark.matrix("T-SES-36")
+def test_resume_command_status_uses_identity_and_safety_not_lineage(
+    repo_scenario, monkeypatch
+):
+    import agent_fork.session as session_module
+
+    world = repo_scenario()
+    no_identity = session_module.inspect_session(world.env, cwd=world.parent_path)
+    assert no_identity.resume_command.status == "not_detected"
+    assert no_identity.resume_command.command is None
+
+    claude_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    claude = session_module.inspect_session(claude_env, cwd=world.parent_path)
+    assert claude.resume_command.status == "available"
+    assert claude.resume_command.command == (
+        f"cd {world.parent_path} && claude --resume claude-child"
+    )
+
+    ambiguous = session_module.inspect_session(
+        {**claude_env, "CODEX_THREAD_ID": "codex-thread"}, cwd=world.parent_path
+    )
+    assert ambiguous.resume_command.status == "ambiguous"
+    assert ambiguous.resume_command.command is None
+
+    original_which = session_module.shutil.which
+    monkeypatch.setattr(
+        session_module.shutil,
+        "which",
+        lambda name, path=None: (
+            None if name == "codex" else original_which(name, path=path)
+        ),
+    )
+    codex = session_module.inspect_session(
+        {**world.env, "CODEX_THREAD_ID": "codex-thread"}, cwd=world.parent_path
+    )
+    assert codex.resume_command.status == "available"
+    assert codex.resume_command.command == (
+        f"codex resume codex-thread -C {world.parent_path}"
+    )
+
+    unsafe = session_module.inspect_session(
+        {
+            **world.env,
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_SESSION_ID": "unsafe\x1b]52;c;Zm9v\x07",
+        },
+        cwd=world.parent_path,
+    )
+    assert unsafe.resume_command.status == "unsafe_input"
+    assert unsafe.resume_command.command is None
+
+    with pytest.raises(ValueError, match="unknown session resume command status"):
+        session_module.SessionResumeCommand(
+            cast(session_module.SessionForkStatus, "future"), None
+        )
+    with pytest.raises(ValueError, match="must be non-empty"):
+        session_module.SessionResumeCommand("available", None)
+    with pytest.raises(ValueError, match="must be null"):
+        session_module.SessionResumeCommand("ambiguous", "unexpected")
+
+
+@pytest.mark.matrix("T-SES-37")
+def test_document_includes_resume_command(repo_scenario):
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+    claude_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    result = inspect_session(claude_env, cwd=world.parent_path)
+    document = result.document()
+    assert document["resume_command"] == {
+        "status": "available",
+        "command": result.resume_command.command,
+    }
+
+
 @pytest.mark.matrix("T-SES-29")
 def test_claude_child_uuid_lives_once_per_inspection(repo_scenario):
     import uuid
@@ -507,3 +602,237 @@ def test_claude_child_uuid_lives_once_per_inspection(repo_scenario):
     assert first_child != second_child
     assert uuid.UUID(first_child).version == 4
     assert uuid.UUID(second_child).version == 4
+
+
+@pytest.mark.matrix("T-SES-33")
+def test_partial_claude_signal_is_shared_without_session_identity(repo_scenario):
+    from agent_fork.session import inspect_session
+
+    cases = (
+        (
+            {"CLAUDECODE": "1"},
+            {
+                "status": "incomplete",
+                "present": ["CLAUDECODE=1"],
+                "missing": ["CLAUDE_CODE_SESSION_ID"],
+            },
+            "not_detected",
+        ),
+        (
+            {"CLAUDE_CODE_SESSION_ID": "claude-child"},
+            {
+                "status": "incomplete",
+                "present": ["CLAUDE_CODE_SESSION_ID"],
+                "missing": ["CLAUDECODE=1"],
+            },
+            "not_detected",
+        ),
+        (
+            {"CLAUDECODE": "1", "CODEX_THREAD_ID": "codex-thread"},
+            {
+                "status": "ambiguous",
+                "present": ["CLAUDECODE=1", "CODEX_THREAD_ID"],
+                "missing": ["CLAUDE_CODE_SESSION_ID"],
+            },
+            "ambiguous",
+        ),
+        (
+            {
+                "CLAUDE_CODE_SESSION_ID": "claude-child",
+                "CODEX_THREAD_ID": "codex-thread",
+            },
+            {
+                "status": "ambiguous",
+                "present": ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"],
+                "missing": ["CLAUDECODE=1"],
+            },
+            "ambiguous",
+        ),
+    )
+
+    for signals, expected_signal, expected_status in cases:
+        world = repo_scenario()
+        result = inspect_session({**world.env, **signals}, cwd=world.parent_path)
+        document = result.document()
+
+        assert document["agent_signal"] == expected_signal
+        assert result.agent is None
+        assert result.current_session is None
+        assert result.parent_session is None
+        assert result.lineage_status == expected_status
+        assert result.fork_command.status == expected_status
+        assert result.fork_command.command is None
+
+
+@pytest.mark.matrix("T-SES-35")
+def test_validation_embeds_detected_agent_signal(repo_scenario):
+    from agent_fork.session import SessionAssertions, inspect_session, validate_session
+
+    world = repo_scenario()
+    inspection = inspect_session(
+        {
+            **world.env,
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_SESSION_ID": "claude-child",
+        },
+        cwd=world.parent_path,
+        child_session_id="33333333-3333-4333-8333-333333333333",
+    )
+
+    result = validate_session(
+        inspection,
+        SessionAssertions(
+            agent="claude",
+            session_id="claude-child",
+            has_parent=False,
+        ),
+    )
+
+    assert result["valid"] is True
+    assert result["assertions"] == [
+        {
+            "name": "session_detected",
+            "expected": True,
+            "actual": True,
+            "passed": True,
+        },
+        {
+            "name": "agent",
+            "expected": "claude",
+            "actual": "claude",
+            "passed": True,
+        },
+        {
+            "name": "session_id",
+            "expected": "claude-child",
+            "actual": "claude-child",
+            "passed": True,
+        },
+        {
+            "name": "has_parent",
+            "expected": False,
+            "actual": False,
+            "passed": True,
+        },
+    ]
+    session = cast(dict[str, object], result["session"])
+    assert session["agent_signal"] == {
+        "status": "detected",
+        "present": ["CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID"],
+        "missing": [],
+    }
+
+
+@pytest.mark.matrix("T-SES-39")
+def test_transcript_resolution_uses_identity_and_disk_state(repo_scenario, monkeypatch):
+    import agent_fork.session as session_module
+
+    world = repo_scenario()
+
+    no_identity = session_module.inspect_session(world.env, cwd=world.parent_path)
+    assert no_identity.transcript.path is None
+    assert no_identity.transcript.exists is False
+
+    claude_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    absent = session_module.inspect_session(claude_env, cwd=world.parent_path)
+    expected = session_module._claude_transcript(
+        claude_env, world.parent_path, "claude-child"
+    )
+    assert absent.transcript.path == expected
+    assert absent.transcript.exists is False
+
+    expected.parent.mkdir(parents=True)
+    expected.write_text("{}\n")
+    present = session_module.inspect_session(claude_env, cwd=world.parent_path)
+    assert present.transcript.path == expected
+    assert present.transcript.exists is True
+
+    ambiguous = session_module.inspect_session(
+        {**claude_env, "CODEX_THREAD_ID": "codex-thread"}, cwd=world.parent_path
+    )
+    assert ambiguous.transcript.path is None
+    assert ambiguous.transcript.exists is False
+
+    unsafe = session_module.inspect_session(
+        {
+            **world.env,
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_SESSION_ID": "unsafe\x1b]52;c;Zm9v\x07",
+        },
+        cwd=world.parent_path,
+    )
+    assert unsafe.transcript.path is None
+    assert unsafe.transcript.exists is False
+
+    original_which = session_module.shutil.which
+    monkeypatch.setattr(
+        session_module.shutil,
+        "which",
+        lambda name, path=None: (
+            None if name == "codex" else original_which(name, path=path)
+        ),
+    )
+    codex_home = world.parent_path.parent / "codex-home"
+    rollout = codex_home / "sessions/2026/08/19" / "rollout-now-codex-thread.jsonl"
+    rollout.parent.mkdir(parents=True)
+    rollout.write_text("{}\n")
+    codex_env = {
+        **world.env,
+        "CODEX_THREAD_ID": "codex-thread",
+        "CODEX_HOME": str(codex_home),
+    }
+    codex = session_module.inspect_session(codex_env, cwd=world.parent_path)
+    assert codex.transcript.path == rollout
+    assert codex.transcript.exists is True
+
+    codex_missing = session_module.inspect_session(
+        {
+            **world.env,
+            "CODEX_THREAD_ID": "absent-thread",
+            "CODEX_HOME": str(codex_home),
+        },
+        cwd=world.parent_path,
+    )
+    assert codex_missing.transcript.path is None
+    assert codex_missing.transcript.exists is False
+
+    # The reported path is absolute even when the configured root is not:
+    # a relative CLAUDE_CONFIG_DIR, or an absent HOME leaving the literal "~".
+    relative_root = session_module.inspect_session(
+        {**claude_env, "CLAUDE_CONFIG_DIR": "relative/claude-dir"},
+        cwd=world.parent_path,
+    )
+    assert relative_root.transcript.path is not None
+    assert relative_root.transcript.path.is_absolute()
+
+    tilde_root = session_module._claude_transcript(
+        {"CLAUDECODE": "1"}, world.parent_path, "claude-child"
+    )
+    assert tilde_root.is_absolute()
+    assert "~" not in str(tilde_root)
+
+    with pytest.raises(ValueError, match="cannot exist"):
+        session_module.SessionTranscript(None, True)
+
+
+@pytest.mark.matrix("T-SES-40")
+def test_document_includes_transcript(repo_scenario):
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+    claude_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    result = inspect_session(claude_env, cwd=world.parent_path)
+    document = result.document()
+    assert result.transcript.path is not None
+    assert document["transcript"] == {
+        "path": str(result.transcript.path),
+        "exists": False,
+    }

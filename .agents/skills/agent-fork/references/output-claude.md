@@ -18,6 +18,7 @@ reconstruct a command from.
 | Repository | `/Users/dev/project` |
 | Branch | `main` (default branch) |
 | Status | clean |
+| Transcript | `/Users/dev/.claude/projects/-Users-dev-project/11111111-1111-4111-8111-111111111111.jsonl` (on disk) |
 
 Fork command — paste in a new terminal to fork this session in place:
 
@@ -27,6 +28,19 @@ cd /Users/dev/project && claude --session-id 33333333-3333-4333-8333-33333333333
 
 The `--session-id` value is the fork's new session ID, minted fresh on each
 inspection.
+
+Resume command — paste in a new terminal to rehydrate this exact session in
+place (no new session ID, branch, or worktree):
+
+```bash
+cd /Users/dev/project && claude --resume 11111111-1111-4111-8111-111111111111
+```
+
+The Transcript row is `transcript.path`, terminal-escaped like every other
+session- and repository-controlled value in this table — it embeds the
+invocation directory — and never otherwise rewritten. `(on disk)` renders
+`transcript.exists: true` and `(not yet written)` renders `false`. When
+`transcript.path` is null the row reads `not located`.
 
 Row variants: an unnamed session shows `—` for Session name; a known parent
 shows its ID with the lineage status, for example

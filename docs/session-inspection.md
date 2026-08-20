@@ -30,6 +30,26 @@ ambiguous identity, or terminal-unsafe identity/path data produces an explicit
 unavailable status and a null command. Inspection succeeds with `not_detected`
 in an ordinary terminal.
 
+Machine output always includes an additive `agent_signal` object:
+
+```json
+{"status":"incomplete","present":["CLAUDECODE=1"],"missing":["CLAUDE_CODE_SESSION_ID"]}
+```
+
+`status` is one of `absent`, `incomplete`, `detected`, or `ambiguous`.
+`present` and `missing` contain only supported environment variable names,
+never their session or thread values. Either half of the Claude tuple by
+itself is incomplete. Any Claude value together with `CODEX_THREAD_ID` is
+ambiguous, including a partial Claude tuple. This assessment describes the
+environment shape; it does not prove that the reported session exists.
+
+Incomplete inspection remains observational and exits 0. It reports no
+current identity, retains `lineage.status: not_detected` and
+`fork_command.status: not_detected`, and adds a notice naming the missing
+Claude value. Human output adds `agent signal: incomplete`. These additive
+results distinguish incomplete input from an ordinary terminal without
+redefining the existing lineage or command-status dimensions.
+
 The native session commands have these shapes:
 
 ```text
@@ -58,6 +78,17 @@ Claude transcripts do not preserve the source session UUID. Missing evidence
 is not proof that a session was never forked. Inspection makes no network calls
 and does not modify agent or repository state.
 
+A Codex app-server `thread/read` error is unavailable evidence, not a successful
+lookup with no parent. Inspection retains the current session ID, reports
+`lineage.status: unavailable`, and adds a notice. If the current thread already
+supplied a parent ID but reading the parent name fails, inspection retains that
+parent ID and resolved lineage while marking only the parent name unavailable.
+When lineage is unavailable, validation refuses both `--has-parent` and
+`--no-parent`; neither assertion can be proven. Assertions limited to `--agent`
+or `--session-id` can still succeed because they do not depend on parent
+evidence. A successful `thread/read` response with no parent continues to
+satisfy `--no-parent`.
+
 ## Claude parent inference
 
 Claude does not expose an authoritative historical parent ID for ordinary
@@ -82,6 +113,13 @@ never Claude transcripts, history, sessions, Git branches, or worktrees. It
 prompts only in interactive human mode; use `--yes` for automation, while
 `--no-input` makes missing consent fail immediately. Bulk JSON remains one
 document and uses bounded per-target candidate projections.
+
+`infer --current` uses the same `agent_signal` assessment before transcript
+discovery. Incomplete Claude input returns `agent_signal_incomplete`, exit 3.
+Any Claude value combined with Codex input is unavailable because the current
+agent identity is ambiguous. Absent and Codex-only input retain
+`claude_parent_unavailable`; complete Claude-only input supplies the target
+session ID.
 
 Analysis uses a bounded manifest, superficial streaming UUID screens, exact
 candidate parsing, and bounded graph comparison. Cache shards live under

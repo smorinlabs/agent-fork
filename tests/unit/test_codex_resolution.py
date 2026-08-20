@@ -157,6 +157,40 @@ def test_malformed_app_server_is_typed(repo_scenario, tmp_path):
         list_named_threads(str(server), "hello", {})
 
 
+@pytest.mark.matrix("T-PRE-30")
+def test_app_server_closed_stdin_is_typed_under_default_sigpipe(
+    repo_scenario, tmp_path
+):
+    import signal
+
+    from agent_fork.codex_app_server import list_named_threads
+    from agent_fork.errors import SessionResolutionUnavailableError
+
+    repo_scenario()
+    # The server closes its stdin BEFORE answering the initialize request, so
+    # by the time the client sends its next message the pipe's read end is
+    # deterministically gone (the response acts as an ordering barrier).
+    server = tmp_path / "codex"
+    server.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os,sys,time\n"
+        "sys.stdin.readline()\n"
+        "os.close(0)\n"
+        'print(\'{"id":1,"result":{}}\',flush=True)\n'
+        "time.sleep(5)\n"
+    )
+    server.chmod(0o755)
+    # cli.main() sets SIGPIPE to SIG_DFL for the real CLI's stdout contract;
+    # reproduce that disposition so a raw write here would be fatal, then
+    # assert the adapter still surfaces the typed failure instead of dying.
+    previous = signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    try:
+        with pytest.raises(SessionResolutionUnavailableError, match="closed its input"):
+            list_named_threads(str(server), "hello", {})
+    finally:
+        signal.signal(signal.SIGPIPE, previous)
+
+
 @pytest.mark.matrix("T-PRE-17")
 def test_resolved_stale_rollout_is_accurate(repo_scenario, monkeypatch):
     from agent_fork.agents import AgentContext, preflight_agent
@@ -268,6 +302,61 @@ def test_thread_read_returns_name_and_parent(repo_scenario, tmp_path):
     assert result.name == "hello" and result.forked_from_id == "parent"
 
 
+@pytest.mark.matrix("T-SES-43")
+def test_thread_read_valid_no_parent_is_distinct_from_failure(repo_scenario, tmp_path):
+    from agent_fork.codex_app_server import read_thread
+
+    repo_scenario()
+    server = _server(
+        tmp_path,
+        [
+            {"result": {}},
+            {"result": {"thread": {"id": UUID, "name": "hello"}}},
+        ],
+    )
+    result = read_thread(str(server), UUID, {})
+    assert result is not None
+    assert result.name == "hello"
+    assert result.forked_from_id is None
+
+
+@pytest.mark.matrix("T-SES-44")
+def test_thread_read_json_rpc_error_is_typed(repo_scenario, tmp_path):
+    from agent_fork.codex_app_server import read_thread
+    from agent_fork.errors import SessionResolutionUnavailableError
+
+    repo_scenario()
+    server = _server(
+        tmp_path,
+        [
+            {"result": {}},
+            {"error": {"code": -32601, "message": "unsupported"}},
+        ],
+    )
+    with pytest.raises(SessionResolutionUnavailableError, match="thread/read failed"):
+        read_thread(str(server), UUID, {})
+
+
+@pytest.mark.matrix("T-SES-45")
+def test_thread_read_malformed_result_is_typed(repo_scenario, tmp_path):
+    from agent_fork.codex_app_server import read_thread
+    from agent_fork.errors import SessionResolutionUnavailableError
+
+    repo_scenario()
+    server = _server(
+        tmp_path,
+        [
+            {"result": {}},
+            {"result": {"thread": {"name": "missing-id"}}},
+        ],
+    )
+    with pytest.raises(
+        SessionResolutionUnavailableError,
+        match="thread/read returned an unsupported schema",
+    ):
+        read_thread(str(server), UUID, {})
+
+
 @pytest.mark.matrix("T-EMT-07")
 def test_resolved_name_emits_canonical_uuid(repo_scenario):
     from agent_fork.agents import AgentContext, build_launch_command
@@ -277,3 +366,69 @@ def test_resolved_name_emits_canonical_uuid(repo_scenario):
         AgentContext("codex", UUID), worktree=Path("/tmp/fork"), name="fork"
     ).command
     assert command == f"codex fork {UUID} -C /tmp/fork"
+
+
+@pytest.mark.matrix("T-SES-42")
+def test_codex_rollout_path_resolves_the_matching_rollout(repo_scenario, monkeypatch):
+    from agent_fork.agents import (
+        AgentContext,
+        codex_rollout_exists,
+        codex_rollout_path,
+    )
+
+    _, env = _world(repo_scenario)
+    context = AgentContext("codex", UUID)
+
+    resolved = codex_rollout_path(context, env)
+    assert resolved is not None
+    assert resolved.name == f"rollout-now-{UUID}.jsonl"
+    assert resolved.is_file()
+    assert codex_rollout_exists(context, env) is True
+
+    home = Path(env["CODEX_HOME"])
+    newer = home / "sessions/2026/08/11" / f"rollout-later-{UUID}.jsonl"
+    newer.parent.mkdir(parents=True)
+    newer.write_text("{}\n")
+    assert codex_rollout_path(context, env) == newer
+
+    missing = AgentContext("codex", "019fed92-fa7e-7262-b93e-6bd73a38ac73")
+    assert codex_rollout_path(missing, env) is None
+    assert codex_rollout_exists(missing, env) is False
+
+    # Only real files count. A directory or a broken symlink carrying a
+    # rollout-shaped name must never be returned, and — because the newest
+    # match wins — must never shadow the real rollout by sorting after it.
+    shadow_dir = home / "sessions/2026/08/11" / f"rollout-zzz-dir-{UUID}.jsonl"
+    shadow_dir.mkdir()
+    shadow_link = home / "sessions/2026/08/11" / f"rollout-zzzz-link-{UUID}.jsonl"
+    shadow_link.symlink_to(home / "sessions/2026/08/11/absent-target.jsonl")
+    assert not shadow_link.is_file() and shadow_link.is_symlink()
+    assert codex_rollout_path(context, env) == newer
+    assert codex_rollout_exists(context, env) is True
+
+    # With every real file gone, rollout-shaped non-files resolve to nothing.
+    newer.unlink()
+    (home / "sessions/2026/08/10" / f"rollout-now-{UUID}.jsonl").unlink()
+    assert codex_rollout_path(context, env) is None
+    assert codex_rollout_exists(context, env) is False
+
+    # The reported path is absolute even when the configured root is relative,
+    # for both CODEX_HOME and the HOME fallback — the contract says absolute.
+    relative_home = home.parent / "relative-codex"
+    (relative_home / "sessions/2026/08/12").mkdir(parents=True)
+    (relative_home / "sessions/2026/08/12" / f"rollout-rel-{UUID}.jsonl").write_text(
+        "{}\n"
+    )
+    monkeypatch.chdir(home.parent)
+
+    configured = codex_rollout_path(context, {**env, "CODEX_HOME": "relative-codex"})
+    assert configured is not None and configured.is_absolute()
+
+    fallback_home = home.parent / "relative-home"
+    (fallback_home / ".codex/sessions/2026/08/13").mkdir(parents=True)
+    (
+        fallback_home / ".codex/sessions/2026/08/13" / f"rollout-fb-{UUID}.jsonl"
+    ).write_text("{}\n")
+    fallback_env = {k: v for k, v in env.items() if k != "CODEX_HOME"}
+    fallback = codex_rollout_path(context, {**fallback_env, "HOME": "relative-home"})
+    assert fallback is not None and fallback.is_absolute()

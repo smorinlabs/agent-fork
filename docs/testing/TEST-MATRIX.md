@@ -7,11 +7,11 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Row IDs `T-<GRP>-NN`, never renumbered. Retired/tombstoned IDs keep their numbers forever.
 - `row_status`: live | n/a | tombstone (no stub may ever exist) | retired (exempt skip stub, returns at the named milestone) | blocked (named unblock gate).
 - Group `Status:` field: pending | tdd | done — the single source of truth for the stub lifecycle (spec §7.2).
-- Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · backend = git (jj reserved, no v1 values).
+- Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · agent-signal = absent | incomplete-marker | incomplete-id | detected-claude | detected-codex | ambiguous-partial-marker | ambiguous-partial-id | ambiguous-complete · agent-mode = auto | strict | git-only · backend = git (jj reserved, no v1 values).
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 236 (18 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 413 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -44,6 +44,12 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 | T-CFG-15 | agent-mode precedence is CLI > environment > config > `auto` | baseline | U | live | REQ-45; D16 |
 | T-CFG-16 | invalid configured agent mode is rejected as `config_error` | baseline | U | live | REQ-45; D16 |
 | T-CFG-17 | Codex session-name resolution defaults on and obeys CLI > config precedence | agent=codex | U | live | REQ-46; D17 |
+| T-CFG-18 | output defaults to `text`; only `text` and `json` are valid effective values; an explicit fork output overrides an invalid lower-precedence `AGENT_FORK_OUTPUT` value | baseline | U | live | P02 A13(b); REQ-14; R5.1 |
+| T-CFG-19 | shared XDG resolver uses an explicit base and needs no `HOME` | baseline | U | live | REQ-41 |
+| T-CFG-20 | shared XDG resolver expands the `HOME` default rather than emitting a literal tilde | baseline | U | live | REQ-41 |
+| T-CFG-21 | shared XDG resolver returns the base itself when no trailing segments are given | baseline | U | live | REQ-41 |
+| T-CFG-22 | an empty XDG value counts as unset per the specification, so state never resolves relative to the current working directory | baseline | U | live | REQ-41 |
+| T-CFG-23 | an empty `HOME` counts as unset too — `env.get("HOME", "~")` returns the empty string when the variable is set but empty, so the default never applies | baseline | U | live | REQ-41 |
 
 ---
 
@@ -68,6 +74,20 @@ Varying axes: agent (claude/codex, must vary per §4); otherwise baseline pinned
 | T-DET-10 | auto mode with exactly one session signal selects that agent | agent=claude | U | live | REQ-45; D16 |
 | T-DET-11 | strict mode with no session signal refuses with exit 3 | baseline | U | live | REQ-45; D16 |
 | T-DET-12 | auto mode with both session signals refuses as ambiguous | baseline | U | live | REQ-45; D16 |
+| T-DET-13 | no supported signal assesses as `absent` with empty detail | agent-signal=absent | U | live | P02 A9; REQ-26 |
+| T-DET-14 | Claude marker without its session ID assesses as `incomplete` and names the missing ID | agent-signal=incomplete-marker | U | live | P02 A9; REQ-26 |
+| T-DET-15 | Claude session ID without its marker assesses as `incomplete` and names the missing marker | agent-signal=incomplete-id | U | live | P02 A9; REQ-26 |
+| T-DET-16 | complete Claude signals assess as `detected` with Claude context | agent-signal=detected-claude | U | live | P02 A9; REQ-26 |
+| T-DET-17 | Codex thread ID assesses as `detected` with Codex context | agent-signal=detected-codex | U | live | P02 A9; REQ-26 |
+| T-DET-18 | partial Claude marker plus Codex assesses as `ambiguous` and retains missing-ID detail | agent-signal=ambiguous-partial-marker | U | live | P02 A9; REQ-26 |
+| T-DET-19 | partial Claude ID plus Codex assesses as `ambiguous` and retains missing-marker detail | agent-signal=ambiguous-partial-id | U | live | P02 A9; REQ-26 |
+| T-DET-20 | complete Claude plus Codex assesses as `ambiguous` | agent-signal=ambiguous-complete | U | live | P02 A9; REQ-26 |
+| T-DET-21 | automatic and strict resolution raise typed `agent_signal_incomplete` for either partial-Claude shape | agent-signal=incomplete-marker; agent-mode=auto/strict | U | live | P02 A9; REQ-45 |
+| T-DET-22 | a complete explicit identity overrides incomplete or ambiguous ambient signals | agent-mode=auto/strict | U | live | P02 A9; REQ-03; REQ-45 |
+| T-DET-23 | explicit Git-only mode ignores incomplete or ambiguous ambient signals | agent-mode=git-only | U | live | P02 A9; REQ-45 |
+| T-DET-24 | complete single-agent signals retain automatic and strict resolution | agent-signal=detected-claude/detected-codex; agent-mode=auto/strict | U | live | P02 A9; REQ-45 |
+| T-DET-25 | explicit agent without a parent flag retains its matching environment-ID fallback | agent=claude/codex | U | live | P02 A9; REQ-03; REQ-26 |
+| T-DET-26 | both partial-Claude-plus-Codex shapes refuse as ambiguous in automatic and strict modes | agent-signal=ambiguous-partial-marker/ambiguous-partial-id; agent-mode=auto/strict | U | live | P02 A9; REQ-45 |
 
 ---
 
@@ -95,6 +115,7 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 | T-PRE-18 | app-server lookup follows pagination and only accepts an exact name | agent=codex | U | live | REQ-46; D17 |
 | T-PRE-19 | app-server notifications are tolerated and the subprocess is reaped | agent=codex | U | live | REQ-46; D17 |
 | T-PRE-20 | an app-server notification flood is stopped by the pending-message bound | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-30 | app-server closing its input mid-handshake yields the typed closed-input failure even under default (fatal) SIGPIPE disposition | agent=codex | U | live | REQ-46; D17 |
 | T-PRE-06 | PRODUCT_GIT_MIN boundary — injected `git --version` just below 2.19.0 → the named check fails | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-07 | PRODUCT_GIT_MIN boundary — injected `git --version` at/above 2.19.0 → the named check passes | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-08 | A14 — below-2.19.0 `fork` refusal, exit 5, remedy names installed version/floor/upgrade path | baseline | F | live | REQ-19 (A14); PRODUCT-GIT-MIN-AUDIT |
@@ -162,6 +183,12 @@ Varying axes: topology (the full set: plain@branch, plain@main, detached, linked
 | T-ANC-06 | bare@wt (invoked from a worktree of a bare project) — anchor == the invoking worktree's `HEAD^{commit}` | topology=bare@wt | F | live | REQ-20; RESEARCH §2.3/§4 |
 | T-ANC-07 | dot-bare@wt (`.bare/` layout, invoked from a worktree) — anchor == the invoking worktree's `HEAD^{commit}` | topology=dot-bare@wt | F | live | REQ-20; RESEARCH §2.3 |
 | T-ANC-08 | nested-bare — anchor == `HEAD^{commit}` resolved through the nested bare child | topology=nested-bare | F | live | REQ-20; RESEARCH §2.3 |
+| T-ANC-09 | shared porcelain parser resolves worktree paths and flushes the final record | baseline | U | live | REQ-20 |
+| T-ANC-10 | shared porcelain parser flushes a record that has no trailing blank line | baseline | U | live | REQ-20 |
+| T-ANC-11 | shared porcelain parser reports a detached worktree with no branch | baseline | U | live | REQ-20 |
+| T-ANC-12 | NUL-delimited porcelain preserves a newline-bearing worktree path, which the newline-delimited form truncates into a different location | baseline | U | live | P02 A13(d); REQ-20 |
+| T-ANC-13 | `-z` rejected with exit 129 on Git below 2.36 falls back to the newline-delimited request; rejection rather than silent ignoring is what makes the retry safe | baseline | U | live | P02 A13(d); REQ-20 |
+| T-ANC-14 | `-z` accepted issues no second invocation and yields the newline-safe path | baseline | U | live | P02 A13(d); REQ-20 |
 
 ---
 
@@ -215,6 +242,7 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 | T-LOC-15 | linked mirror-parent result accepts partial override after derivation | topology=linked-worktree | F | live | D15; REQ-44 |
 | T-LOC-16 | bare-at-root result accepts partial override after derivation | topology=bare@bare | F | live | D15; REQ-44 |
 | T-LOC-17 | symlinked base resolves once and remains contained | baseline | F | live | D15; REQ-44 |
+| T-LOC-18 | explicit worktree leaf rejects control characters, so a newline-bearing name is refused before any mutation rather than failing verification afterwards | baseline | U | live | P02 A13(d); REQ-44 |
 
 ---
 
@@ -238,7 +266,7 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-09 | binary file, staged → cached `--binary` diff applies with `--index`, child byte-identical | baseline | F | live | REQ-21; RESEARCH §2.2 step 1 |
 | T-MAT-10 | binary file, unstaged → uncached `--binary` diff applies without `--index`, child byte-identical | baseline | F | live | REQ-21; RESEARCH §2.2 step 2 |
 | T-MAT-11 | rename+edit → child reflects the rename with edited content; manifest oracle confirms old path absent and new path's content correct | baseline | F | live | REQ-21; RESEARCH §2.2 |
-| T-MAT-12 | intent-to-add file transported → cached diff uses `--ita-invisible-in-index`, working-tree patch uses plain `apply`, child is marked via `add --intent-to-add`, child shows `␠A` (`␠` denotes the leading status-column space) not `??`, and existing index entries remain intact | baseline | F | live | REQ-21 (A3) |
+| T-MAT-12 | intent-to-add files are transported as literal paths, including overlapping pathspec-pattern names and a name beginning `:(glob)`; ordinary changed files apply once; child bytes, `␠A` status (`␠` denotes the leading status-column space), and existing index entries remain exact | baseline | F | live | REQ-21 (A3); P02 A13(e); issue #29 |
 | T-MAT-13 | empty directory in parent → documented absence in child (git-visible state copy only; empty-dir expectation declared per mode) | baseline | F | live | REQ-21; spec §6.5 |
 | T-MAT-14 | submodule present → treated opaque, gitlink OID (mode-160000) compared, submodule contents pruned from manifest; fixture built with command-scoped `-c protocol.file.allow=always` | baseline | F | live | RESEARCH §2.1 step 6; spec §6.3; RESEARCH §4 |
 | T-MAT-15 | parent strictly read-only during materialize → full manifest+index snapshot before/after, byte-identical | baseline | F | live | REQ-21; spec §6.5 item 3 |
@@ -337,22 +365,27 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-06 | registry ownership check feeds cleanup — `cleanup` refuses a target it didn't create unless `--force` | baseline | F | live | REQ-31; D12 |
 | T-REG-07 | `list` renders registry entries (name, branch, worktree path, agent, worktree-still-exists) in creation-time order; `-o json` emits the stable schema | baseline | C | live | REQ-31; D10; REQ-17 |
 | T-REG-08 | registry records mode and reads legacy records without mode as agent mode | baseline | U | live | REQ-45; D16 |
-| T-REG-09 | same fork name created in two repositories under one registry → both records survive; neither clobbers the other | baseline | F | live | REQ-41 (A3); A3 repro 1 |
-| T-REG-10 | `cleanup <name>` from a repository that has no such fork → `cleanup_registry_stale`, the other repository's worktree is never named, registry unchanged | baseline | F | live | REQ-31 (A3); A3 repro 2 |
-| T-REG-11 | auto-named forks in two repositories on the same branch and day derive one name → both records survive | baseline | F | live | REQ-41 (A3); A3 repro 3 |
-| T-REG-12 | after an auto-name collision, `cleanup` plans against the invoking repository's own worktree, never the other's | baseline | F | live | REQ-31 (A3); A3 repro 4 |
-| T-REG-13 | staleness — worktree removed by hand → `cleanup` refuses with `cleanup_registry_stale` and keeps the record, instead of failing on a raw Git error against the missing path | baseline | F | live | REQ-31 (A3); overlaps A7 |
-| T-REG-14 | staleness — recorded path is live but on a different branch → the pair does not match, `cleanup` refuses | baseline | F | live | REQ-31 (A3) |
-| T-REG-15 | `prune` removes only records whose worktree path does not exist; `--dry-run` writes nothing | baseline | F | live | REQ-31 (A3); absorbs A7's prune |
-| T-REG-16 | `prune` keeps and reports a record whose path another repository's live worktree now occupies | baseline | F | live | REQ-31 (A3) |
-| T-REG-17 | `prune` on a healthy registry reports nothing to remove and changes nothing | baseline | F | live | REQ-31 (A3) |
-| T-REG-18 | a v1 record carrying no repository is read, not rejected, and stays cleanable from its own repository — liveness decides, not the recorded identity | baseline | F | live | REQ-41 (A3); migration |
-| T-REG-19 | forking backfills a repository onto a live legacy record and rewrites the file as v2; the evidence is live enumeration, never the record's stored path | baseline | F | live | REQ-41 (A3); migration |
-| T-REG-20 | path reuse on the same branch by another repository → cleanup refuses; that repository's worktree and branch both survive. Anchors the destructive commands to the invoking repository, not the record's stored path | baseline | F | live | REQ-31 (A3); gate-6 P0 |
-| T-REG-21 | `--force` does not override the stale refusal — it extends targeting and overrides dirty/unpushed only, never ownership | baseline | F | live | REQ-31 (A3); gate-6 P0 |
-| T-REG-22 | a registered fork is cleanable by absolute path from outside any repository; an explicit path is fresh input and anchors the repository | baseline | F | live | REQ-31 (A3); gate-6 P1 |
-| T-REG-23 | `prune` reports path reuse as displaced even when the occupying worktree carries the same branch name | baseline | F | live | REQ-31a (A3); gate-6 P2 |
-| T-REG-24 | a record naming another repository cannot authorize deletion even when invoked from the repository that now holds its path and branch — the stored repository vetoes, though it never authorizes | baseline | F | live | REQ-31 (A3); gate-6 r2 P0 |
+| T-REG-09 | shared atomic writer round-trips a document through its same-directory rename | baseline | U | live | REQ-41 |
+| T-REG-10 | store stays owner-only (0600) under a restrictive umask — the explicit chmod is load-bearing because NamedTemporaryFile only requests the mode | baseline | U | live | REQ-41 |
+| T-REG-11 | no temporary file survives a successful atomic write | baseline | U | live | REQ-41 |
+| T-REG-12 | temporary file is removed when serialization fails mid-write | baseline | U | live | REQ-41 |
+| T-REG-13 | `fsync=False` still writes the document and still applies owner-only mode — the disposable-cache path | baseline | U | live | REQ-41 |
+| T-REG-14 | same fork name created in two repositories under one registry → both records survive; neither clobbers the other | baseline | F | live | REQ-41 (A3); A3 repro 1 |
+| T-REG-15 | `cleanup <name>` from a repository that has no such fork → `cleanup_registry_stale`, the other repository's worktree is never named, registry unchanged | baseline | F | live | REQ-31 (A3); A3 repro 2 |
+| T-REG-16 | auto-named forks in two repositories on the same branch and day derive one name → both records survive | baseline | F | live | REQ-41 (A3); A3 repro 3 |
+| T-REG-17 | after an auto-name collision, `cleanup` plans against the invoking repository's own worktree, never the other's | baseline | F | live | REQ-31 (A3); A3 repro 4 |
+| T-REG-18 | staleness — worktree removed by hand → `cleanup` refuses with `cleanup_registry_stale` and keeps the record, instead of failing on a raw Git error against the missing path | baseline | F | live | REQ-31 (A3); overlaps A7 |
+| T-REG-19 | staleness — recorded path is live but on a different branch → the pair does not match, `cleanup` refuses | baseline | F | live | REQ-31 (A3) |
+| T-REG-20 | `prune` removes only records whose worktree path does not exist; `--dry-run` writes nothing | baseline | F | live | REQ-31 (A3); absorbs A7's prune |
+| T-REG-21 | `prune` keeps and reports a record whose path another repository's live worktree now occupies | baseline | F | live | REQ-31 (A3) |
+| T-REG-22 | `prune` on a healthy registry reports nothing to remove and changes nothing | baseline | F | live | REQ-31 (A3) |
+| T-REG-23 | a v1 record carrying no repository is read, not rejected, and stays cleanable from its own repository — liveness decides, not the recorded identity | baseline | F | live | REQ-41 (A3); migration |
+| T-REG-24 | forking backfills a repository onto a live legacy record and rewrites the file as v2; the evidence is live enumeration, never the record's stored path | baseline | F | live | REQ-41 (A3); migration |
+| T-REG-25 | path reuse on the same branch by another repository → cleanup refuses; that repository's worktree and branch both survive. Anchors the destructive commands to the invoking repository, not the record's stored path | baseline | F | live | REQ-31 (A3); gate-6 P0 |
+| T-REG-26 | `--force` does not override the stale refusal — it extends targeting and overrides dirty/unpushed only, never ownership | baseline | F | live | REQ-31 (A3); gate-6 P0 |
+| T-REG-27 | a registered fork is cleanable by absolute path from outside any repository; an explicit path is fresh input and anchors the repository | baseline | F | live | REQ-31 (A3); gate-6 P1 |
+| T-REG-28 | `prune` reports path reuse as displaced even when the occupying worktree carries the same branch name | baseline | F | live | REQ-31a (A3); gate-6 P2 |
+| T-REG-29 | a record naming another repository cannot authorize deletion even when invoked from the repository that now holds its path and branch — the stored repository vetoes, though it never authorizes | baseline | F | live | REQ-31 (A3); gate-6 r2 P0 |
 
 ---
 
@@ -386,12 +419,13 @@ the group.
 | T-CLN-15 | flag combination — `--force` with `--no-input` and no `--yes` → fail, exit 2 (`--force` never substitutes for consent) | baseline | C | live | REQ-33; DESIGN-DECISIONS D12 |
 | T-CLN-16 | `cleanup --force --dry-run` on a dirty worktree reports each at-risk path and performs no mutation | baseline | C | live | issue #16 sections 1–2; REQ-18; REQ-32 |
 | T-CLN-17 | dirty-worktree refusal enumerates modified and untracked paths with porcelain statuses and names `--allow-dirty` | baseline | C | live | issue #16 sections 1 and 3; REQ-32 |
-| T-CLN-18 | unpushed-commit refusal enumerates each abbreviated SHA and subject and names `--allow-unpushed` | baseline | C | live | issue #16 sections 1 and 3; REQ-32 |
+| T-CLN-18 | unpushed-commit refusal with a configured remote enumerates each abbreviated SHA and subject, names `--allow-unpushed`, and retains `push first` guidance | baseline | C | live | issue #16 sections 1 and 3; REQ-32 |
 | T-CLN-19 | dirty enumeration is capped at 10 entries with the remaining count reported in human and JSON errors | baseline | C | live | issue #16 sections 1 and 4; REQ-17 |
 | T-CLN-20 | `--allow-dirty` and `--allow-unpushed` override only their named guard | baseline | C | live | issue #16 section 3; REQ-32; DESIGN-DECISIONS D12 |
 | T-CLN-21 | JSON refusal and `--force --dry-run` result carry matching dirty and unpushed `details` objects | baseline | C | live | issue #16 section 4; REQ-17; REQ-18 |
 | T-CLN-22 | `--allow-dirty` and `--allow-unpushed` never override the invoking-cwd refusal | baseline | C | live | issue #16 section 3; REQ-32; DESIGN-DECISIONS D12 |
 | T-CLN-23 | Human cleanup diagnostics escape terminal control bytes in Git-controlled paths and commit subjects while JSON preserves the values | baseline | C | live | PR #17 late security review; issue #16 sections 1 and 4; REQ-17 |
+| T-CLN-24 | unpushed-commit refusal with no configured remote explains remote setup; JSON preserves the existing error code and `details` object | baseline | C | live | P02 A13(f); REQ-17; REQ-32 |
 
 ---
 
@@ -432,6 +466,9 @@ Varying axes: agent (claude/codex, must vary per §4 — templates differ by age
 | T-EMT-08 | Claude session inspection emits the distinct byte-exact command with one fresh injectable child UUID and no name or extra args | agent=claude | U | live | REQ-50; D21 |
 | T-EMT-09 | Codex session inspection emits the distinct byte-exact `fork -C` command from the current thread and resolved directory | agent=codex | U | live | REQ-50; D21 |
 | T-EMT-10 | shared native rendering preserves REQ-28 templates, quotes hostile shell values, and rejects terminal-unsafe IDs, directories, or configured arguments before mutation | baseline | U | live | REQ-42; REQ-50; D21 |
+| T-EMT-11 | Claude session inspection resume command is byte-exact — `cd '<directory>' && claude --resume '<parent-id>'`, no child session ID, no `--fork-session` | agent=claude | U | live | P04; REQ-50; D21 |
+| T-EMT-12 | Codex session inspection resume command is byte-exact — `codex resume '<parent-thread-id>' -C '<directory>'` | agent=codex | U | live | P04; REQ-50; D21 |
+| T-EMT-13 | resume-mode native rendering rejects a passed child session ID, quotes hostile shell values, and rejects terminal-unsafe IDs or directories before mutation | baseline | U | live | P04; REQ-42; REQ-50; D21 |
 
 ---
 
@@ -452,7 +489,7 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-06 | error object shape on stderr — single `{"error":{"code","message"}}` under any machine format | baseline | C | live | REQ-17 |
 | T-OUT-07 | every code in the authoritative stable error catalog round-trips correctly in the `-o json` error object — asserted individually | baseline | C | live | REQ-17 |
 | T-OUT-08 | `--dry-run` output lists every planned mutation (branch, worktree path, files-to-carry counts, paste command) and states validation was local-only | baseline | C | live | REQ-18 |
-| T-OUT-09 | clipboard copy failure emits a stderr notice; exit code is unaffected | baseline | C | live | DESIGN-DECISIONS D9 |
+| T-OUT-09 | clipboard copy failure is absent from human stdout, emits exactly one stderr notice, remains in JSON `notices[]`, and does not affect the exit code | baseline | C | live | DESIGN-DECISIONS D9; REQ-16; REQ-17; P02 A13(a) |
 | T-OUT-10 | non-C locale row — `-o json` machine output is byte-identical regardless of process locale | locale=non-C | C | live | REQ-38 R9.4 |
 | T-OUT-11 | `fork -o json` success object carries the REQ-17 minimum fields — `agent`, `parent_session_id`, `fork.branch`, `fork.worktree`, `fork.anchor_commit`, `fork.mode` (state-carry booleans), `verification` (per-check results), `command`, `notices[]` | baseline | C | live | REQ-17 |
 | T-OUT-12 | dry-run reports exact composed destination and mutates nothing | baseline | C | live | D15; REQ-44 |
@@ -465,6 +502,8 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-19 | renamed Codex JSON preserves canonical `parent_session_id` and additively reports `parent_session_name` | agent=codex | C | live | REQ-46; D17 |
 | T-OUT-20 | renamed Codex dry-run reports the resolution notice and UUID-based paste command | agent=codex | C | live | REQ-46; D17 |
 | T-OUT-21 | `fork --dry-run -o json` and `fork --dry-run --json` emit the same parseable preview object with every planned mutation and perform no mutation | baseline | C | live | REQ-17; REQ-18; issue #14; R4.2; R8.6 |
+| T-OUT-22 | `agent_signal_incomplete` is cataloged at exit 3 and emits exact non-secret `status`, `present`, and `missing` machine details | agent-signal=incomplete-marker | C | live | P02 A9; REQ-17; R7.8; R7.12 |
+| T-OUT-23 | bidirectional formatting characters are escaped by the renderer and rejected by the command-safety predicate, which share one control set | baseline | U | live | REQ-17 |
 
 ---
 
@@ -503,6 +542,15 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-24 | help, positive/negative flag spelling, and dotted config set/get expose the Codex-specific control | agent=codex | C | live | REQ-46; D17 |
 | T-CLI-25 | A4 — `doctor` reports recipe-flag coverage for both installed CLIs, the destination both preflight notices name | baseline | C | live | P02 A4; REQ-28 |
 | T-CLI-26 | A4 — recipe drift fails `doctor` only for the selected agent; an unselected CLI's drift is reported without changing exit status | baseline | C | live | P02 A4; TS04 Codex review 3.4 |
+| T-CLI-27 | automatic and strict doctor diagnostics classify both incomplete and both partial-plus-Codex shapes consistently, with exact CLI optionality and recipe semantics | agent-signal=incomplete-marker/incomplete-id/ambiguous-partial-marker/ambiguous-partial-id; agent-mode=auto/strict | C | live | P02 A9; REQ-38; REQ-45 |
+| T-CLI-28 | explicit Git-only doctor mode reports incomplete or ambiguous observations while both agent CLIs and recipe drift remain informational | agent-signal=incomplete-marker/ambiguous-partial-marker; agent-mode=git-only | C | live | P02 A9; REQ-38; REQ-45 |
+| T-CLI-29 | automatic real fork refuses incomplete Claude input with exit 3 and exact JSON details | agent-signal=incomplete-marker; agent-mode=auto | C | live | P02 A9; REQ-17; REQ-45 |
+| T-CLI-30 | strict real fork refuses incomplete Claude input with exit 3 and exact JSON details | agent-signal=incomplete-id; agent-mode=strict | C | live | P02 A9; REQ-17; REQ-45 |
+| T-CLI-31 | automatic incomplete dry-run refusal emits one stderr JSON error and creates no Git or Agent Fork artifact | agent-signal=incomplete-marker; agent-mode=auto | C | live | P02 A9; REQ-18; REQ-29; R8.6 |
+| T-CLI-32 | every output parser accepts only `text` and `json`; all human-result defaults equal explicit `text`; `table` is rejected; completions omit it; invalid environment output follows each command's existing config-resolution contract | baseline | C | live | P02 A13(b); REQ-10; R4.2; R5.1 |
+| T-CLI-33 | every option argparse declares for each subcommand reaches the completion vocabulary — the parity invariant that replaces hand-maintained option lists | baseline | U | live | REQ-10 |
+| T-CLI-34 | every subcommand argparse declares reaches the completion vocabulary | baseline | U | live | REQ-10 |
+| T-CLI-35 | completion output choices are exactly those the parser accepts, so a removed alias cannot linger in completions | baseline | U | live | P02 A13(b); REQ-10 |
 
 ---
 
@@ -547,6 +595,21 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 | T-SES-30 | JSON reports the additive status/command object and human output prints an exact safe command or explicit unavailable status | baseline | C | live | REQ-50; D21; CLI R7.2 |
 | T-SES-31 | session command construction performs no Git mutation, write, registry/lineage change, clipboard access, preflight, or command execution | baseline | C | live | REQ-50; D21 |
 | T-SES-32 | session help makes human and JSON command inspection discoverable and labels availability as constructible, not preflighted | baseline | C | live | REQ-50; D21; CLI R7.5 |
+| T-SES-33 | session inspection consumes both incomplete and both partial-plus-Codex assessments without creating identity or a command | agent-signal=incomplete-marker/incomplete-id/ambiguous-partial-marker/ambiguous-partial-id | U | live | P02 A9; REQ-47; REQ-50 |
+| T-SES-34 | session human/JSON output emits exact additive assessment state for absent, incomplete, detected, and ambiguous input while incomplete inspection remains observational and write-free | agent-signal=absent/incomplete-marker/detected-claude/ambiguous-partial-marker | C | live | P02 A9; REQ-47; REQ-50; R7.2 |
+| T-SES-35 | validation preserves existing assertions and embeds the detected `agent_signal` document | agent-signal=detected-claude | U | live | P02 A9; REQ-47 |
+| T-SES-36 | resume-command status depends only on the zero/one/two ambient identity truth table and terminal safety, never lineage availability, mirroring fork-command's contract | baseline | U | live | P04; REQ-50; D21 |
+| T-SES-37 | `document()` includes the additive `resume_command` object alongside `fork_command` | agent=claude | U | live | P04; REQ-50; D21 |
+| T-SES-38 | JSON reports the additive resume-command status/command object and human output prints an exact safe command or explicit unavailable status | baseline | C | live | P04; REQ-50; D21; CLI R7.2 |
+| T-SES-39 | transcript resolution derives the Claude path from identity and directory, discovers the Codex rollout by glob, and reports no path for an unsafe ID or absent identity | baseline | U | live | P05; REQ-47; REQ-50 |
+| T-SES-40 | `document()` includes the additive `transcript` object alongside `fork_command` and `resume_command` | agent=claude | U | live | P05; REQ-47; REQ-50 |
+| T-SES-41 | JSON reports the additive transcript path/exists object and human output prints an escaped path with its on-disk state or an explicit unavailable line | baseline | C | live | P05; REQ-47; REQ-50; CLI R7.2 |
+| T-SES-42 | Codex rollout resolution returns the newest matching rollout file and stays consistent with the existence probe | agent=codex | U | live | P05; REQ-46; REQ-50 |
+| T-SES-43 | a valid Codex `thread/read` response with no `forkedFromId` returns the current thread with no parent | agent=codex | U | live | P02 A13(c); REQ-47 |
+| T-SES-44 | a Codex `thread/read` JSON-RPC error raises typed unavailable evidence instead of returning valid absence | agent=codex | U | live | P02 A13(c); REQ-47 |
+| T-SES-45 | a Codex `thread/read` result with an unsupported schema raises the existing typed unavailable failure | agent=codex | U | live | P02 A13(c); REQ-47 |
+| T-SES-46 | CLI inspection distinguishes valid no-parent from current-thread failure; parent-name failure preserves the resolved parent ID and marks only its name unavailable | agent=codex | C | live | P02 A13(c); REQ-47 |
+| T-SES-47 | unavailable parent evidence satisfies neither parent-presence assertion, while agent-only and current-session-only assertions remain independent of lineage availability | agent=codex | C | live | P02 A13(c); REQ-47 |
 
 ---
 
@@ -594,6 +657,10 @@ Varying axes: relationship (parent/child/sibling/unrelated), cache (cold/warm), 
 | T-CPI-33 | partial bulk recording commits successes but emits one stderr error document | CLI+bulk+persistence | C | live | REQ-48; D19 |
 | T-CPI-34 | bulk projection caps candidate detail, notices, and scalar lengths explicitly | output+memory | U | live | REQ-48; D19 |
 | T-CPI-35 | deferred bulk spool uses restrictive private permissions | output+privacy | U | live | REQ-48; D19 |
+| T-CPI-36 | `infer --current` preserves absent/Codex-only behavior, refuses incomplete and ambiguous signals before discovery, and uses complete Claude context | agent-signal=absent/detected-codex/incomplete-marker/incomplete-id/ambiguous-partial-marker/ambiguous-partial-id/ambiguous-complete/detected-claude | C | live | P02 A9; REQ-48 |
+| T-CPI-37 | `read_lineage` normalizes a malformed store to the typed `invalid agent-fork lineage store` error | baseline | U | live | REQ-48 |
+| T-CPI-38 | `add_lineage` normalizes the same malformed store to the same typed error, so every entry point shares one contract | baseline | U | live | REQ-48 |
+| T-CPI-39 | invalid UTF-8 bytes normalize to the same typed error rather than escaping as a decoder-specific `UnicodeDecodeError` | baseline | U | live | REQ-48 |
 
 ---
 

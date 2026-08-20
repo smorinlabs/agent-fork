@@ -11,6 +11,7 @@ from typing import Any
 
 from agent_fork.errors import AgentForkError
 from agent_fork.models import ConfigValues, ResolvedConfig
+from agent_fork.xdg import xdg_path
 
 DEFAULT_BRANCH_PREFIX = "fork/"
 DEFAULT_WORKTREE_LOCATION = "sibling"
@@ -80,7 +81,7 @@ def resolve_config(
     agent_mode = DEFAULT_AGENT_MODE
     verify = True
     copy = False
-    output = "table"
+    output = "text"
     config_path: Path | None = None
     claude_extra_args: tuple[str, ...] = ()
     codex_extra_args: tuple[str, ...] = ()
@@ -119,6 +120,8 @@ def resolve_config(
 
     if agent_mode not in {"auto", "strict", "git-only"}:
         raise ConfigError("agent_mode must be auto, strict, or git-only")
+    if output not in {"text", "json"}:
+        raise ConfigError("output must be text or json")
 
     return ResolvedConfig(
         with_state=with_state,
@@ -248,8 +251,8 @@ def discover_config_paths(cwd: Path, env: Mapping[str, str]) -> list[Path]:
         candidate = directory / XDG_RELATIVE_PATH
         if candidate.is_file():
             paths.append(candidate.resolve())
-    user = Path(env.get("XDG_CONFIG_HOME", Path(env.get("HOME", "~")) / ".config"))
-    user_candidate = user.expanduser() / XDG_RELATIVE_PATH
+    user = xdg_path(env, "XDG_CONFIG_HOME", ".config")
+    user_candidate = user / XDG_RELATIVE_PATH
     if user_candidate.is_file():
         paths.append(user_candidate.resolve())
     project = find_project_config(cwd, env)

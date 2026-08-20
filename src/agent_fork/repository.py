@@ -10,6 +10,7 @@ from pathlib import Path
 from agent_fork.errors import PreconditionError
 from agent_fork.git import GitCommandError, run_git
 from agent_fork.text import escape_terminal_text
+from agent_fork.worktree_list import list_worktrees
 
 
 @dataclass(frozen=True)
@@ -119,14 +120,10 @@ def inspect_repository(
 def _worktree_branches(
     parent: Path, *, env: Mapping[str, str] | None
 ) -> dict[str, Path]:
-    result = run_git(parent, ["worktree", "list", "--porcelain"], env=env)
     branches: dict[str, Path] = {}
-    current_path: Path | None = None
-    for line in result.stdout.decode(errors="surrogateescape").splitlines():
-        if line.startswith("worktree "):
-            current_path = Path(line.removeprefix("worktree ")).resolve()
-        elif line.startswith("branch refs/heads/") and current_path is not None:
-            branches[line.removeprefix("branch refs/heads/")] = current_path
+    for record in list_worktrees(parent, env=env):
+        if record.branch is not None:
+            branches[record.branch] = record.path
     return branches
 
 
@@ -135,50 +132,31 @@ def live_worktree_pairs(
 ) -> frozenset[tuple[str, str]]:
     """Freshly observed (worktree path, branch) pairs for one repository.
 
-    This is the evidence the registry is checked against. Two kinds of record
-    are deliberately excluded, because neither is a worktree that exists now:
+    This is the evidence registry records are checked against, so it reports
+    only what is demonstrably there *now*. Enumeration comes from
+    `list_worktrees`, and every listed path is then asked directly which
+    repository it belongs to and which branch it is on, because being listed
+    is not the same as being present:
 
-    - `prunable` entries, which Git still lists after the directory has been
-      deleted, until someone runs `git worktree prune`;
-    - detached entries, which have no branch. A fork always has one, so a row
-      matching nothing here is not one of this repository's forks.
+    - Git keeps listing a worktree whose directory was deleted, marking it
+      `prunable`, until someone runs `git worktree prune`;
+    - a directory can be replaced by an unrelated repository's worktree while
+      the original repository still lists the path.
+
+    Both are excluded by the probe rather than by parsing list metadata, which
+    is why this does not need the `prunable` field. Detached worktrees are
+    excluded too: a fork always has a branch, so a record matching nothing
+    here is not one of this repository's forks.
     """
     own_common_dir = inspect_repository(parent, env=env).common_dir
-    # Newline-delimited, not `-z`. The NUL form would parse paths containing
-    # newlines, but it arrived in Git 2.36 and this product's floor is 2.19;
-    # docs/testing/PRODUCT-GIT-MIN-AUDIT.md names this exact option as
-    # deliberately avoided. A worktree path containing a newline is not
-    # matched here and its record is refused rather than acted on, which errs
-    # in the safe direction.
-    result = run_git(parent, ["worktree", "list", "--porcelain"], env=env)
     pairs: set[tuple[str, str]] = set()
-    path: Path | None = None
-    prunable = False
-
-    def confirm() -> None:
-        if path is None or prunable:
-            return
-        current = _current_worktree_identity(path, env=env)
+    for record in list_worktrees(parent, env=env):
+        current = _current_worktree_identity(record.path, env=env)
         if current is None:
-            return
+            continue
         common_dir, branch = current
-        # Being listed is not enough. Git keeps listing a path whose directory
-        # was replaced, so ask the directory itself which repository it now
-        # belongs to and which branch it is now on.
         if common_dir == own_common_dir:
-            pairs.add((str(path), branch))
-
-    for line in result.stdout.decode(errors="surrogateescape").splitlines() + [""]:
-        if line.startswith("worktree "):
-            confirm()
-            path = Path(line.removeprefix("worktree ")).resolve()
-            prunable = False
-        elif line.startswith("prunable"):
-            prunable = True
-        elif not line:
-            confirm()
-            path = None
-            prunable = False
+            pairs.add((str(record.path), branch))
     return frozenset(pairs)
 
 

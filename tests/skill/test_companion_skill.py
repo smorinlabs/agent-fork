@@ -32,6 +32,24 @@ def test_skill_locks_session_and_fork_command_routes() -> None:
     assert "character-for-character" in text
 
 
+def test_skill_session_route_also_presents_the_resume_command() -> None:
+    text = _text()
+    assert "`resume_command`" in text
+    assert "predates the resume_command" in text and "contract" in text
+    assert "rehydrate" in text.lower()
+    assert "Do not execute a returned session fork or resume command." in text
+
+
+def test_skill_session_route_also_presents_the_transcript_path() -> None:
+    text = _text()
+    assert "`transcript`" in text
+    assert "predates the transcript" in text and "contract" in text
+    assert "transcript.path" in text
+    assert "transcript.exists" in text
+    assert "terminal control characters escaped" in text
+    assert "never printed raw" in text
+
+
 def test_omitted_name_uses_session_context_and_cli_automatic_naming() -> None:
     text = _text()
     assert "Resolve the candidate name and confirm it as specified above." in text
@@ -138,7 +156,8 @@ def test_stale_cli_contract_reports_a_specific_upgrade_path() -> None:
     assert (
         "uv tool install --force git+https://github.com/smorinlabs/agent-fork" in text
     )
-    assert "contract changed without a version bump" in text
+    assert "not a reliable discriminator" in text
+    assert "fork_command" in text and "did not get one" in text
 
 
 def test_failure_and_success_json_contracts_remain_explicit() -> None:

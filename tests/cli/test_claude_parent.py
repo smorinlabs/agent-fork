@@ -296,3 +296,158 @@ def test_bulk_partial_record_is_one_stderr_document(repo_scenario):
     summary = document["error"]["details"]["analysis"]["summary"]
     assert summary == {"failed": 1, "recorded": 1, "total": 2}
     assert find_inference(child, env=env) is not None
+
+
+def _current_signal_env(environment, **signals):
+    result = {
+        key: value
+        for key, value in environment.items()
+        if key not in {"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"}
+    }
+    result.update(signals)
+    return result
+
+
+@pytest.mark.matrix("T-CPI-36")
+def test_current_inference_consumes_shared_agent_signal_assessment(
+    repo_scenario, monkeypatch, capsys
+):
+    import agent_fork.claude_lineage_inference as inference
+    from agent_fork.cli import main
+    from conftest import run_cli
+
+    world = repo_scenario()
+    seeded, _, child = _seed(world)
+
+    discovery_attempted = False
+
+    def fail_if_discovery_starts(*args, **kwargs):
+        nonlocal discovery_attempted
+        discovery_attempted = True
+        raise AssertionError("Claude lineage discovery started before assessment")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(inference, "ClaudeLineageCorpus", fail_if_discovery_starts)
+        for name in ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"):
+            patch.delenv(name, raising=False)
+        patch.setenv("CLAUDECODE", "1")
+        assert (
+            main(["session", "claude-parent", "infer", "--current", "-o", "json"]) == 3
+        )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err)["error"]["code"] == "agent_signal_incomplete"
+    assert discovery_attempted is False
+
+    for signals in ({}, {"CODEX_THREAD_ID": "codex-parent"}):
+        unavailable = run_cli(
+            ["session", "claude-parent", "infer", "--current", "-o", "json"],
+            _current_signal_env(seeded, **signals),
+            world.parent_path,
+        )
+        assert unavailable.returncode == 3
+        assert unavailable.stdout == b""
+        assert json.loads(unavailable.stderr)["error"]["code"] == (
+            "claude_parent_unavailable"
+        )
+
+    incomplete_shapes = (
+        (
+            {"CLAUDECODE": "1"},
+            ["CLAUDECODE=1"],
+            ["CLAUDE_CODE_SESSION_ID"],
+        ),
+        (
+            {"CLAUDE_CODE_SESSION_ID": child},
+            ["CLAUDE_CODE_SESSION_ID"],
+            ["CLAUDECODE=1"],
+        ),
+    )
+    for signals, present, missing in incomplete_shapes:
+        missing_text = ", ".join(missing)
+        incomplete = run_cli(
+            ["session", "claude-parent", "infer", "--current", "-o", "json"],
+            _current_signal_env(seeded, **signals),
+            world.parent_path,
+        )
+        assert incomplete.returncode == 3
+        assert incomplete.stdout == b""
+        assert json.loads(incomplete.stderr) == {
+            "error": {
+                "code": "agent_signal_incomplete",
+                "message": (
+                    f"incomplete agent signal; missing {missing_text}; restore the "
+                    "missing value before retrying"
+                ),
+                "details": {
+                    "status": "incomplete",
+                    "present": present,
+                    "missing": missing,
+                },
+            }
+        }
+
+    ambiguous_shapes = (
+        (
+            {"CLAUDECODE": "1", "CODEX_THREAD_ID": "codex-parent"},
+            ["CLAUDECODE=1", "CODEX_THREAD_ID"],
+            ["CLAUDE_CODE_SESSION_ID"],
+        ),
+        (
+            {"CLAUDE_CODE_SESSION_ID": child, "CODEX_THREAD_ID": "codex-parent"},
+            ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"],
+            ["CLAUDECODE=1"],
+        ),
+        (
+            {
+                "CLAUDECODE": "1",
+                "CLAUDE_CODE_SESSION_ID": child,
+                "CODEX_THREAD_ID": "codex-parent",
+            },
+            ["CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"],
+            [],
+        ),
+    )
+    for signals, present, missing in ambiguous_shapes:
+        diagnosis = (
+            "Claude and Codex signals are present; incomplete Claude signal is "
+            f"missing {', '.join(missing)}"
+            if missing
+            else "both Claude and Codex signals are present"
+        )
+        expected_message = f"current agent signals are ambiguous: {diagnosis}"
+        ambiguous = run_cli(
+            ["session", "claude-parent", "infer", "--current", "-o", "json"],
+            _current_signal_env(seeded, **signals),
+            world.parent_path,
+        )
+        assert ambiguous.returncode == 3
+        assert ambiguous.stdout == b""
+        error = json.loads(ambiguous.stderr)["error"]
+        assert error["code"] == "claude_parent_unavailable"
+        assert error["message"] == expected_message
+        assert error["details"] == {
+            "status": "ambiguous",
+            "present": present,
+            "missing": missing,
+        }
+        if missing:
+            human = run_cli(
+                ["session", "claude-parent", "infer", "--current"],
+                _current_signal_env(seeded, **signals),
+                world.parent_path,
+            )
+            assert human.returncode == 3
+            assert human.stdout == b""
+            assert human.stderr == (
+                f"claude_parent_unavailable: {expected_message}\n".encode()
+            )
+
+    detected = run_cli(
+        ["session", "claude-parent", "infer", "--current", "-o", "json"],
+        _current_signal_env(seeded, CLAUDECODE="1", CLAUDE_CODE_SESSION_ID=child),
+        world.parent_path,
+    )
+    assert detected.returncode == 0, detected.stderr
+    assert detected.stderr == b""
+    assert json.loads(detected.stdout)["session_id"] == child

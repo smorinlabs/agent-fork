@@ -290,3 +290,87 @@ def test_session_renderer_quotes_shell_values_and_rejects_terminal_controls(
     )
     assert branch_probe.returncode != 0
     assert not destination.exists()
+
+
+@pytest.mark.matrix("T-EMT-11")
+def test_claude_session_resume_command_is_byte_exact(repo_scenario):
+    from agent_fork.agents import build_session_resume_command
+
+    world = repo_scenario()
+    built = build_session_resume_command(
+        _context("claude"), directory=world.parent_path
+    )
+
+    assert built.command == (
+        f"cd {world.parent_path} && claude --resume "
+        "11111111-1111-1111-1111-111111111111"
+    )
+    assert built.child_session_id is None
+    assert built.extra_args == ()
+
+
+@pytest.mark.matrix("T-EMT-12")
+def test_codex_session_resume_command_is_byte_exact(repo_scenario):
+    from agent_fork.agents import build_session_resume_command
+
+    world = repo_scenario()
+    built = build_session_resume_command(_context("codex"), directory=world.parent_path)
+
+    assert built.command == (
+        f"codex resume 22222222-2222-2222-2222-222222222222 -C {world.parent_path}"
+    )
+    assert built.child_session_id is None
+    assert built.extra_args == ()
+
+
+@pytest.mark.matrix("T-EMT-13")
+def test_session_resume_renderer_quotes_shell_values_and_rejects_terminal_controls(
+    repo_scenario,
+):
+    from agent_fork.agents import (
+        AgentContext,
+        UnsafeCommandInputError,
+        build_session_resume_command,
+    )
+
+    world = repo_scenario()
+    hostile_directory = world.parent_path.parent / "space ' quote $HOME; safe"
+    hostile_directory.mkdir()
+    binary = world.parent_path.parent / "resume-bin"
+    binary.mkdir()
+    log = _fake_binary(binary, "claude")
+    parent = "parent ' $HOME; touch INJECTED"
+    built = build_session_resume_command(
+        AgentContext("claude", parent), directory=hostile_directory
+    )
+
+    completed = subprocess.run(
+        ["/bin/sh", "-c", built.command],
+        cwd=world.parent_path,
+        env={
+            **world.env,
+            "PATH": f"{binary}{os.pathsep}{world.env['PATH']}",
+            "ARGV_LOG": str(log),
+        },
+        capture_output=True,
+    )
+    assert completed.returncode == 0
+    assert json.loads(log.read_text()) == ["--resume", parent]
+    assert not (world.parent_path / "INJECTED").exists()
+
+    unsafe_values = (
+        "line\nfeed",
+        "escape\x1b]52;c;Zm9v\x07",
+        "delete\x7f",
+        "c1\x9b",
+        "bidi\u202e",
+    )
+    for unsafe in unsafe_values:
+        with pytest.raises(UnsafeCommandInputError):
+            build_session_resume_command(
+                AgentContext("claude", unsafe), directory=world.parent_path
+            )
+        with pytest.raises(UnsafeCommandInputError):
+            build_session_resume_command(
+                _context("claude"), directory=world.parent_path / unsafe
+            )
