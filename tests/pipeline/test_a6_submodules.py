@@ -225,3 +225,28 @@ def test_notice_names_uncarried_submodule_state_instead_of_claiming_a_copy(
     assert "vendor/submodule" in joined
     assert "copied" not in joined
     assert "not carried" in joined
+
+
+@pytest.mark.matrix("T-GRD-23")
+def test_unstaged_gitlink_advance_is_not_refused_when_no_state_is_carried(
+    repo_scenario,
+):
+    """A6a — the refusal must not block the remedy it recommends.
+
+    `submodule_unrepresentable` tells the user to fork without carrying state.
+    The guard therefore must not fire in that mode: with `--no-with-state` the
+    child is a clean checkout of the anchor commit, nothing about the parent's
+    submodule is being reproduced, and there is no divergence to refuse.
+    """
+    from agent_fork.repository import validate_fork_guards
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="advanced"),))
+    child = world.parent_path.parent / "a6-nostate"
+
+    validate_fork_guards(
+        world.parent_path,
+        "fork/a6-nostate",
+        child,
+        with_state=False,
+        env=world.env,
+    )

@@ -164,6 +164,7 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-20 | A2 guard — repository-local configuration still applies; sanitization targets inline injection only | baseline | F | live | A2 design doc §C2 |
 | T-GRD-21 | A2 — `GIT_CONFIG_PARAMETERS`, Git's second inline-injection channel, is stripped too; stripping only the `GIT_CONFIG_COUNT` triple left it open | baseline | F | live | PR #36 review; A2 design doc |
 | T-GRD-22 | A6a — a submodule checked out at a commit the parent's index does not record is refused before any mutation (`submodule_unrepresentable`, exit 5); conditional on submodules not being carried, so A6b gates it rather than deleting it | baseline | F | live | A6 design doc §Matrix 1 cell `c` |
+| T-GRD-23 | A6a — the refusal is gated on carrying state, so `--no-with-state` (the remedy the error recommends) is not itself refused | baseline | F | live | A6 design doc §Split |
 
 ---
 

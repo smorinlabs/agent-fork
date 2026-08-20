@@ -266,11 +266,20 @@ def validate_fork_guards(
     branch: str,
     destination: Path,
     *,
+    with_state: bool = True,
     env: Mapping[str, str] | None = None,
 ) -> RepositoryInfo:
-    """Run every refusal before filesystem or ref mutation."""
+    """Run every refusal before filesystem or ref mutation.
+
+    ``with_state`` gates the submodule refusal only. A fork that carries no
+    state reproduces nothing about the parent's submodules, so there is no
+    divergence to refuse — and refusing anyway would block the remedy the error
+    itself recommends.
+    """
     info = inspect_repository(parent, env=env)
-    unrepresentable = _unrepresentable_submodules(info.parent_path, env=env)
+    unrepresentable = (
+        _unrepresentable_submodules(info.parent_path, env=env) if with_state else []
+    )
     if unrepresentable:
         listed = ", ".join(escape_terminal_text(path) for path in unrepresentable)
         raise PreconditionError(

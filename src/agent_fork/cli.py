@@ -524,7 +524,13 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             ["git", "--version"], env=environment, capture_output=True, text=True
         ).stdout
         preflight_git(git_version, force=args.force, verify=config.verify)
-        validate_fork_guards(parent_path, branch, destination, env=environment)
+        validate_fork_guards(
+            parent_path,
+            branch,
+            destination,
+            with_state=config.with_state,
+            env=environment,
+        )
 
         def count(arguments):
             return count_paths(parent_path, arguments, env=environment)
