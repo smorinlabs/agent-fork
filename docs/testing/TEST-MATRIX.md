@@ -564,11 +564,15 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 | T-SES-36 | resume-command status depends only on the zero/one/two ambient identity truth table and terminal safety, never lineage availability, mirroring fork-command's contract | baseline | U | live | P04; REQ-50; D21 |
 | T-SES-37 | `document()` includes the additive `resume_command` object alongside `fork_command` | agent=claude | U | live | P04; REQ-50; D21 |
 | T-SES-38 | JSON reports the additive resume-command status/command object and human output prints an exact safe command or explicit unavailable status | baseline | C | live | P04; REQ-50; D21; CLI R7.2 |
-| T-SES-39 | a valid Codex `thread/read` response with no `forkedFromId` returns the current thread with no parent | agent=codex | U | live | P02 A13(c); REQ-47 |
-| T-SES-40 | a Codex `thread/read` JSON-RPC error raises typed unavailable evidence instead of returning valid absence | agent=codex | U | live | P02 A13(c); REQ-47 |
-| T-SES-41 | a Codex `thread/read` result with an unsupported schema raises the existing typed unavailable failure | agent=codex | U | live | P02 A13(c); REQ-47 |
-| T-SES-42 | CLI inspection distinguishes valid no-parent from current-thread failure; parent-name failure preserves the resolved parent ID and marks only its name unavailable | agent=codex | C | live | P02 A13(c); REQ-47 |
-| T-SES-43 | unavailable parent evidence satisfies neither parent-presence assertion, while agent-only and current-session-only assertions remain independent of lineage availability | agent=codex | C | live | P02 A13(c); REQ-47 |
+| T-SES-39 | transcript resolution derives the Claude path from identity and directory, discovers the Codex rollout by glob, and reports no path for an unsafe ID or absent identity | baseline | U | live | P05; REQ-47; REQ-50 |
+| T-SES-40 | `document()` includes the additive `transcript` object alongside `fork_command` and `resume_command` | agent=claude | U | live | P05; REQ-47; REQ-50 |
+| T-SES-41 | JSON reports the additive transcript path/exists object and human output prints an escaped path with its on-disk state or an explicit unavailable line | baseline | C | live | P05; REQ-47; REQ-50; CLI R7.2 |
+| T-SES-42 | Codex rollout resolution returns the newest matching rollout file and stays consistent with the existence probe | agent=codex | U | live | P05; REQ-46; REQ-50 |
+| T-SES-43 | a valid Codex `thread/read` response with no `forkedFromId` returns the current thread with no parent | agent=codex | U | live | P02 A13(c); REQ-47 |
+| T-SES-44 | a Codex `thread/read` JSON-RPC error raises typed unavailable evidence instead of returning valid absence | agent=codex | U | live | P02 A13(c); REQ-47 |
+| T-SES-45 | a Codex `thread/read` result with an unsupported schema raises the existing typed unavailable failure | agent=codex | U | live | P02 A13(c); REQ-47 |
+| T-SES-46 | CLI inspection distinguishes valid no-parent from current-thread failure; parent-name failure preserves the resolved parent ID and marks only its name unavailable | agent=codex | C | live | P02 A13(c); REQ-47 |
+| T-SES-47 | unavailable parent evidence satisfies neither parent-presence assertion, while agent-only and current-session-only assertions remain independent of lineage availability | agent=codex | C | live | P02 A13(c); REQ-47 |
 
 ---
 

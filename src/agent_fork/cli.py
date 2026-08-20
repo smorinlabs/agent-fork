@@ -175,15 +175,18 @@ def _parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
         help="Inspect or validate the current agent session",
         description=(
-            "Report agent-neutral current-session evidence and construct its native "
-            "fork command and resume (rehydrate) command without executing either."
+            "Report agent-neutral current-session evidence, locate its transcript "
+            "file, and construct its native fork command and resume (rehydrate) "
+            "command without executing either."
         ),
         epilog=(
             "Examples:\n"
-            "  agent-fork session          # human inspection, fork/resume commands\n"
+            "  agent-fork session          # human inspection, transcript, commands\n"
             "  agent-fork session --json   # exact commands in fork_command.command "
-            "and resume_command.command\n\n"
-            "Command availability means constructible, not preflighted."
+            "and resume_command.command; transcript file in transcript.path\n\n"
+            "Command availability means constructible, not preflighted.\n"
+            "A transcript path is reported even when the file is not yet on disk; "
+            "transcript.exists says which."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1115,6 +1118,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"resume command: {resume_command.command}")
             else:
                 print(f"resume command: unavailable ({resume_command.status})")
+            transcript = inspection.transcript
+            if transcript.path is None:
+                print("transcript: unavailable")
+            else:
+                state = "exists" if transcript.exists else "missing"
+                print(f"transcript: {terminal_text(transcript.path)} ({state})")
             return 0
         if args.command == "cleanup":
             from agent_fork.cleanup import cleanup, resolve_cleanup_target

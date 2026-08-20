@@ -511,7 +511,50 @@ def test_session_machine_output_exposes_exact_agent_signal(repo_scenario):
             assert validation["session"]["agent_signal"] == expected_signal
 
 
-@pytest.mark.matrix("T-SES-42")
+@pytest.mark.matrix("T-SES-41")
+def test_session_outputs_transcript_path_or_unavailable(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    machine = run_cli(["session", "--json"], env, world.parent_path)
+    document = json.loads(machine.stdout)
+    transcript = document["transcript"]
+    assert transcript["exists"] is False
+    assert transcript["path"].endswith("/claude-child.jsonl")
+    assert "/projects/" in transcript["path"]
+
+    human = run_cli(["session"], env, world.parent_path)
+    assert f"transcript: {transcript['path']} (missing)".encode() in human.stdout
+
+    written = Path(transcript["path"])
+    written.parent.mkdir(parents=True, exist_ok=True)
+    written.write_text("{}\n")
+    present = run_cli(["session"], env, world.parent_path)
+    assert f"transcript: {transcript['path']} (exists)".encode() in present.stdout
+
+    absent = run_cli(["session"], world.env, world.parent_path)
+    assert b"transcript: unavailable" in absent.stdout
+    absent_document = json.loads(
+        run_cli(["session", "--json"], world.env, world.parent_path).stdout
+    )
+    assert absent_document["transcript"] == {"path": None, "exists": False}
+
+    unsafe_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "unsafe\x1b]52;c;Zm9v\x07\nnext\u202e",
+    }
+    unsafe = run_cli(["session"], unsafe_env, world.parent_path)
+    assert b"\x1b" not in unsafe.stdout and b"\x07" not in unsafe.stdout
+    assert b"transcript: unavailable" in unsafe.stdout
+
+
+@pytest.mark.matrix("T-SES-46")
 def test_codex_session_distinguishes_absent_lineage_from_read_failures(repo_scenario):
     from conftest import run_cli
 
@@ -580,7 +623,7 @@ def test_codex_session_distinguishes_absent_lineage_from_read_failures(repo_scen
     )
 
 
-@pytest.mark.matrix("T-SES-43")
+@pytest.mark.matrix("T-SES-47")
 def test_codex_unavailable_lineage_refuses_only_parent_assertions(repo_scenario):
     from conftest import run_cli
 

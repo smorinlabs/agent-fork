@@ -18,6 +18,7 @@ reconstruct a command from.
 | Repository | `/Users/dev/project` |
 | Branch | `feature/auth-refresh` |
 | Status | staged 0 · unstaged 2 · untracked 0 |
+| Transcript | `/Users/dev/.codex/sessions/2026/08/19/rollout-2026-08-19T09-14-02-11111111-1111-4111-8111-111111111111.jsonl` (on disk) |
 
 Fork command — paste in a new terminal to fork this session in place:
 
@@ -34,6 +35,14 @@ place (no new thread, branch, or worktree):
 ```bash
 codex resume 11111111-1111-4111-8111-111111111111 -C /Users/dev/project
 ```
+
+The Transcript row is `transcript.path`, terminal-escaped like every other
+session- and repository-controlled value in this table — it embeds the
+invocation directory — and never otherwise rewritten. `(on disk)` renders
+`transcript.exists: true` and `(not yet written)` renders `false`. Codex
+rollout files are located by search rather than derived, so a Codex
+`transcript.path` is never non-null with `exists: false`; an unlocatable
+rollout reads `not located`.
 
 Row variants: an unnamed session shows `—` for Session name; a session with
 no recorded parent shows `none recorded (lineage: not_found)`; a clean
