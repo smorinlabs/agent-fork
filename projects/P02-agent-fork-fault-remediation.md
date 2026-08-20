@@ -398,11 +398,26 @@ repository-controlled text raw).
   the interaction with A6's dirty-submodule case. The window figures come
   from one machine at one repository size — indicative, not a bound.
 
-  Revised direction: (a) no change; (b) skip-with-notice at both
-  `content.py:_digest` and `_copy_entry`, matching `include.py:80-85`, with a
-  typed error replacing the raw `runtime_error`; (c) keep the rollback, add a
-  named cause ("the parent changed during the fork; nothing was lost") plus
-  retry-once, and a distinct message when the retry fails identically.
+  **Decided direction (owner, 2026-08-20).** One rule governs all three cases:
+  *a condition present when the snapshot was taken is skipped; a condition that
+  appears after it is a parent change and fails the fork.* Concretely —
+  (a) unchanged in effect: git never lists a socket or FIFO, so the
+  non-regular branch in `_copy_entry` can only fire on a mid-fork swap, which
+  is a parent change and therefore keeps failing; (b) unreadable at snapshot
+  time (`content.py:_digest`) is skipped, dropped from the carried inventory so
+  transport and verification stay driven by one set, and named in `notices`
+  plus a `skipped` array in the JSON output; the same path unreadable only at
+  copy time is a parent change and fails; `absent` and `other` manifest kinds
+  at snapshot time likewise fail, because the inventory lists only paths git
+  had just seen; (c) keep the rollback, add a named cause ("the parent changed
+  during the fork; nothing was lost"), retry **once** with fresh snapshots, and
+  emit a distinct message when the retry fails identically. Retry fires only
+  when parent drift was detected, never on a `content-match` failure without
+  drift, which would be an A1-class transport defect that a retry would mask.
+  A single `--strict`-style flag inverts (b): skips become refusals with a
+  non-zero exit. Flag name and strict-mode exit code are subject to the CLI
+  Design Standard check at the design gate. Full record: the
+  [A5 design doc](../docs/superpowers/plans/2026-08-20-p02-a5-skip-and-race-policy.md).
 - **A6 — Dirty submodules likely make the repo unforkable by default.**
   `git worktree add` leaves submodules uninitialized; `materialize.py:89-99`
   only emits a (misleading "copied opaquely") notice; parent ` M vendor/mod`
