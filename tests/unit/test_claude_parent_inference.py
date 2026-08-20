@@ -393,8 +393,11 @@ def test_discovery_bounds_all_entries_not_only_valid_transcripts(tmp_path):
     for index in range(10):
         (project / f"invalid-{index}").write_text("x")
 
-    with pytest.raises(ValueError, match="entry limit"):
+    from agent_fork.claude_lineage_inference import CorpusLimitError
+
+    with pytest.raises(CorpusLimitError) as excinfo:
         discover(env, Limits(max_entries=5), Work())
+    assert excinfo.value.limit == "max_entries"
 
 
 @pytest.mark.matrix("T-CPI-24")
@@ -477,3 +480,162 @@ def test_history_retains_only_discovered_sessions_and_earliest_timestamp(tmp_pat
 
     assert corpus.history == {PARENT: 1000}
     assert corpus.work.history_passes == 1
+
+
+@pytest.mark.matrix("T-CPI-46")
+def test_screen_cache_shard_is_flat_and_self_superseding(tmp_path):
+    env = _world(tmp_path)
+    path = Path(env["CLAUDE_CONFIG_DIR"]) / "projects/-repo" / f"{CHILD}.jsonl"
+    cache = Path(env["XDG_CACHE_HOME"]) / "agent-fork" / "claude-lineage-index-v3"
+
+    for _ in range(3):
+        path.write_text(path.read_text() + "\n")
+        _screen(path, env, Work())
+
+    shards = list(cache.glob("*.json"))
+    assert len(shards) == 1
+    assert shards[0].name == f"{CHILD}.json"
+    document = json.loads(shards[0].read_text())
+    assert document["source"]["session_id"] == CHILD
+
+
+@pytest.mark.matrix("T-CPI-47")
+def test_sweep_cache_bounds_and_safety(tmp_path, monkeypatch):
+    from agent_fork.claude_lineage_inference import (
+        CACHE_TEMP_GRACE_SECONDS,
+        sweep_cache,
+    )
+
+    env = _world(tmp_path)
+    v3 = Path(env["XDG_CACHE_HOME"]) / "agent-fork" / "claude-lineage-index-v3"
+    v2 = Path(env["XDG_CACHE_HOME"]) / "agent-fork" / "claude-lineage-index-v2"
+    v3.mkdir(parents=True)
+    v2.mkdir(parents=True)
+
+    # legacy v2 tree with content, to be removed
+    (v2 / "legacy-shard.json").write_text("{}")
+    (v2 / "sub").mkdir()
+    (v2 / "sub" / "nested.json").write_text("{}")
+
+    # v3 contents:
+    orphan = v3 / "99999999-0000-4000-8000-000000000099.json"
+    orphan.write_text("{}")
+    kept = v3 / f"{CHILD}.json"
+    kept.write_text("{}")
+    live_temp = v3 / f".{CHILD}.json.live12345"
+    live_temp.write_text("{}")
+    import os
+    import time as time_module
+
+    old_time = time_module.time() - CACHE_TEMP_GRACE_SECONDS - 10
+    stale_temp = v3 / f".{CHILD}.json.stale6789"
+    stale_temp.write_text("{}")
+    os.utime(stale_temp, (old_time, old_time))
+
+    work = Work()
+    sweep_cache(env, {CHILD}, work)
+
+    assert not v2.exists()
+    assert work.legacy_cache_removed == 1
+    assert not orphan.exists()
+    assert kept.exists()
+    assert live_temp.exists()
+    assert not stale_temp.exists()
+    assert (v3 / ".sweep").exists()
+    assert work.cache_shards_pruned >= 1
+
+    # the marker gates re-running the sweep within the interval
+    orphan.write_text("{}")
+    work2 = Work()
+    sweep_cache(env, {CHILD}, work2)
+    assert orphan.exists()  # sweep did not run again; marker is fresh
+
+    # symlinked or foreign-owned v2 root is left untouched even though v3 passed
+    env2 = _world(tmp_path.parent / "second-world")
+    v3b = Path(env2["XDG_CACHE_HOME"]) / "agent-fork" / "claude-lineage-index-v3"
+    v3b.mkdir(parents=True)
+    v2b_target = tmp_path.parent / "outside-v2"
+    v2b_target.mkdir()
+    (v2b_target / "shard.json").write_text("{}")
+    v2b = Path(env2["XDG_CACHE_HOME"]) / "agent-fork" / "claude-lineage-index-v2"
+    v2b.symlink_to(v2b_target)
+    work3 = Work()
+    sweep_cache(env2, set(), work3)
+    assert v2b.is_symlink()
+    assert (v2b_target / "shard.json").exists()
+
+
+@pytest.mark.matrix("T-CPI-49")
+def test_freshness_write_failure_increments_additional_counter(tmp_path, monkeypatch):
+    import agent_fork.lineage_inference_store as store
+
+    env = _world(tmp_path)
+
+    def fail_update(*args, **kwargs):
+        raise OSError("injected freshness write failure")
+
+    monkeypatch.setattr(store, "update_index_freshness", fail_update)
+
+    corpus = ClaudeLineageCorpus(env)
+    result = corpus.infer_one(CHILD)
+
+    assert result.work.freshness_write_failures == 1
+    baseline_work = Work()
+    assert result.work.cache_write_failures > baseline_work.cache_write_failures
+
+
+@pytest.mark.matrix("T-CPI-48")
+def test_corpus_limit_error_shape_per_limit(tmp_path):
+    from agent_fork.claude_lineage_inference import CorpusLimitError, discover
+
+    env = _world(tmp_path)
+
+    with pytest.raises(CorpusLimitError) as excinfo:
+        discover(env, Limits(max_files=1), Work())
+    assert (excinfo.value.limit, excinfo.value.allowed, excinfo.value.scope) == (
+        "max_files",
+        1,
+        "corpus",
+    )
+    assert excinfo.value.observed > 1
+
+    with pytest.raises(CorpusLimitError) as excinfo:
+        discover(env, Limits(max_entries=1), Work())
+    assert (excinfo.value.limit, excinfo.value.allowed, excinfo.value.scope) == (
+        "max_entries",
+        1,
+        "corpus",
+    )
+
+    with pytest.raises(CorpusLimitError) as excinfo:
+        discover(env, Limits(max_total_bytes=1), Work())
+    assert (excinfo.value.limit, excinfo.value.allowed, excinfo.value.scope) == (
+        "max_total_bytes",
+        1,
+        "corpus",
+    )
+
+    corpus = ClaudeLineageCorpus(env, Limits(max_candidates=0))
+    with pytest.raises(CorpusLimitError) as excinfo:
+        corpus.infer_one(CHILD)
+    assert (excinfo.value.limit, excinfo.value.allowed, excinfo.value.scope) == (
+        "max_candidates",
+        0,
+        "target",
+    )
+
+
+@pytest.mark.matrix("T-CPI-57")
+def test_max_seconds_timeout_maps_to_structured_shape(tmp_path):
+    from agent_fork.claude_lineage_inference import map_timeout_to_limit_error
+
+    env = _world(tmp_path)
+    corpus = ClaudeLineageCorpus(env, Limits(max_seconds=-1))
+
+    with pytest.raises(TimeoutError):
+        corpus.infer_one(CHILD)
+
+    mapped = map_timeout_to_limit_error(TimeoutError("timed out"), corpus.limits)
+    assert mapped.limit == "max_seconds"
+    assert mapped.scope == "target"
+    assert mapped.allowed == int(corpus.limits.max_seconds)

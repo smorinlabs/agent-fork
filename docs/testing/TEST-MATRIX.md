@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 413 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 444 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -410,6 +410,10 @@ the group.
 | T-CLN-22 | `--allow-dirty` and `--allow-unpushed` never override the invoking-cwd refusal | baseline | C | live | issue #16 section 3; REQ-32; DESIGN-DECISIONS D12 |
 | T-CLN-23 | Human cleanup diagnostics escape terminal control bytes in Git-controlled paths and commit subjects while JSON preserves the values | baseline | C | live | PR #17 late security review; issue #16 sections 1 and 4; REQ-17 |
 | T-CLN-24 | unpushed-commit refusal with no configured remote explains remote setup; JSON preserves the existing error code and `details` object | baseline | C | live | P02 A13(f); REQ-17; REQ-32 |
+| T-CLN-25 | real and dry-run cleanup of a fork with a lineage claim discloses the retained claim, inferred record, freshness entry, store paths, and the exact source-qualified removal command, and removes none of them | freshness=A10 | C | live | P02 A10; REQ-32 |
+| T-CLN-26 | cleanup of a target with no matching lineage claim, and cleanup when a lineage-store read fails, both succeed with the neutral notice and empty `retained_metadata` | freshness=A10 | C | live | P02 A10; REQ-32 |
+| T-CLN-27 | `retained_metadata` reaches machine output: `cleanup --json` emits it alongside `notices`, proving the hand-assembled CLI document was extended and not only the `CleanupResult` dataclass | freshness=A10 | C | live | P02 A10; REQ-17 |
+| T-CLN-28 | removal commands are per record and source-qualified; a child holding both a planned claim and an inferred record produces two command lines, neither omitting `--source`; store-derived notices are escaped | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
 
 ---
 
@@ -535,6 +539,12 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-33 | every option argparse declares for each subcommand reaches the completion vocabulary — the parity invariant that replaces hand-maintained option lists | baseline | U | live | REQ-10 |
 | T-CLI-34 | every subcommand argparse declares reaches the completion vocabulary | baseline | U | live | REQ-10 |
 | T-CLI-35 | completion output choices are exactly those the parser accepts, so a removed alias cannot linger in completions | baseline | U | live | P02 A13(b); REQ-10 |
+| T-CLI-36 | human and JSON session output report `last_known_good` and `freshness_unknown` parent inference, with the exact rerun notice, the `parent inference:` line immediately after `lineage:`, and no corpus discovery, cache write, or freshness write | freshness=A10 | C | live | P02 A10; REQ-32 |
+| T-CLI-37 | `delete --source inferred` reports every additive field and removes the freshness entry; `delete --source planned` with a surviving inferred record retains the freshness entry and says so | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLI-38 | exceeding a whole-corpus limit (`max_files`) under `--current`, `--session-id`, `--all`, and `--record` exits 3 as `claude_parent_incomplete_analysis` with one JSON error and no spool, inference, freshness, or registry write | freshness=A10 | C | live | P02 A10; REQ-17; REQ-18; R6.1 |
+| T-CLI-39 | `delete --source inferred` removes the freshness entry before the record; a fault injected after the freshness removal leaves the record readable as `freshness_unknown`, never `current` | freshness=A10 | C | live | P02 A10; REQ-32 |
+| T-CLI-40 | a per-target limit (`max_candidates`) tripped on one of several `--all` targets yields that target's own typed incomplete-analysis document inside the bulk output while every other target is recorded normally and the spool closes cleanly | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLI-41 | a freshness-index write failure increments `work.freshness_write_failures`; the CLI appends the rerun notice only on a `--record` run that actually recorded, never on a preview run | freshness=A10 | C | live | P02 A10; REQ-17 |
 
 ---
 
@@ -594,6 +604,9 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 | T-SES-45 | a Codex `thread/read` result with an unsupported schema raises the existing typed unavailable failure | agent=codex | U | live | P02 A13(c); REQ-47 |
 | T-SES-46 | CLI inspection distinguishes valid no-parent from current-thread failure; parent-name failure preserves the resolved parent ID and marks only its name unavailable | agent=codex | C | live | P02 A13(c); REQ-47 |
 | T-SES-47 | unavailable parent evidence satisfies neither parent-presence assertion, while agent-only and current-session-only assertions remain independent of lineage availability | agent=codex | C | live | P02 A13(c); REQ-47 |
+| T-SES-48 | a stale-source inference produces `parent_inference.status == "last_known_good"` with the recorded parent ID, while `parent_session` stays null and `lineage.status` stays `not_found` | freshness=A10 | U | live | P02 A10; REQ-47; REQ-48 |
+| T-SES-49 | `parent_inference` is present for all seven statuses with the exact field shape, coexists with `transcript`, and nulls `parent_session_id`/`analyzed_at`/`changed_sources` for `superseded` while keeping `freshness == "stale_algorithm"` | freshness=A10 | U | live | P02 A10; REQ-47; REQ-48 |
+| T-SES-50 | `session validate --has-parent` fails for `last_known_good` and `freshness_unknown` records and passes only once a re-inference makes the record `current` | freshness=A10 | U | live | P02 A10; REQ-47; REQ-48 |
 
 ---
 
@@ -645,6 +658,24 @@ Varying axes: relationship (parent/child/sibling/unrelated), cache (cold/warm), 
 | T-CPI-37 | `read_lineage` normalizes a malformed store to the typed `invalid agent-fork lineage store` error | baseline | U | live | REQ-48 |
 | T-CPI-38 | `add_lineage` normalizes the same malformed store to the same typed error, so every entry point shares one contract | baseline | U | live | REQ-48 |
 | T-CPI-39 | invalid UTF-8 bytes normalize to the same typed error rather than escaping as a decoder-specific `UnicodeDecodeError` | baseline | U | live | REQ-48 |
+| T-CPI-40 | the full freshness status/evidence mapping table, one row per status, including `changed_sources` for target-only, parent, and mixed source mismatches | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-41 | deleting the freshness index at both the state and legacy locations yields `freshness_unknown`, not `current_at_last_analysis` — the gate-1 revival repro | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-42 | a state index whose `targets` lacks this child, or an invalid/symlinked/oversized index, yields `freshness_unknown` when no legacy entry exists | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-43 | appending one blank line to the target transcript yields `stale_sources` with `changed_sources == ("target",)`; the record stays readable | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-44 | `remove_index_freshness` removes only the named key from the state path, leaves other entries intact, never unlinks either file, and preserves mode `0o600` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-45 | a record with more source fingerprints than `MAX_SOURCE_FINGERPRINTS` is rejected as an invalid store | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-46 | three successive transcript appends plus re-inference leave exactly one flat `{stem}.json` screen-cache shard | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-47 | the bounded sweep removes the legacy v2 tree once under its own safety check, removes orphan and aged shards, respects the marker interval, and never removes a live in-flight temp file or the `.sweep` marker itself | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-48 | each of `max_files`, `max_entries`, `max_total_bytes`, and `max_candidates` raises `CorpusLimitError` with the exact `limit`, `allowed`, `observed`, and `scope` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-49 | a freshness-index write failure increments `freshness_write_failures` in addition to the unchanged `cache_write_failures` aggregate; a shard-write failure increments only the latter | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-50 | `index_freshness_path` resolves under `XDG_STATE_HOME`; `update_index_freshness` writes the state entry and removes only this child's key from the legacy file, which still exists afterward | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-51 | `assess_inference` falls back to a legacy-only entry when the state file is entirely absent, evaluating it identically to a state-path hit | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-52 | `remove_index_freshness` removes the entry from whichever location holds it, and from both when present in both, returning `True` whenever either changed | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-53 | the per-entry migration repro: a state file holding other children's entries but not this child's still falls back to this child's legacy entry rather than reporting `freshness_unknown` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-54 | `update_index_freshness` for one child leaves every other child's legacy entry byte-identical; a pop that empties `targets` rewrites an empty dict rather than unlinking | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-55 | with an entry for the same child in both locations, reads use the state-path entry, writes leave only the state-path entry, and deletes remove both | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-56 | `update_index_freshness` and `remove_index_freshness` acquire the state-path lock before the legacy-path lock and release in reverse order, on every path touching both files | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-57 | `infer_one` raises `TimeoutError` at its `max_seconds` deadline guard, and the CLI-boundary mapping function turns it into the structured `max_seconds`/`target` shape | freshness=A10 | U | live | P02 A10; REQ-48 |
 
 ---
 

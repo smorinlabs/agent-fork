@@ -705,14 +705,39 @@ def main(argv: list[str] | None = None) -> int:
             if args.session_action == "claude-parent":
                 from agent_fork.claude_lineage_inference import (
                     ClaudeLineageCorpus,
+                    CorpusLimitError,
+                    map_timeout_to_limit_error,
                     to_record,
                 )
                 from agent_fork.errors import (
                     AgentSignalIncompleteError,
                     ClaudeParentError,
+                    ClaudeParentIncompleteAnalysisError,
                     ClaudeParentNotRecordableError,
                     ClaudeParentPartialRecordError,
                 )
+
+                def _incomplete_analysis_document(error, *, session_id=None):
+                    return {
+                        "agent": "claude",
+                        "session_id": session_id,
+                        "relationship": {"status": "incomplete"},
+                        "limit": {
+                            "name": error.limit,
+                            "allowed": error.allowed,
+                            "observed": error.observed,
+                            "scope": error.scope,
+                        },
+                        "recorded": False,
+                        "remediation": (
+                            "the Claude transcript corpus exceeds agent-fork's bounded "
+                            "analysis limit; archive or relocate older project "
+                            "transcripts under ~/.claude/projects, then rerun. "
+                            "agent-fork does not record a parent inferred from an "
+                            "incomplete corpus."
+                        ),
+                    }
+
                 from agent_fork.lineage import (
                     find_lineage,
                     read_lineage,
@@ -720,7 +745,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 from agent_fork.lineage_inference_store import (
                     add_inference,
+                    find_inference,
                     read_inferences,
+                    remove_index_freshness,
                     remove_inference,
                 )
 
@@ -742,7 +769,11 @@ def main(argv: list[str] | None = None) -> int:
                                 print("  ".join(str(value) for value in fields))
                         else:
                             for key, value in document.items():
-                                print(f"{key}: {terminal_text(value)}")
+                                if isinstance(value, list):
+                                    for entry in value:
+                                        print(f"{key}: {terminal_text(entry)}")
+                                else:
+                                    print(f"{key}: {terminal_text(value)}")
 
                 def records():
                     values = []
@@ -821,15 +852,47 @@ def main(argv: list[str] | None = None) -> int:
                         if sys.stdin.readline().strip().lower() not in {"y", "yes"}:
                             print("Claude parent delete cancelled", file=sys.stderr)
                             return 2
-                    if found[0]["source"] == "planned":
-                        remove_lineage("claude", args.session_id, env=environment)
-                    else:
+                    delete_notices = []
+                    if found[0]["source"] == "inferred":
+                        removed_freshness_entry = remove_index_freshness(
+                            args.session_id, env=environment
+                        )
                         remove_inference(args.session_id, env=environment)
+                        retained_planned_record = False
+                        retained_inferred_record = False
+                    else:
+                        surviving_inferred = find_inference(
+                            args.session_id, env=environment
+                        )
+                        if surviving_inferred is None:
+                            removed_freshness_entry = remove_index_freshness(
+                                args.session_id, env=environment
+                            )
+                        else:
+                            removed_freshness_entry = False
+                            delete_notices.append(
+                                "freshness entry retained: an inferred record for "
+                                "this child still relies on it"
+                            )
+                        remove_lineage("claude", args.session_id, env=environment)
+                        retained_planned_record = False
+                        retained_inferred_record = surviving_inferred is not None
+                    delete_notices.append(
+                        "shared transcript screen cache retained at "
+                        "~/.cache/agent-fork/claude-lineage-index-v3/; it holds no "
+                        "parent conclusion and is rebuilt on demand"
+                    )
                     emit(
                         {
                             "deleted": True,
                             "session_id": args.session_id,
                             "source": found[0]["source"],
+                            "removed_record": found[0]["source"],
+                            "removed_freshness_entry": removed_freshness_entry,
+                            "retained_planned_record": retained_planned_record,
+                            "retained_inferred_record": retained_inferred_record,
+                            "retained_screen_cache": True,
+                            "notices": delete_notices,
                         }
                     )
                     return 0
@@ -856,7 +919,13 @@ def main(argv: list[str] | None = None) -> int:
                     ids = [assessment.context.parent_session_id]
                 elif args.session_id:
                     ids = [args.session_id]
-                corpus = ClaudeLineageCorpus(environment)
+                try:
+                    corpus = ClaudeLineageCorpus(environment)
+                except CorpusLimitError as error:
+                    raise ClaudeParentIncompleteAnalysisError(
+                        str(error),
+                        details={"analysis": _incomplete_analysis_document(error)},
+                    ) from error
                 if args.all:
                     ids = [
                         p.stem
@@ -885,6 +954,29 @@ def main(argv: list[str] | None = None) -> int:
                                 recorded = True
                                 recorded_count += 1
                         document = {**result.document(), "recorded": recorded}
+                        if recorded and result.work.freshness_write_failures:
+                            existing_notices = document["notices"]
+                            assert isinstance(existing_notices, list)
+                            document["notices"] = [
+                                *existing_notices,
+                                "the record was written but will report "
+                                "freshness_unknown until the freshness index "
+                                "becomes writable",
+                            ]
+                        if bulk_spool is None:
+                            documents.append(document)
+                        else:
+                            bulk_spool.append(document)
+                    except (CorpusLimitError, TimeoutError) as error:
+                        failures += 1
+                        limit_error = (
+                            error
+                            if isinstance(error, CorpusLimitError)
+                            else map_timeout_to_limit_error(error, corpus.limits)
+                        )
+                        document = _incomplete_analysis_document(
+                            limit_error, session_id=sid
+                        )
                         if bulk_spool is None:
                             documents.append(document)
                         else:
@@ -1019,6 +1111,28 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     )
                 print(f"lineage: {terminal_text(inspection.lineage_status)}")
+                pi = inspection.parent_inference
+                if pi.status not in {"not_consulted", "absent"}:
+                    if pi.status == "superseded":
+                        print(f"parent inference: {terminal_text(pi.status)}")
+                    else:
+                        detail_bits = []
+                        if pi.analyzed_at is not None:
+                            detail_bits.append(f"analyzed {pi.analyzed_at}")
+                        if pi.changed_sources:
+                            detail_bits.append(
+                                f"{', '.join(pi.changed_sources)} transcript changed"
+                            )
+                        detail = f"  ({'; '.join(detail_bits)})" if detail_bits else ""
+                        parent_id = (
+                            terminal_text(pi.parent_session_id)
+                            if pi.parent_session_id is not None
+                            else "-"
+                        )
+                        print(
+                            f"parent inference: {terminal_text(pi.status)} "
+                            f"{parent_id}{detail}"
+                        )
             for notice in inspection.notices:
                 print(f"notice: {terminal_text(notice)}")
             print(f"directory: {terminal_text(inspection.directory)}")
@@ -1118,6 +1232,7 @@ def main(argv: list[str] | None = None) -> int:
                     "keep_branch": args.keep_branch,
                     "dry_run": args.dry_run,
                     "notices": list(result.notices),
+                    "retained_metadata": result.retained_metadata,
                 }
                 if args.dry_run:
                     document["details"] = result.details.document()

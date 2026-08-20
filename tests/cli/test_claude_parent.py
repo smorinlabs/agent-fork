@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -451,3 +452,322 @@ def test_current_inference_consumes_shared_agent_signal_assessment(
     assert detected.returncode == 0, detected.stderr
     assert detected.stderr == b""
     assert json.loads(detected.stdout)["session_id"] == child
+
+
+def _inferred_record(
+    child_session_id="child", parent_session_id="parent", fingerprints=()
+):
+    from agent_fork.lineage_inference_store import InferenceRecord
+
+    return InferenceRecord(
+        child_session_id,
+        parent_session_id,
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00Z",
+        fingerprints,
+        "generation-1",
+        "universe-1",
+    )
+
+
+def _fingerprint(path):
+    import hashlib
+
+    stat = path.stat()
+    raw = (
+        f"{path.absolute()}:{stat.st_dev}:{stat.st_ino}:"
+        f"{stat.st_size}:{stat.st_mtime_ns}"
+    )
+    return f"{path}:{hashlib.sha256(raw.encode()).hexdigest()}"
+
+
+@pytest.mark.matrix("T-CLI-37")
+def test_delete_reports_additive_fields_and_removes_freshness(repo_scenario):
+    from agent_fork.lineage import LineageClaim, add_lineage
+    from agent_fork.lineage_inference_store import (
+        add_inference,
+        index_freshness_path,
+        update_index_freshness,
+    )
+    from conftest import run_cli
+
+    world = repo_scenario()
+    add_inference(_inferred_record("child-a"), env=world.env)
+    update_index_freshness("child-a", "universe-1", "generation-1", env=world.env)
+
+    deleted = run_cli(
+        [
+            "session",
+            "claude-parent",
+            "delete",
+            "--session-id",
+            "child-a",
+            "--source",
+            "inferred",
+            "--yes",
+            "-o",
+            "json",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    document = json.loads(deleted.stdout)
+    assert document["deleted"] is True
+    assert document["removed_record"] == "inferred"
+    assert document["removed_freshness_entry"] is True
+    assert document["retained_planned_record"] is False
+    assert document["retained_inferred_record"] is False
+    assert document["retained_screen_cache"] is True
+    import json as json_module
+
+    freshness_document = json_module.loads(index_freshness_path(world.env).read_text())
+    assert "child-a" not in freshness_document["targets"]
+
+    # planned delete with a surviving inferred record retains the freshness entry
+    add_lineage(
+        LineageClaim.create(
+            agent="claude", child_session_id="child-b", parent_session_id="parent"
+        ),
+        env=world.env,
+    )
+    add_inference(_inferred_record("child-b"), env=world.env)
+    update_index_freshness("child-b", "universe-1", "generation-1", env=world.env)
+
+    deleted_planned = run_cli(
+        [
+            "session",
+            "claude-parent",
+            "delete",
+            "--session-id",
+            "child-b",
+            "--source",
+            "planned",
+            "--yes",
+            "-o",
+            "json",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    document = json.loads(deleted_planned.stdout)
+    assert document["removed_freshness_entry"] is False
+    assert document["retained_inferred_record"] is True
+    assert any("retained" in notice for notice in document["notices"])
+    freshness_document = json_module.loads(index_freshness_path(world.env).read_text())
+    assert "child-b" in freshness_document["targets"]
+
+
+@pytest.mark.matrix("T-CLI-39")
+def test_delete_removes_freshness_before_record_and_tolerates_mid_delete_failure(
+    repo_scenario, monkeypatch
+):
+    import agent_fork.lineage_inference_store as store
+    from agent_fork.cli import main
+    from agent_fork.lineage_inference_store import (
+        add_inference,
+        update_index_freshness,
+    )
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+    transcript = world.parent_path / "child-c.jsonl"
+    transcript.write_text("{}\n")
+    add_inference(
+        _inferred_record("child-c", fingerprints=(_fingerprint(transcript),)),
+        env=world.env,
+    )
+    update_index_freshness("child-c", "universe-1", "generation-1", env=world.env)
+
+    call_order = []
+    original_remove_index_freshness = store.remove_index_freshness
+    original_remove_inference = store.remove_inference
+
+    def recording_remove_index_freshness(*args, **kwargs):
+        call_order.append("remove_index_freshness")
+        return original_remove_index_freshness(*args, **kwargs)
+
+    def failing_remove_inference(*args, **kwargs):
+        call_order.append("remove_inference")
+        raise RuntimeError("simulated failure after freshness removal committed")
+
+    monkeypatch.setattr(
+        store, "remove_index_freshness", recording_remove_index_freshness
+    )
+    monkeypatch.setattr(store, "remove_inference", failing_remove_inference)
+    monkeypatch.setattr("os.environ", world.env)
+
+    exit_code = main(
+        [
+            "session",
+            "claude-parent",
+            "delete",
+            "--session-id",
+            "child-c",
+            "--source",
+            "inferred",
+            "--yes",
+            "-o",
+            "json",
+        ]
+    )
+    assert exit_code == 1
+
+    assert call_order == ["remove_index_freshness", "remove_inference"]
+
+    monkeypatch.setattr(
+        store, "remove_index_freshness", original_remove_index_freshness
+    )
+    monkeypatch.setattr(store, "remove_inference", original_remove_inference)
+    env = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "child-c"}
+    result = inspect_session(env, cwd=world.parent_path)
+    assert result.parent_inference.status == "freshness_unknown"
+    assert result.parent_session is None
+
+
+def _patch_limits(monkeypatch, **overrides):
+    import agent_fork.claude_lineage_inference as inference_module
+
+    real_corpus_cls = inference_module.ClaudeLineageCorpus
+
+    def limited_corpus(env, limits=None):
+        return real_corpus_cls(env, limits or inference_module.Limits(**overrides))
+
+    monkeypatch.setattr(inference_module, "ClaudeLineageCorpus", limited_corpus)
+
+
+@pytest.mark.matrix("T-CLI-38")
+def test_whole_corpus_limit_exits_incomplete_analysis(repo_scenario, monkeypatch):
+    from agent_fork.cli import main
+    from agent_fork.lineage_inference_store import inference_path
+
+    world = repo_scenario()
+    env, _parent, child = _seed(world)
+    _patch_limits(monkeypatch, max_files=1)
+    monkeypatch.setattr("os.environ", env)
+
+    for extra_args in ([], ["--record"]):
+        exit_code = main(
+            [
+                "session",
+                "claude-parent",
+                "infer",
+                "--session-id",
+                child,
+                "-o",
+                "json",
+                *extra_args,
+            ]
+        )
+        assert exit_code == 3
+
+    assert not inference_path(env).exists()
+
+
+@pytest.mark.matrix("T-CLI-40")
+def test_per_target_limit_under_all_does_not_void_batch(
+    repo_scenario, monkeypatch, capsys
+):
+    import json as json_module
+
+    from agent_fork.cli import main
+
+    world = repo_scenario()
+    env, parent, child = _seed(world)
+
+    # an isolated, unrelated transcript: zero shared candidates, never trips
+    # a per-target candidate limit
+    isolated = "20000000-0000-4000-8000-000000000099"
+    root = Path(env["CLAUDE_CONFIG_DIR"])
+    (root / "projects" / "-repo" / f"{isolated}.jsonl").write_text(
+        json_module.dumps(
+            {
+                "sessionId": isolated,
+                "uuid": "10000000-0000-4000-8000-000000009001",
+                "parentUuid": None,
+                "type": "user",
+                "timestamp": "2026-06-01T00:00:00Z",
+            }
+        )
+        + "\n"
+    )
+
+    _patch_limits(monkeypatch, max_candidates=0)
+    monkeypatch.setattr("os.environ", env)
+
+    exit_code = main(
+        ["session", "claude-parent", "infer", "--all", "--record-all", "-o", "json"]
+    )
+    assert exit_code == 3
+    captured = capsys.readouterr()
+    document = json_module.loads(captured.err)
+    results = document["error"]["details"]["analysis"]["results"]
+    child_result = next(r for r in results if r["session_id"] == child)
+    assert child_result["relationship"]["status"] == "incomplete"
+    assert child_result["limit"]["scope"] == "target"
+    assert child_result["recorded"] is False
+    isolated_result = next(r for r in results if r["session_id"] == isolated)
+    assert isolated_result["relationship"]["status"] != "incomplete"
+
+
+@pytest.mark.matrix("T-CLI-41")
+def test_freshness_write_failure_notice_composed_at_cli_layer(
+    repo_scenario, monkeypatch
+):
+    import io
+    import json as json_module
+    from contextlib import redirect_stdout
+
+    import agent_fork.lineage_inference_store as store
+    from agent_fork.cli import main
+
+    world = repo_scenario()
+    env, _parent, child = _seed(world)
+
+    def fail_update(*args, **kwargs):
+        raise OSError("injected freshness write failure")
+
+    monkeypatch.setattr(store, "update_index_freshness", fail_update)
+    monkeypatch.setattr("os.environ", env)
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        code = main(
+            [
+                "session",
+                "claude-parent",
+                "infer",
+                "--session-id",
+                child,
+                "--record",
+                "-o",
+                "json",
+            ]
+        )
+    assert code == 0
+    document = json_module.loads(out.getvalue())
+    assert document["recorded"] is True
+    assert document["work"]["freshness_write_failures"] == 1
+    assert any("freshness_unknown" in notice for notice in document["notices"])
+
+    out2 = io.StringIO()
+    with redirect_stdout(out2):
+        code2 = main(
+            [
+                "session",
+                "claude-parent",
+                "infer",
+                "--session-id",
+                child,
+                "-o",
+                "json",
+            ]
+        )
+    assert code2 == 0
+    preview_document = json_module.loads(out2.getvalue())
+    assert preview_document["recorded"] is False
+    assert preview_document["work"]["freshness_write_failures"] == 1
+    assert preview_document["notices"] == []

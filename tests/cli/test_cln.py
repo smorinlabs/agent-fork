@@ -423,3 +423,182 @@ def test_human_cleanup_details_escape_terminal_controls(repo_scenario):
     assert "\x1b" in raw_message
     assert "\x1b" not in human_message
     assert "\\x1b" in human_message
+
+
+@pytest.mark.matrix("T-CLN-25")
+def test_cleanup_discloses_retained_lineage_metadata(repo_scenario):
+    from agent_fork.lineage_inference_store import (
+        InferenceRecord,
+        add_inference,
+        update_index_freshness,
+    )
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "disclose")
+    child = "33333333-3333-3333-3333-333333333333"
+    add_inference(
+        InferenceRecord(
+            child,
+            "parent",
+            "inferred",
+            "boundary",
+            3,
+            1,
+            1,
+            "2026-01-01T00:00:00Z",
+            (),
+            "generation-1",
+            "universe-1",
+        ),
+        env=world.env,
+    )
+    update_index_freshness(child, "universe-1", "generation-1", env=world.env)
+
+    dry = run_cli(
+        ["cleanup", "disclose", "--dry-run", "-o", "json"], world.env, world.parent_path
+    )
+    dry_document = json.loads(dry.stdout)
+    assert child in dry_document["retained_metadata"]["lineage_claims"]
+    assert child in dry_document["retained_metadata"]["inferred_records"]
+    assert child in dry_document["retained_metadata"]["freshness_entries"]
+    assert dry_document["retained_metadata"]["removal_commands"]
+    assert result.creation.path.exists()
+
+    real = run_cli(
+        ["cleanup", "disclose", "--yes", "-o", "json"], world.env, world.parent_path
+    )
+    real_document = json.loads(real.stdout)
+    assert child in real_document["retained_metadata"]["lineage_claims"]
+    assert not result.creation.path.exists()
+
+    from agent_fork.lineage import read_lineage
+    from agent_fork.lineage_inference_store import find_inference, index_freshness_path
+
+    assert any(claim.child_session_id == child for claim in read_lineage(env=world.env))
+    assert find_inference(child, env=world.env) is not None
+    assert index_freshness_path(world.env).exists()
+
+
+@pytest.mark.matrix("T-CLN-26")
+def test_cleanup_disclosure_handles_no_match_and_read_failure(
+    repo_scenario, monkeypatch
+):
+    from agent_fork.lineage import remove_lineage
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "no-claim")
+    remove_lineage("claude", "33333333-3333-3333-3333-333333333333", env=world.env)
+
+    completed = run_cli(
+        ["cleanup", "no-claim", "--yes", "-o", "json"], world.env, world.parent_path
+    )
+    document = json.loads(completed.stdout)
+    assert document["retained_metadata"] == {
+        "lineage_claims": [],
+        "inferred_records": [],
+        "freshness_entries": [],
+        "removal_commands": [],
+    }
+
+    # a store-read failure degrades to the neutral notice + empty metadata,
+    # without failing the cleanup itself
+    import io
+    from contextlib import redirect_stdout
+
+    from agent_fork.cli import main
+    from agent_fork.pipeline import ForkRequest, fork
+
+    other_world = repo_scenario("plain@main")
+    fork_result = fork(
+        ForkRequest(
+            parent=other_world.parent_path,
+            destination=other_world.parent_path.parent / "child-failure",
+            name="failure",
+            branch="fork/failure",
+            agent=None,
+            agent_executable=None,
+            agent_version_output=None,
+            git_version_output="git version 2.43.0",
+            child_session_id=None,
+        ),
+        env=other_world.env,
+    )
+
+    def failing_read_lineage(*args, **kwargs):
+        raise ValueError("injected store read failure")
+
+    import agent_fork.lineage as lineage_module
+
+    monkeypatch.setattr(lineage_module, "read_lineage", failing_read_lineage)
+    monkeypatch.setattr("os.environ", other_world.env)
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        exit_code = main(["cleanup", "failure", "--force", "--yes", "-o", "json"])
+    assert exit_code == 0
+    failure_document = json.loads(out.getvalue())
+    assert failure_document["retained_metadata"] == {
+        "lineage_claims": [],
+        "inferred_records": [],
+        "freshness_entries": [],
+        "removal_commands": [],
+    }
+    assert not fork_result.creation.path.exists()
+
+
+@pytest.mark.matrix("T-CLN-27")
+def test_cleanup_retained_metadata_reaches_json_output(repo_scenario):
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "wiring")
+    completed = run_cli(
+        ["cleanup", "wiring", "--dry-run", "-o", "json"], world.env, world.parent_path
+    )
+    document = json.loads(completed.stdout)
+    assert "retained_metadata" in document
+    assert "notices" in document
+
+
+@pytest.mark.matrix("T-CLN-28")
+def test_cleanup_removal_commands_are_source_qualified_and_escaped(repo_scenario):
+    from agent_fork.lineage_inference_store import (
+        InferenceRecord,
+        add_inference,
+        update_index_freshness,
+    )
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "qualified")
+    child = "33333333-3333-3333-3333-333333333333"
+    add_inference(
+        InferenceRecord(
+            child,
+            "parent",
+            "inferred",
+            "boundary",
+            3,
+            1,
+            1,
+            "2026-01-01T00:00:00Z",
+            (),
+            "generation-1",
+            "universe-1",
+        ),
+        env=world.env,
+    )
+    update_index_freshness(child, "universe-1", "generation-1", env=world.env)
+
+    completed = run_cli(
+        ["cleanup", "qualified", "--dry-run", "-o", "json"],
+        world.env,
+        world.parent_path,
+    )
+    document = json.loads(completed.stdout)
+    commands = document["retained_metadata"]["removal_commands"]
+    sources = {entry["source"] for entry in commands if entry["session_id"] == child}
+    assert sources == {"planned", "inferred"}
+    for entry in commands:
+        assert "--source" in entry["command"]
+
+    human = run_cli(["cleanup", "qualified", "--dry-run"], world.env, world.parent_path)
+    assert b"\x1b" not in human.stdout

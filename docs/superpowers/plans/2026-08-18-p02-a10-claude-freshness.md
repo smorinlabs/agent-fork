@@ -26,7 +26,7 @@ network access, streaming, plugins, or interactive behavior.
 | 2. Owner scope decision | **approved**; six subproblem decisions recorded below, plus two follow-up decisions on 2026-08-20 |
 | 3. Design document | **complete**; revalidated against `origin/main` on 2026-08-20 |
 | 4. Implementation plan and adversarial review, including Codex | **APPROVE-WITH-CHANGES** on 2026-08-20; both required lenses concurred, every required change incorporated; see "Plan-review outcome" below |
-| 5. Test-driven implementation | pending |
+| 5. Test-driven implementation | **complete** on 2026-08-20; 31 new tests, all four repository gates pass; see "Implementation evidence" below |
 | 6. Adversarial implementation review, including Codex | pending |
 
 ## Revalidation against main (2026-08-20)
@@ -1208,6 +1208,68 @@ name pattern, which is strictly safer than matching either shape. Neither review
 new owner decision, or a change to strict parent validation, the default
 cleanup retention policy, or any existing v1 machine-field semantics. Gate 4 is
 therefore complete and implementation may proceed test-first.
+
+## Implementation evidence
+
+**Complete.** All eight steps were implemented test-first, in the dependency
+order the Sequencing table specifies: step 1, then steps 2 and 3, then step 4,
+then steps 5 and 6 (in either order), then step 7, then step 8. Seven
+production files changed — `lineage_inference_store.py`, `session.py`,
+`claude_lineage_inference.py`, `cli.py`, `errors.py`, `cleanup.py`, and
+`bulk_output.py` — the last one not originally named in the plan; see the
+deviation below. Six test files changed before any of them:
+`tests/unit/test_lineage_inference_store.py`,
+`tests/unit/test_session.py`, `tests/unit/test_claude_parent_inference.py`,
+`tests/cli/test_session.py`, `tests/cli/test_claude_parent.py`, and
+`tests/cli/test_cln.py`. All 31 planned test IDs were implemented; each
+step's RED run failed for the missing name or behavior the step introduces
+(`AttributeError`/`ImportError`/plain assertion mismatches), never for an
+unrelated reason, before its GREEN change landed.
+
+One planned test was written after its production code rather than before it:
+`T-CLI-41` (the freshness-write-failure notice at the CLI layer). Step 5's
+GREEN change added the `work.freshness_write_failures` counter and its test
+coverage (`T-CPI-49`) correctly test-first, but the CLI-layer notice-append
+half of that same step — explicitly specified in the plan's step 5 prose —
+was skipped in the first pass and only caught during the step-8 completeness
+sweep before matrix/documentation work, not by a human reviewer. The gap was
+closed by writing `T-CLI-41` and confirming it failed for the right reason
+(the notice was simply absent) before adding the four-line notice-append in
+`cli.py`. Recorded here rather than smoothed over, since the discipline this
+document exists to enforce is exactly "watch it fail before you trust it
+passes."
+
+**One plan-vs-reality deviation, resolved during step 6.** The design's
+worked example for a per-target limit under `--all` did not anticipate that
+`BulkSpool.append()` routes every document through `compact_result()`
+(`bulk_output.py`), a strict field-projection function that silently drops
+any key outside its fixed set. The typed `limit` object this design adds to
+an incomplete-analysis document was being dropped on the bulk path — `T-CLI-40`
+caught this immediately (the per-target document showed
+`relationship.status: "incomplete"` with no `limit` key, indistinguishable
+from the corpus's own pre-existing `work.corpus_incomplete` status). Fixed by adding an
+explicit, bounded `limit` passthrough to `compact_result()`, following the
+existing precedent there for the `error` key. This is a small, necessary
+addition the design did not name because it did not anticipate the
+bulk-output projection layer; it does not change any decision in this
+document.
+
+A second small, necessary correction: `T-CPI-23`, an existing pre-A10 test,
+asserted on the literal old error text `"entry limit"` via regex match against
+`str(error)`. `CorpusLimitError`'s new message format no longer contains that
+exact substring. That assertion was testing incidental wording, not the
+underlying requirement (`max_entries` enforcement), so it was updated to check
+`CorpusLimitError.limit == "max_entries"` directly — a stronger, more direct
+assertion of the same requirement, not a weakening.
+
+Repository gates, run after the matrix and documentation updates below:
+
+| Gate | Result |
+|---|---|
+| `just all` | **pass** — Ruff format, Ruff lint, `ty`, version sync, 542 tests passed, 1 skipped, 9 deselected |
+| `just check-matrix` | **pass** — 444 rows across 20 groups, one collected item per live row |
+| `just strict-collect` | **pass** — clean collection across every test directory, no unknown markers or import errors |
+| `just clean-install` | **pass** — sdist and wheel built; disposable venv install and smoke check completed |
 
 ## Non-goals
 
