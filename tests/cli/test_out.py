@@ -307,8 +307,25 @@ def test_clipboard_copy_failure_emits_notice_only(repo_scenario):
 
     completed = run_cli(["fork", "copy", "--copy"], environment, world.parent_path)
     assert completed.returncode == 0
-    assert b"clipboard copy failed" in completed.stderr
+    assert b"clipboard copy failed" not in completed.stdout
+    assert completed.stderr == (
+        b"clipboard copy failed; paste command remains available on stdout\n"
+    )
     assert completed.stdout.decode().splitlines()[-1].endswith("--fork-session -n copy")
+
+    machine = run_cli(
+        ["fork", "copy-json", "--copy", "--json"],
+        environment,
+        world.parent_path,
+    )
+    assert machine.returncode == 0
+    document = json.loads(machine.stdout)
+    assert document["notices"] == [
+        "clipboard copy failed; paste command remains available on stdout"
+    ]
+    assert machine.stderr == (
+        b"clipboard copy failed; paste command remains available on stdout\n"
+    )
 
 
 @pytest.mark.matrix("T-OUT-10")

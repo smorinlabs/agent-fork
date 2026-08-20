@@ -253,7 +253,8 @@ than starting a new one.
 Global options: `-V/--version`, `-v/--verbose`, `-q/--quiet`, `--debug`, and
 `--config PATH`. Commands that emit formatted results (`fork`, `list`,
 `session`, `cleanup`, `doctor`, and `config view`) accept
-`-o/--output {table,text,json}`; `--json` is an alias for `-o json`.
+`-o/--output {text,json}` and default to `text`; `--json` is an alias for
+`-o json`.
 
 `cleanup` is registry-scoped unless `--force` is used. It always inspects the
 target for uncommitted changes and commits that are not reachable from a remote.
@@ -355,7 +356,7 @@ evidence labels — are documented in
 | `--yes` | Supply non-interactive consent; it does not override safety guards |
 | `--no-input` | Never prompt; fail unless required consent was supplied with `--yes` |
 | `--dry-run` | Run the full safety inspection and preview removal without mutating |
-| `-o/--output {table,text,json}` | Select the result format |
+| `-o/--output {text,json}` | Select the result format; default: `text` |
 | `--json` | Alias for `--output json` |
 
 Examples:
@@ -503,7 +504,6 @@ Configuration is TOML, discovered per the XDG/project precedence documented in
 | `agent_mode` | `"auto"` | `AGENT_FORK_AGENT_MODE` | `auto`, `strict`, or `git-only` |
 | `verify` | `true` | — | Run the verification ladder |
 | `copy` | `false` | — | Copy the paste command to the clipboard |
-| `output` | `"table"` | `AGENT_FORK_OUTPUT` | `table`, `text`, or `json` |
 
 Per-agent tables append arguments to the emitted command, each element
 individually shell-quoted:
@@ -518,6 +518,9 @@ session_name_resolution = true
 ```
 
 `AGENT_FORK_CONFIG` selects a config file, equivalent to `--config`.
+`AGENT_FORK_OUTPUT` selects `text` or `json` for commands that resolve effective
+configuration and defaults to `text`. The output setting is not a `[fork]`
+TOML key and cannot be changed with `config set`.
 
 An explicit flag beats config **and** suppresses dependent config settings — a
 config `with_ignored = true` combined with `--no-with-state` carries no state.

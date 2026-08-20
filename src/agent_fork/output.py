@@ -75,8 +75,6 @@ class ForkOutput:
         ]
         if self.mode == "git-only":
             lines.insert(0, "mode: git-only")
-        if self.notices:
-            lines.append("notices: " + "; ".join(self.notices))
         lines.extend(("", self.command))
         return "\n".join(lines)
 

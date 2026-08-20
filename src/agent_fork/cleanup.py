@@ -245,6 +245,11 @@ def _unpushed_commits(
     return entries, count
 
 
+def _has_configured_remotes(plan: CleanupPlan, *, env: Mapping[str, str]) -> bool:
+    output = run_git(plan.worktree, ["remote"], env=env).stdout
+    return bool(output.strip())
+
+
 def _inspect(plan: CleanupPlan, *, env: Mapping[str, str]) -> CleanupDetails:
     dirty, dirty_count = _dirty_paths(plan, env=env)
     unpushed, unpushed_count = _unpushed_commits(plan, env=env)
@@ -282,7 +287,11 @@ def _unpushed_lines(details: CleanupDetails, heading: str) -> list[str]:
 
 
 def _refusal_message(
-    plan: CleanupPlan, details: CleanupDetails, *, code: str
+    plan: CleanupPlan,
+    details: CleanupDetails,
+    *,
+    code: str,
+    has_configured_remotes: bool = True,
 ) -> tuple[str, str]:
     if code == "cleanup_dirty_worktree":
         message = f"refusing to remove {plan.worktree}"
@@ -295,7 +304,16 @@ def _refusal_message(
     else:
         message = f"refusing to remove {plan.branch}"
         human_message = f"refusing to remove {_escape_terminal_text(plan.branch)}"
-        next_step = "  Override with --allow-unpushed (destroys them), or push first."
+        if has_configured_remotes:
+            next_step = (
+                "  Override with --allow-unpushed (destroys them), or push first."
+            )
+        else:
+            next_step = (
+                "  No Git remote is configured. Configure one before pushing these "
+                "commits (for example: git remote add REMOTE-NAME REMOTE-URL), or "
+                "override with --allow-unpushed (destroys them)."
+            )
     blocks = [human_message]
     if details.dirty_count:
         change = "change" if details.dirty_count == 1 else "changes"
@@ -346,7 +364,10 @@ def _validate(
         )
     if details.unpushed_count and not (force or allow_unpushed):
         message, human_message = _refusal_message(
-            plan, details, code="cleanup_unpushed_commits"
+            plan,
+            details,
+            code="cleanup_unpushed_commits",
+            has_configured_remotes=_has_configured_remotes(plan, env=env),
         )
         raise PreconditionError(
             "cleanup_unpushed_commits",

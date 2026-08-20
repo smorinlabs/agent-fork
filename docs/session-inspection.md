@@ -78,6 +78,17 @@ Claude transcripts do not preserve the source session UUID. Missing evidence
 is not proof that a session was never forked. Inspection makes no network calls
 and does not modify agent or repository state.
 
+A Codex app-server `thread/read` error is unavailable evidence, not a successful
+lookup with no parent. Inspection retains the current session ID, reports
+`lineage.status: unavailable`, and adds a notice. If the current thread already
+supplied a parent ID but reading the parent name fails, inspection retains that
+parent ID and resolved lineage while marking only the parent name unavailable.
+When lineage is unavailable, validation refuses both `--has-parent` and
+`--no-parent`; neither assertion can be proven. Assertions limited to `--agent`
+or `--session-id` can still succeed because they do not depend on parent
+evidence. A successful `thread/read` response with no parent continues to
+satisfy `--no-parent`.
+
 ## Claude parent inference
 
 Claude does not expose an authoritative historical parent ID for ordinary

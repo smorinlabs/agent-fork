@@ -6,6 +6,7 @@
 | **Profile** | Small-CLI (Appendix A) — criteria check in REQUIREMENTS.md §3.1; migration trigger: second resource type ⇒ noun-verb next major |
 | **Tier** | publishable |
 | **Owner** | Steve Morin |
+| **Current status** | **nonconforming; release blocked by R4.1 and R9.3** |
 
 ## Applicability
 
@@ -29,6 +30,16 @@
 
 > D1 resolved 2026-07-21: bare invocation prints help (R7.9-conforming); no amendment needed. Small-CLI profile confirmed by owner same date.
 
+## Release-blocking MUST nonconformances
+
+These are not waivers. The pinned standard does not permit a local decision to
+turn either `MUST` into an optional requirement.
+
+| Rule | Current behavior | Why release is blocked | Required resolution |
+|---|---|---|---|
+| R4.1 | A13(B) removes `table`; `-o/--output` accepts `text` and `json`, and `text` is the human default. | CLI Design Standard v1.4.14 requires `table` as the default human result format. | Amend the governing standard or restore a real `table` default before release. |
+| R9.3 | A13(B) removes an existing accepted CLI value while the repository declares version `1.0.0` and Production/Stable status. | Removing `-o table` without a compatible deprecation or major-version transition breaks the declared interface-stability contract. | Complete an approved compatibility/version transition, or restore `table`, before release. |
+
 ## Audit history
 
 | Date | Standard version | Mode | Result |
@@ -45,6 +56,7 @@
 | 2026-08-11 | 1.4.14 | direct companion skill and session context | Skill delegates directly to `session --json` and `fork --require-agent --json`; session output adds directory and repository context; the wrapper is removed; local, host-managed, and fresh Claude/Codex forward gates pass; no new waiver |
 | 2026-08-14 | 1.4.14 | read-only native session command | Codex OBJECT and Claude Code CONCUR WITH AMENDMENTS were reconciled before implementation. Session inspection additively reports a constructible, non-preflighted native command; terminal-unsafe inputs return a null command; help examples, exact skill routes, open JSON schema, and no-write behavior pass T-EMT-08..10/T-SES-28..32. Full local and clean-install gates pass; no new waiver. Fresh authenticated host acceptance is tracked separately because its additional private-context export was not authorized. |
 | 2026-08-18 | 1.4.14 | P02 A9 shared agent-signal assessment | One four-state assessment now feeds fork resolution, session inspection, doctor, and current Claude inference. Incomplete automatic/strict fork input returns typed exit-3 `agent_signal_incomplete` before mutation; session adds an open-schema `agent_signal` object; doctor names non-secret present/missing signals. T-DET-13..26, T-OUT-22, T-CLI-27..31, T-SES-33..35, and T-CPI-36 protect R6.1/R7.1/R7.2/R7.6/R7.8/R7.12/R8.6/R9.3/R9.10/R9.14; no new waiver. |
+| 2026-08-18 | 1.4.14 | P02 A13(B) output-value removal | Owner-approved removal of the byte-identical `table` value makes `text` the default and retains `json`. T-CFG-18 and T-CLI-32 protect resolved configuration, all parser routes, diagnostics, precedence, and completions. This is a release-blocking R4.1 and R9.3 `MUST` nonconformance, not a waiver; current conformance result is **fail**. |
 
 ## Requirement trace
 
@@ -64,7 +76,7 @@ open implementation finding.
 | REQ-07 | Implemented + waived | `cleanup` service/command; R2.1 waiver above |
 | REQ-08 | Implemented | Boolean negations, kebab-case, reserved shorts, and no-abbreviation regression |
 | REQ-09 | Implemented | Fork creates without consent; G-GRD refusals are pre-mutation |
-| REQ-10 | Implemented | Global help/version/verbosity/quiet/config/debug and per-result output flags; T-CLI-02 |
+| REQ-10 | Implemented with release blocker | Global help/version/verbosity/quiet/config/debug and per-result `text`/`json` output flags; T-CLI-02/T-CLI-32. The missing R4.1 `table` default blocks release. |
 | REQ-11 | Implemented | Usage/not-found/precondition/runtime/signal mappings across G-CLI/G-OUT/G-RBK |
 | REQ-12 | Implemented | G-CFG discovery boundaries and G-REG locked XDG state |
 | REQ-13 | Implemented | G-CFG truth table and G-EMT per-agent `extra_args` boundary |
@@ -92,7 +104,7 @@ open implementation finding.
 | REQ-35 | Implemented | Python floor, minimal dependencies, wheel, and console entry point clean-install |
 | REQ-36 | Deferred | Publishing/release automation and channel validation are Phase F |
 | REQ-37 | Implemented | MIT license present; fresh implementation uses behavioral corpus only |
-| REQ-38 | Implemented for Phase D | Doctor shared-signal classification and optionality in T-CLI-27..28; locale, signals/SIGPIPE, SemVer/deprecation docs, telemetry statement, blocking conformance CI |
+| REQ-38 | Release-blocked | Doctor shared-signal classification and optionality remain covered by T-CLI-27..28, but A13(B) has not satisfied the R9.3 compatibility transition required for release. |
 | REQ-39 | Implemented | Four-system Flox/uv/just/ruff/ty/Git toolchain; host-managed agent CLIs; explicit hermetic/live/Git-matrix/signal gates |
 | REQ-40 | Implemented/documented | No runtime network client dependency or call; ignored-mode cost documented |
 | REQ-41 | Implemented | Atomic registry replacement, advisory timeout/death, concurrent forks, Git race |

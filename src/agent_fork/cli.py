@@ -165,7 +165,7 @@ def _parser() -> argparse.ArgumentParser:
     fork.add_argument(
         "-o",
         "--output",
-        choices=("table", "text", "json"),
+        choices=("text", "json"),
         default=None,
         help="Select result format",
     )
@@ -193,8 +193,8 @@ def _parser() -> argparse.ArgumentParser:
     session.add_argument(
         "-o",
         "--output",
-        choices=("table", "text", "json"),
-        default="table",
+        choices=("text", "json"),
+        default="text",
         help="Select result format",
     )
     session.add_argument("--json", action="store_true", help="Alias for --output json")
@@ -211,12 +211,15 @@ def _parser() -> argparse.ArgumentParser:
     session_validate.add_argument(
         "-o",
         "--output",
-        choices=("table", "text", "json"),
-        default="table",
+        choices=("text", "json"),
+        default=argparse.SUPPRESS,
         help="Select result format",
     )
     session_validate.add_argument(
-        "--json", action="store_true", help="Alias for --output json"
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Alias for --output json",
     )
     claude_parent = session_actions.add_parser(
         "claude-parent", allow_abbrev=False, help="Manage Claude parent evidence"
@@ -227,10 +230,16 @@ def _parser() -> argparse.ArgumentParser:
 
     def parent_output(action):
         action.add_argument(
-            "-o", "--output", choices=("table", "text", "json"), default="table"
+            "-o",
+            "--output",
+            choices=("text", "json"),
+            default=argparse.SUPPRESS,
         )
         action.add_argument(
-            "--json", action="store_true", help="Alias for --output json"
+            "--json",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Alias for --output json",
         )
 
     parent_list = parent_actions.add_parser("list", allow_abbrev=False)
@@ -265,8 +274,8 @@ def _parser() -> argparse.ArgumentParser:
     listing.add_argument(
         "-o",
         "--output",
-        choices=("table", "text", "json"),
-        default="table",
+        choices=("text", "json"),
+        default="text",
         help="Select result format",
     )
     listing.add_argument("--json", action="store_true", help="Alias for --output json")
@@ -312,8 +321,8 @@ def _parser() -> argparse.ArgumentParser:
     cleanup.add_argument(
         "-o",
         "--output",
-        choices=("table", "text", "json"),
-        default="table",
+        choices=("text", "json"),
+        default="text",
         help="Select result format",
     )
     cleanup.add_argument("--json", action="store_true", help="Alias for --output json")
@@ -325,8 +334,8 @@ def _parser() -> argparse.ArgumentParser:
     doctor.add_argument(
         "-o",
         "--output",
-        choices=("table", "text", "json"),
-        default="table",
+        choices=("text", "json"),
+        default="text",
         help="Select result format",
     )
     doctor.add_argument("--json", action="store_true", help="Alias for --output json")
@@ -353,8 +362,8 @@ def _parser() -> argparse.ArgumentParser:
     viewer.add_argument(
         "-o",
         "--output",
-        choices=("table", "text", "json"),
-        default="table",
+        choices=("text", "json"),
+        default="text",
         help="Select result format",
     )
     viewer.add_argument("--json", action="store_true", help="Alias for --output json")

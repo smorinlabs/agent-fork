@@ -25,7 +25,7 @@ GLOBAL_OPTIONS = (
     "--debug",
 )
 CONFIG_ACTIONS = ("view", "get", "set", "validate")
-OUTPUTS = ("table", "text", "json")
+OUTPUTS = ("text", "json")
 AGENTS = ("claude", "codex")
 SHELLS = ("bash", "zsh", "fish")
 

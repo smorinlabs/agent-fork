@@ -1,9 +1,60 @@
 """G-SES — installed CLI inspection and assertion contract."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
+
+CODEX_SESSION_ID = "019fed92-fa7e-7262-b93e-6bd73a38ac72"
+CODEX_PARENT_ID = "019fed92-fa7e-7262-b93e-6bd73a38ac73"
+
+
+def _codex_session_env(
+    world,
+    *,
+    current_error: bool = False,
+    parent_id: str | None = None,
+    parent_error: bool = False,
+):
+    directory = world.parent_path.parent / "codex-session-bin"
+    directory.mkdir()
+    script = directory / "codex"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json,sys\n"
+        f"current_id={CODEX_SESSION_ID!r}\n"
+        f"parent_id={parent_id!r}\n"
+        f"current_error={current_error!r}\n"
+        f"parent_error={parent_error!r}\n"
+        "for line in sys.stdin:\n"
+        " request=json.loads(line)\n"
+        " if 'id' not in request: continue\n"
+        " method=request.get('method')\n"
+        " if method == 'initialize':\n"
+        "  response={'result':{}}\n"
+        " elif method == 'thread/read':\n"
+        "  thread_id=request['params']['threadId']\n"
+        "  if (thread_id == current_id and current_error) or "
+        "(thread_id == parent_id and parent_error):\n"
+        "   response={'error':{'code':-32601,'message':'unsupported'}}\n"
+        "  else:\n"
+        "   thread={'id':thread_id,'name':"
+        "('current' if thread_id == current_id else 'parent')}\n"
+        "   if thread_id == current_id and parent_id is not None:\n"
+        "    thread['forkedFromId']=parent_id\n"
+        "   response={'result':{'thread':thread}}\n"
+        " else:\n"
+        "  response={'error':{'code':-32601,'message':'unsupported'}}\n"
+        " response['id']=request['id']\n"
+        " print(json.dumps(response),flush=True)\n"
+    )
+    script.chmod(0o755)
+    return {
+        **world.env,
+        "PATH": f"{directory}{os.pathsep}{world.env['PATH']}",
+        "CODEX_THREAD_ID": CODEX_SESSION_ID,
+    }
 
 
 @pytest.mark.matrix("T-SES-09")
@@ -501,3 +552,105 @@ def test_session_outputs_transcript_path_or_unavailable(repo_scenario):
     unsafe = run_cli(["session"], unsafe_env, world.parent_path)
     assert b"\x1b" not in unsafe.stdout and b"\x07" not in unsafe.stdout
     assert b"transcript: unavailable" in unsafe.stdout
+
+
+@pytest.mark.matrix("T-SES-46")
+def test_codex_session_distinguishes_absent_lineage_from_read_failures(repo_scenario):
+    from conftest import run_cli
+
+    no_parent_world = repo_scenario()
+    no_parent_env = _codex_session_env(no_parent_world)
+    no_parent = run_cli(
+        ["session", "--json"], no_parent_env, no_parent_world.parent_path
+    )
+    assert no_parent.returncode == 0 and no_parent.stderr == b""
+    no_parent_document = json.loads(no_parent.stdout)
+    assert no_parent_document["lineage"] == {
+        "has_parent_evidence": False,
+        "status": "not_found",
+    }
+    assert no_parent_document["notices"] == []
+
+    no_parent_validation = run_cli(
+        ["session", "validate", "--no-parent", "--json"],
+        no_parent_env,
+        no_parent_world.parent_path,
+    )
+    assert no_parent_validation.returncode == 0
+    assert json.loads(no_parent_validation.stdout)["valid"] is True
+
+    current_failure_world = repo_scenario()
+    current_failure_env = _codex_session_env(current_failure_world, current_error=True)
+    current_failure = run_cli(
+        ["session", "--json"],
+        current_failure_env,
+        current_failure_world.parent_path,
+    )
+    assert current_failure.returncode == 0 and current_failure.stderr == b""
+    current_failure_document = json.loads(current_failure.stdout)
+    assert current_failure_document["lineage"] == {
+        "has_parent_evidence": False,
+        "status": "unavailable",
+    }
+    assert current_failure_document["current_session"]["name_status"] == "unavailable"
+    assert any(
+        "thread/read failed" in notice for notice in current_failure_document["notices"]
+    )
+
+    parent_failure_world = repo_scenario()
+    parent_failure_env = _codex_session_env(
+        parent_failure_world,
+        parent_id=CODEX_PARENT_ID,
+        parent_error=True,
+    )
+    parent_failure = run_cli(
+        ["session", "--json"],
+        parent_failure_env,
+        parent_failure_world.parent_path,
+    )
+    assert parent_failure.returncode == 0 and parent_failure.stderr == b""
+    parent_failure_document = json.loads(parent_failure.stdout)
+    assert parent_failure_document["lineage"] == {
+        "has_parent_evidence": True,
+        "status": "resolved",
+    }
+    assert parent_failure_document["parent_session"]["id"] == CODEX_PARENT_ID
+    assert parent_failure_document["parent_session"]["id_status"] == "resolved"
+    assert parent_failure_document["parent_session"]["name"] is None
+    assert parent_failure_document["parent_session"]["name_status"] == "unavailable"
+    assert any(
+        "thread/read failed" in notice for notice in parent_failure_document["notices"]
+    )
+
+
+@pytest.mark.matrix("T-SES-47")
+def test_codex_unavailable_lineage_refuses_only_parent_assertions(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    environment = _codex_session_env(world, current_error=True)
+
+    for parent_assertion in ("--has-parent", "--no-parent"):
+        result = run_cli(
+            ["session", "validate", parent_assertion, "--json"],
+            environment,
+            world.parent_path,
+        )
+        assert result.returncode == 3 and result.stdout == b""
+        error = json.loads(result.stderr)["error"]
+        assert error["code"] == "session_validation_failed"
+        assert "parent evidence is unavailable" in error["message"]
+
+    for non_parent_assertion in (
+        ("--agent", "codex"),
+        ("--session-id", CODEX_SESSION_ID),
+    ):
+        result = run_cli(
+            ["session", "validate", *non_parent_assertion, "--json"],
+            environment,
+            world.parent_path,
+        )
+        assert result.returncode == 0 and result.stderr == b""
+        document = json.loads(result.stdout)
+        assert document["valid"] is True
+        assert document["session"]["lineage"]["status"] == "unavailable"

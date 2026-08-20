@@ -590,13 +590,14 @@ def _assert_completion_semantics(script):
         "--debug",
         "claude",
         "codex",
-        "table",
+        "text",
         "json",
         "bash",
         "zsh",
         "fish",
     ):
         assert token in script or token.removeprefix("--") in script
+    assert "table" not in script
 
 
 @pytest.mark.matrix("T-CLI-16")
@@ -631,6 +632,202 @@ def test_fish_completion_semantics_and_syntax(repo_scenario):
             [executable, "-n"], input=script, text=True, capture_output=True
         )
         assert completed.returncode == 0, completed.stderr
+
+
+def _output_route_arguments(output=None):
+    suffix = [] if output is None else ["-o", output]
+    return (
+        ["fork", "format", "--dry-run", "--no-agent", "--no-with-state", *suffix],
+        ["session", *suffix],
+        ["session", "validate", *suffix],
+        ["session", "claude-parent", "list", *suffix],
+        [
+            "session",
+            "claude-parent",
+            "show",
+            "--session-id",
+            "child",
+            *suffix,
+        ],
+        ["session", "claude-parent", "infer", "--current", *suffix],
+        [
+            "session",
+            "claude-parent",
+            "delete",
+            "--session-id",
+            "child",
+            "--no-input",
+            *suffix,
+        ],
+        ["list", *suffix],
+        ["cleanup", "missing", "--dry-run", "--yes", *suffix],
+        ["doctor", *suffix],
+        ["config", "view", *suffix],
+    )
+
+
+@pytest.mark.matrix("T-CLI-32")
+def test_a13b_text_is_only_human_output_across_cli_boundaries(repo_scenario, capsys):
+    """A13(B) removes the byte-identical table alias from every CLI boundary."""
+    from agent_fork.cli import _parser
+    from conftest import run_cli
+
+    parser = _parser()
+    defaults = [
+        parser.parse_args(arguments).output for arguments in _output_route_arguments()
+    ]
+    assert defaults == [None, *("text",) * 10]
+    for output in ("text", "json"):
+        assert all(
+            parser.parse_args(arguments).output == output
+            for arguments in _output_route_arguments(output)
+        )
+    nested_routes = (
+        ["validate"],
+        ["claude-parent", "list"],
+        ["claude-parent", "show", "--session-id", "child"],
+        ["claude-parent", "infer", "--current"],
+        [
+            "claude-parent",
+            "delete",
+            "--session-id",
+            "child",
+            "--no-input",
+        ],
+    )
+    for route in nested_routes:
+        for option in (("-o", "json"), ("--json",)):
+            before = parser.parse_args(["session", *option, *route])
+            after = parser.parse_args(["session", *route, *option])
+            assert ("json" if before.json else before.output) == "json"
+            assert ("json" if after.json else after.output) == "json"
+    for arguments in _output_route_arguments("table"):
+        with pytest.raises(SystemExit) as caught:
+            parser.parse_args(arguments)
+        assert caught.value.code == 2
+    capsys.readouterr()
+
+    world = repo_scenario("plain@main")
+    environment = {
+        key: value
+        for key, value in world.env.items()
+        if key not in {"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"}
+    }
+
+    created = run_cli(
+        ["fork", "format-cleanup", "--no-agent", "--no-with-state", "--json"],
+        environment,
+        world.parent_path,
+    )
+    assert created.returncode == 0, created.stderr.decode()
+
+    command_pairs = (
+        (
+            ["fork", "preview", "--dry-run", "--no-agent", "--no-with-state"],
+            [
+                "fork",
+                "preview",
+                "--dry-run",
+                "--no-agent",
+                "--no-with-state",
+                "-o",
+                "text",
+            ],
+            environment,
+        ),
+        (["session"], ["session", "-o", "text"], environment),
+        (["list"], ["list", "-o", "text"], environment),
+        (
+            ["cleanup", "format-cleanup", "--dry-run", "--yes"],
+            ["cleanup", "format-cleanup", "--dry-run", "--yes", "-o", "text"],
+            environment,
+        ),
+        (["doctor"], ["doctor", "-o", "text"], _doctor_env(world, agents=False)),
+        (["config", "view"], ["config", "view", "-o", "text"], environment),
+    )
+    for default_arguments, text_arguments, command_environment in command_pairs:
+        default = run_cli(default_arguments, command_environment, world.parent_path)
+        explicit = run_cli(text_arguments, command_environment, world.parent_path)
+        assert (default.returncode, default.stdout, default.stderr) == (
+            explicit.returncode,
+            explicit.stdout,
+            explicit.stderr,
+        )
+
+    invalid_environment = {**environment, "AGENT_FORK_OUTPUT": "table"}
+    for output_arguments in (("-o", "text"), ("-o", "json"), ("--json",)):
+        explicit_output = run_cli(
+            [
+                "fork",
+                "override",
+                "--dry-run",
+                "--no-agent",
+                "--no-with-state",
+                *output_arguments,
+            ],
+            invalid_environment,
+            world.parent_path,
+        )
+        assert explicit_output.returncode == 0, explicit_output.stderr.decode()
+
+    invalid_fork = run_cli(
+        ["fork", "invalid", "--dry-run", "--no-agent", "--no-with-state"],
+        invalid_environment,
+        world.parent_path,
+    )
+    assert invalid_fork.returncode == 2
+    assert invalid_fork.stdout == b""
+    assert invalid_fork.stderr == b"output must be text or json\n"
+
+    rejected_table = run_cli(["session", "-o", "table"], environment, world.parent_path)
+    assert rejected_table.returncode == 2
+    assert b"invalid choice: 'table'" in rejected_table.stderr
+
+    for arguments in (
+        ["session"],
+        ["list"],
+        ["cleanup", "format-cleanup", "--dry-run", "--yes"],
+    ):
+        baseline = run_cli(arguments, environment, world.parent_path)
+        ignored = run_cli(arguments, invalid_environment, world.parent_path)
+        assert (ignored.returncode, ignored.stdout, ignored.stderr) == (
+            baseline.returncode,
+            baseline.stdout,
+            baseline.stderr,
+        )
+
+    invalid_config = run_cli(
+        ["config", "view", "--json"], invalid_environment, world.parent_path
+    )
+    assert invalid_config.returncode == 2
+    assert json.loads(invalid_config.stderr) == {
+        "error": {
+            "code": "config_error",
+            "message": "output must be text or json",
+        }
+    }
+
+    doctor_environment = {
+        **_doctor_env(world),
+        "AGENT_FORK_OUTPUT": "table",
+    }
+    invalid_doctor = run_cli(
+        ["doctor", "--json"], doctor_environment, world.parent_path
+    )
+    assert invalid_doctor.returncode == 1
+    doctor_document, checks = _doctor_checks(invalid_doctor)
+    assert doctor_document["ok"] is False
+    assert checks["config validity"] == {
+        "name": "config validity",
+        "ok": False,
+        "detail": "output must be text or json",
+    }
+
+    for shell in ("bash", "zsh", "fish"):
+        script = _completion(repo_scenario, shell)
+        assert "text" in script
+        assert "json" in script
+        assert "table" not in script
 
 
 @pytest.mark.matrix("T-CLI-19")
