@@ -175,6 +175,36 @@ must not touch version literals.
 **Nothing in the re-validation invalidates the design.** The gate-4 corrections
 stand, the flag decision stands, and the recipe changes by one prefix.
 
+## Split into A6a and A6b (owner decision 2026-08-20)
+
+Two gate-4 passes returned NOT-READY. Neither faulted the carry mechanism — that
+matched on 8 of 8 cells at first attempt. Both faulted integration: how pins
+reach recursive calls, what the snapshot must freeze, what order to build in.
+Carry-by-default is a feature-sized change inside a project chartered for
+minimal remediation, and it must satisfy five invariants at once, four of them
+built by other items for other reasons (A1's frozen inventory domain, A2's
+config-injection sanitizer, A13's pathspec doctrine, the parent-read-only rule,
+and A8's will-not-fix leaving no shared plan-token mechanism).
+
+The work therefore splits, mirroring the `P02-T13` umbrella convention:
+
+| | A6a — unblock | A6b — carry identically |
+|---|---|---|
+| Solves | The repository is unforkable | The submodule's work is not carried |
+| Change | `--ignore-submodules` filtering at three sites, accurate notice | Full recipe, recursive snapshot, `config_pins`, recursive verification |
+| Evidence | Validated 2026-08-17 against real child worktrees | Manual prototype only, 8 local depth-1 cells |
+| Gate 4 | Small enough that its need for a pass is an open question | Third pass required |
+| Size | Days | The ten-step plan below |
+
+The owner's carry-by-default decision is unchanged: `--with-submodules` remains
+the default when A6b ships. Only the sequencing changed, so that users stop
+being blocked while A6b gets the review depth two passes say it needs.
+
+**A6a's scope has one open owner decision** — the unstaged-gitlink-advance case
+(matrix 1 cell `c`), which `--ignore-submodules=dirty` deliberately still
+reports and which therefore still fails. It is recorded in Open items below and
+is not resolved here.
+
 ## Design
 
 ### Flag
@@ -415,6 +445,23 @@ plan is a safe stopping point.
 10. **Docs** — README, skill text, and the four prose copies of the recipe.
 
 ## Open items
+
+**Three decisions are open and block the start of A6a.** They are stated in full
+in the session decision request of 2026-08-20; summarised here so this document
+is self-contained:
+
+1. **A6a's handling of the unstaged-gitlink-advance case (cell `c`).** Options:
+   a typed `PreconditionError` refusal before any mutation (exit 5); or
+   `--ignore-submodules=all` for the whole A6a filter, which lets the case fork
+   while hiding submodule state that A6a does carry; or leave it failing as it
+   does today.
+2. **Where A6b is tracked.** Options: stay in P02 as the second half of the A6
+   umbrella; or move to P03 (core enhancements) as a feature, letting P02 close
+   A6 when A6a merges.
+3. **Whether A6a needs its own gate-4 adversarial pass**, given its evidence is
+   already validated and its change is three call sites plus a notice, or
+   whether the process's per-item review requirement applies unconditionally.
+
 
 - **Gate 4 third pass required before implementation starts.** Two passes have
   returned NOT-READY. The second pass's two blockers are absorbed above, but its

@@ -283,6 +283,24 @@ repository-controlled text raw).
   local, depth-1, status-comparison cells under a manual prototype — not yet
   proven in production shape (gate 4 finding 5). Impact: medium-high for
   submodule users. Type: correctness fix, feature-shaped by owner decision.
+
+  **Split into two remediations (owner decision 2026-08-20)**, after two gate-4
+  passes returned NOT-READY on integration complexity rather than on the carry
+  mechanism, which matched on 8 of 8 cells at first attempt:
+  - **A6a — unblock forking.** `--ignore-submodules` filtering at
+    `verify.py:103`, `verify.py:146`/`pipeline.py:114` (matched pair), and the
+    unstaged inventory listing at `content.py:158`, plus a notice that names
+    what was not carried instead of claiming submodules were "copied opaquely"
+    over an empty directory. Already validated against real child worktrees:
+    the edited-file, untracked-file, and mixed-dirt cells go from rollback to
+    success, and the staged-gitlink case keeps the check it passes today.
+    Handling for the unstaged-gitlink-advance case is an open owner decision.
+  - **A6b — carry submodules identically.** The full recipe, recursive
+    snapshot, `config_pins` at the `run_git` chokepoint, and recursive
+    verification, per the design doc. Requires a further gate-4 pass.
+  Rationale: A6a ends the unforkable-repository fault on validated evidence in
+  days; A6b keeps the owner's carry-by-default decision intact and gets the
+  review depth two passes say it needs.
 - **A7 — Stale registry entries are uncleanable; no prune/repair verb.**
   Reproduced: hand-delete a fork worktree, then `cleanup <name> --yes` dies
   with raw git `runtime_error` (`cleanup.py:126-166` runs `git -C
@@ -394,7 +412,7 @@ swept with the rest.
 - [ ] [P02-TS05] A5 adversarial verification (incl. Codex): socket/fifo, unreadable-file, and parent-race rollback repros
 - [ ] [P02-T05] A5 fix per process
 - [x] [P02-TS06] A6 adversarial verification (incl. Codex): CONFIRMED-WITH-CORRECTIONS 2026-08-17 — matrix 1 reproduced the rollback across four dirty shapes and refuted the "unforkable by default" breadth (staged gitlink advance already forks); matrix 2 showed identical carry is feasible across eight local depth-1 cells. Codex second lens returned CONFIRM-WITH-CORRECTIONS; its findings 5 and 6 narrowed the verdict wording and corrected the cleanup evidence provenance. Register entry rewritten; see the [design doc](../docs/superpowers/plans/2026-08-17-p02-a6-dirty-submodules.md)
-- [~] [P02-T06] A6 fix per process — carry submodules identically by default, `--with-submodules` / `--no-with-submodules` (owner decision 2026-08-17). Gate 4 first pass: **not implementation-ready**, nine findings (four high — parent-config mutation via `submodule sync`, unpinned checkout mode, no frozen recursive snapshot, ambient ignore-config divergence); all absorbed, **re-review required before implementation**. Plan in the [design doc](../docs/superpowers/plans/2026-08-17-p02-a6-dirty-submodules.md)
+- [~] [P02-T06] A6 remediation umbrella — close after **A6a** (unblock: `--ignore-submodules` filtering plus an accurate notice; evidence already validated) and **A6b** (carry submodules identically by default, `--with-submodules` / `--no-with-submodules`, owner decision 2026-08-17) both merge. Split 2026-08-20 after two gate-4 passes returned NOT-READY on integration complexity, not on the carry mechanism. Plan and both gate-4 reports in the [design doc](../docs/superpowers/plans/2026-08-17-p02-a6-dirty-submodules.md)
 - [ ] [P02-TS07] A7 adversarial verification (incl. Codex): stale-entry dead-end repro (already reproduced once; re-verify + bound the fix)
 - [ ] [P02-T07] A7 fix per process
 - [x] [P02-TS08] A8 adversarial verification (incl. Codex) — **CONFIRMED-WITH-CORRECTIONS 2026-08-17.** Executed dry-run/real pairs reproduced collision suffix drift, local-midnight name drift, cross-confirmation anchor drift, same-count carried-file substitution, and distinct dry-run/real Claude child UUIDs; an instrumented real fork also observed three independent `HEAD^{commit}` resolutions and produced a detached-derived name from one commit while materializing another. P01-T51 covers only candidate-name drift and is absorbed here. The proposed `{name, branch, destination, anchor, child_session_id}` tuple is incomplete: the immutable execution plan must also bind carry mode plus the complete approved source-state inventory or a collision-resistant digest and refuse pre-mutation on drift. Owner declined that remedy in T08; confirmation-boundary drift remains a known limitation.
