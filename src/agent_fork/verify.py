@@ -15,7 +15,7 @@ from agent_fork.errors import VerificationError
 from agent_fork.git import run_git
 from agent_fork.repository import WorktreeCreation
 from agent_fork.text import escape_terminal_text
-from agent_fork.worktree_list import parse_worktree_list
+from agent_fork.worktree_list import list_worktrees
 
 DETAIL_LIMIT = 5
 
@@ -59,12 +59,9 @@ def _failed_check(
 
 
 def _worktree_pairs(creation: WorktreeCreation, *, env: Mapping[str, str] | None):
-    output = run_git(
-        creation.parent_path, ["worktree", "list", "--porcelain"], env=env
-    ).stdout
     return {
         (str(record.path), record.branch)
-        for record in parse_worktree_list(output)
+        for record in list_worktrees(creation.parent_path, env=env)
         if record.branch is not None
     }
 

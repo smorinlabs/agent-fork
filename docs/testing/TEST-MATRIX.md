@@ -185,6 +185,9 @@ Varying axes: topology (the full set: plain@branch, plain@main, detached, linked
 | T-ANC-09 | shared porcelain parser resolves worktree paths and flushes the final record | baseline | U | live | REQ-20 |
 | T-ANC-10 | shared porcelain parser flushes a record that has no trailing blank line | baseline | U | live | REQ-20 |
 | T-ANC-11 | shared porcelain parser reports a detached worktree with no branch | baseline | U | live | REQ-20 |
+| T-ANC-12 | NUL-delimited porcelain preserves a newline-bearing worktree path, which the newline-delimited form truncates into a different location | baseline | U | live | P02 A13(d); REQ-20 |
+| T-ANC-13 | `-z` rejected with exit 129 on Git below 2.36 falls back to the newline-delimited request; rejection rather than silent ignoring is what makes the retry safe | baseline | U | live | P02 A13(d); REQ-20 |
+| T-ANC-14 | `-z` accepted issues no second invocation and yields the newline-safe path | baseline | U | live | P02 A13(d); REQ-20 |
 
 ---
 
@@ -238,6 +241,7 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 | T-LOC-15 | linked mirror-parent result accepts partial override after derivation | topology=linked-worktree | F | live | D15; REQ-44 |
 | T-LOC-16 | bare-at-root result accepts partial override after derivation | topology=bare@bare | F | live | D15; REQ-44 |
 | T-LOC-17 | symlinked base resolves once and remains contained | baseline | F | live | D15; REQ-44 |
+| T-LOC-18 | explicit worktree leaf rejects control characters, so a newline-bearing name is refused before any mutation rather than failing verification afterwards | baseline | U | live | P02 A13(d); REQ-44 |
 
 ---
 

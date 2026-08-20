@@ -11,7 +11,7 @@ from agent_fork.git import run_git
 from agent_fork.models import RegistryEntry
 from agent_fork.registry import find_owned, remove_entry
 from agent_fork.text import escape_terminal_text as _escape_terminal_text
-from agent_fork.worktree_list import parse_worktree_list
+from agent_fork.worktree_list import list_worktrees
 
 DETAIL_LIMIT = 10
 
@@ -124,8 +124,7 @@ def _git_root(worktree: Path, *, env: Mapping[str, str]) -> Path:
 
 
 def _worktrees(cwd: Path, *, env: Mapping[str, str]) -> list[tuple[Path, str | None]]:
-    output = run_git(cwd, ["worktree", "list", "--porcelain"], env=env).stdout
-    return [(record.path, record.branch) for record in parse_worktree_list(output)]
+    return [(record.path, record.branch) for record in list_worktrees(cwd, env=env)]
 
 
 def resolve_cleanup_target(

@@ -10,7 +10,7 @@ from pathlib import Path
 from agent_fork.errors import PreconditionError
 from agent_fork.git import GitCommandError, run_git
 from agent_fork.text import escape_terminal_text
-from agent_fork.worktree_list import parse_worktree_list
+from agent_fork.worktree_list import list_worktrees
 
 
 @dataclass(frozen=True)
@@ -120,9 +120,8 @@ def inspect_repository(
 def _worktree_branches(
     parent: Path, *, env: Mapping[str, str] | None
 ) -> dict[str, Path]:
-    result = run_git(parent, ["worktree", "list", "--porcelain"], env=env)
     branches: dict[str, Path] = {}
-    for record in parse_worktree_list(result.stdout):
+    for record in list_worktrees(parent, env=env):
         if record.branch is not None:
             branches[record.branch] = record.path
     return branches
