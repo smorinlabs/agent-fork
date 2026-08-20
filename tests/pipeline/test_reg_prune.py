@@ -155,7 +155,7 @@ def test_prune_reports_path_reuse_even_on_a_matching_branch_name(repo_scenario):
 
 @pytest.mark.matrix("T-REG-23")
 def test_v1_record_without_a_repository_is_still_cleanable(repo_scenario):
-    """Migration keeps pre-1.1 records usable: liveness, not identity, decides."""
+    """Migration keeps pre-v2 records usable: liveness, not identity, decides."""
     from agent_fork.registry import registry_path
     from conftest import run_cli
 

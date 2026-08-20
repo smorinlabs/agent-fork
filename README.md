@@ -517,15 +517,15 @@ Configuration is TOML, discovered per the XDG/project precedence documented in
 `list` and `cleanup` — lives under `$XDG_STATE_HOME/agent-fork`.
 
 The registry is one file per user account, shared by every repository, and each
-record names the repository it belongs to. Records written by agent-fork 1.0
-predate that field. They are read and preserved, not rejected, and no
+record names the repository it belongs to. Records written by agent-fork 1.2
+and earlier predate that field. They are read and preserved, not rejected, and no
 repository is inferred for them: the only path such a record carries is where
 its worktree was when the record was written, which is not evidence about what
-is there now. A pre-1.1 record is repaired the next time you fork in the
+is there now. Such a record is repaired the next time you fork in the
 repository that owns it, which is when the worktree list proves the connection.
 Until then it still appears in `list` and is still removable by `cleanup` from
 its own repository, because `cleanup` confirms against live worktrees rather
-than against the recorded repository. Note that once agent-fork 1.1 writes the
+than against the recorded repository. Note that once agent-fork 1.3 writes the
 registry, earlier versions will not read it.
 
 | `[fork]` key | Default | Environment variable | Notes |

@@ -183,7 +183,15 @@ One predicate closes four of the five recorded sites:
 | Worktree and branch deletion | The predicate confirms `(worktree, branch)` as a live **pair**, so neither is passed to git unverified |
 
 The fifth — the interval between the predicate passing and git running — is a
-time-of-check-to-time-of-use gap that A8 owns. The post-consent revalidation
+time-of-check-to-time-of-use gap. **Re-evaluated 2026-08-20:** A3 was written
+expecting A8 to close that family, but A8 was closed **will-not-fix** on
+2026-08-18 — the plan-token remedy was judged too complex for this CLI and
+confirmation-boundary drift is now an accepted limitation. So nothing later
+will close it, and A3's own handling is the whole of what exists: the
+post-consent revalidation below closes the **registry** half of the window
+(the record cannot change between consent and mutation), while the residual
+filesystem interval between the final check and Git's own work is accepted,
+not deferred. The post-consent revalidation
 below narrows it; nothing in A3 closes it, and this document does not claim
 otherwise.
 
