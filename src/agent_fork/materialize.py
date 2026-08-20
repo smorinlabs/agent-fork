@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_fork.content import Inventory, collect_inventory
+from agent_fork.content import Inventory, collect_inventory, gitlink_paths
 from agent_fork.git import GitCommandError, run_git
 from agent_fork.text import escape_terminal_text
 
@@ -80,15 +80,18 @@ def _apply_patch(
 def _submodule_notices(
     parent: Path, *, env: Mapping[str, str] | None
 ) -> tuple[str, ...]:
-    result = run_git(parent, ["ls-files", "--stage", "-z"], env=env)
-    paths: list[str] = []
-    for record in result.stdout.split(b"\0"):
-        if record.startswith(b"160000 ") and b"\t" in record:
-            paths.append(os.fsdecode(record.split(b"\t", 1)[1]))
+    """Name what the fork leaves behind, rather than claiming a copy.
+
+    The previous wording, "submodules copied opaquely", fired while the child's
+    submodule directory was empty — `git worktree add` does not initialize
+    submodules and nothing here populates them. Under `--no-verify` that message
+    was the only thing a user saw before their submodule work went missing.
+    """
+    paths = gitlink_paths(parent, env=env)
     if not paths:
         return ()
-    listed = ", ".join(escape_terminal_text(path) for path in sorted(paths))
-    return (f"submodules copied opaquely: {listed}",)
+    listed = ", ".join(escape_terminal_text(path) for path in paths)
+    return (f"submodule working-tree changes are not carried: {listed}",)
 
 
 def materialize(

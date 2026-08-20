@@ -88,7 +88,7 @@ class CarriedState:
     manifest: tuple[ManifestEntry, ...]
 
 
-def _nul_paths(data: bytes) -> list[str]:
+def nul_paths(data: bytes) -> list[str]:
     return [os.fsdecode(value) for value in data.split(b"\0") if value]
 
 
@@ -121,7 +121,22 @@ def intent_to_add_paths(
         ["diff", "--cached", "--ita-invisible-in-index", "--name-only", "-z"],
         env=env,
     )
-    return sorted(set(_nul_paths(visible.stdout)) - set(_nul_paths(hidden.stdout)))
+    return sorted(set(nul_paths(visible.stdout)) - set(nul_paths(hidden.stdout)))
+
+
+def gitlink_paths(root: Path, *, env: Mapping[str, str] | None = None) -> list[str]:
+    """Every submodule path recorded in the index, as literal strings.
+
+    Mode 160000 is Git's gitlink entry. Callers need the paths to describe what
+    a fork does not carry and to refuse states it cannot represent.
+    """
+    result = run_git(root, ["ls-files", "--stage", "-z"], env=env)
+    paths = [
+        os.fsdecode(record.split(b"\t", 1)[1])
+        for record in result.stdout.split(b"\0")
+        if record.startswith(b"160000 ") and b"\t" in record
+    ]
+    return sorted(paths)
 
 
 def collect_inventory(
@@ -146,7 +161,7 @@ def collect_inventory(
         return Inventory()
 
     def listing(arguments: list[str]) -> tuple[str, ...]:
-        return tuple(_nul_paths(run_git(root, arguments, env=env).stdout))
+        return tuple(nul_paths(run_git(root, arguments, env=env).stdout))
 
     ignored: tuple[str, ...] = ()
     if with_ignored:
@@ -155,7 +170,15 @@ def collect_inventory(
         )
     return Inventory(
         staged=listing(["diff", "--cached", "--name-only", "-z", "--no-renames"]),
-        unstaged=listing(["diff", "--name-only", "-z", "--no-renames"]),
+        unstaged=listing(
+            [
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                "--ignore-submodules=dirty",
+            ]
+        ),
         intent_to_add=tuple(intent_to_add_paths(root, env=env)),
         untracked=listing(["ls-files", "--others", "-z", "--exclude-standard"]),
         ignored=ignored,

@@ -163,6 +163,7 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-19 | A2 guard — `GIT_CONFIG_GLOBAL` file pointers stay honoured; sanitization must not silently unseal configuration | baseline | F | live | A2 design doc §C1 |
 | T-GRD-20 | A2 guard — repository-local configuration still applies; sanitization targets inline injection only | baseline | F | live | A2 design doc §C2 |
 | T-GRD-21 | A2 — `GIT_CONFIG_PARAMETERS`, Git's second inline-injection channel, is stripped too; stripping only the `GIT_CONFIG_COUNT` triple left it open | baseline | F | live | PR #36 review; A2 design doc |
+| T-GRD-22 | A6a — a submodule checked out at a commit the parent's index does not record is refused before any mutation (`submodule_unrepresentable`, exit 5); conditional on submodules not being carried, so A6b gates it rather than deleting it | baseline | F | live | A6 design doc §Matrix 1 cell `c` |
 
 ---
 
@@ -280,6 +281,7 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-23 | A2 transport — `diff.external` replaces the diff engine repository-wide; transport must be immune | baseline | F | live | A2 design doc §T5 |
 | T-MAT-24 | A2 transport — the committed/staged/working-tree split survives transport while a diff driver is active (the reason patches exist rather than file copies) | baseline | F | live | REQ-21; A2 design doc |
 | T-MAT-25 | A2 audit — reported staged/unstaged counts match the carried inventory for a staged rename; porcelain rename detection reported one path where transport carries both endpoints | baseline | F | live | A2 design doc §T9 |
+| T-MAT-26 | A6a — the materialize notice names the submodule state that was not carried instead of claiming `submodules copied opaquely` over an empty directory | baseline | F | live | A6 design doc §Matrix 1 correction 5 |
 
 ---
 
@@ -326,6 +328,11 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 | T-VER-32 | A1 negative (h) — a path carried by the child but absent from the parent is caught by the child's own inventory, under `status.showUntrackedFiles=no` which blinds the porcelain rung | baseline | F | live | A1 gate-6 review finding 1 |
 | T-VER-33 | A1 negative (i) — a hostile filename (ESC, newline) is escaped in both the human message and `error.details.failed_checks`, machine output stays encodable, and exactly one check is marked primary | baseline | F | live | A1 gate-6 review finding 4 |
 | T-VER-34 | A1 negative (j) — the pipeline hands `materialize()` the inventory it resolved before worktree creation, so transport cannot fall back to re-enumerating afterwards | baseline | F | live | A1 gate-6 re-review blocker 1 |
+| T-VER-35 | A6a — a submodule with an edited tracked file no longer fails `exact-copy-status` and `content-match`; the fork verifies instead of rolling back | baseline | F | live | A6 design doc §Matrix 1 cell `a` |
+| T-VER-36 | A6a — a submodule dirtied only by untracked content forks; distinct from T-VER-35 because plain `git diff` does not list it, so it failed the porcelain rung alone | baseline | F | live | A6 design doc §Matrix 1 cell `b` |
+| T-VER-37 | A6a — the exemption is scoped to submodules: an ordinary modified file alongside a dirty submodule is still transported and still verified | baseline | F | live | A6 design doc §Matrix 1 cell `f` |
+| T-VER-38 | A6a positive guard — a submodule advance staged in the parent keeps being compared, which is why the filter is `--ignore-submodules=dirty` and not `=all` | baseline | F | live | A6 design doc §Matrix 1 cell `d` |
+| T-VER-39 | A6a positive guard — a clean submodule gitlink is unaffected by the filter | baseline | F | live | A6 design doc §Matrix 1 cell `e` |
 
 ---
 

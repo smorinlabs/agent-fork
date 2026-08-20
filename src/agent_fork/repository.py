@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_fork.content import gitlink_paths, nul_paths
 from agent_fork.errors import PreconditionError
 from agent_fork.git import GitCommandError, run_git
 from agent_fork.text import escape_terminal_text
@@ -232,6 +233,34 @@ def _abort_hint(operation: str, parent: Path) -> str:
     return f'cd "{parent}" && {command}'
 
 
+def _unrepresentable_submodules(
+    parent: Path, *, env: Mapping[str, str] | None
+) -> list[str]:
+    """Submodules checked out at a commit the parent's index does not record.
+
+    A fork carries submodule state only as the gitlink in the parent's index. An
+    unstaged gitlink difference means the parent's submodule checkout sits at a
+    different commit than its index — a fact that needs a submodule checkout to
+    express, and a fork's child has none. `--ignore-submodules=dirty` keeps
+    reporting exactly this case while suppressing working-tree dirt, so the
+    difference survives to be refused here instead of failing verification after
+    a worktree has been built and destroyed.
+
+    A6b removes this limitation for the default path: once the child's submodule
+    is initialized and detached at the parent's submodule HEAD, the state is
+    representable and this guard must not fire.
+    """
+    gitlinks = set(gitlink_paths(parent, env=env))
+    if not gitlinks:
+        return []
+    changed = run_git(
+        parent,
+        ["diff", "--name-only", "-z", "--no-renames", "--ignore-submodules=dirty"],
+        env=env,
+    )
+    return sorted(gitlinks.intersection(nul_paths(changed.stdout)))
+
+
 def validate_fork_guards(
     parent: Path,
     branch: str,
@@ -241,6 +270,16 @@ def validate_fork_guards(
 ) -> RepositoryInfo:
     """Run every refusal before filesystem or ref mutation."""
     info = inspect_repository(parent, env=env)
+    unrepresentable = _unrepresentable_submodules(info.parent_path, env=env)
+    if unrepresentable:
+        listed = ", ".join(escape_terminal_text(path) for path in unrepresentable)
+        raise PreconditionError(
+            "submodule_unrepresentable",
+            f"submodule checkout differs from the recorded commit: {listed}; "
+            "a fork carries submodules only as the commit recorded in the index. "
+            "Stage it (git add -- <path>), or fork without carrying state "
+            "(--no-with-state)",
+        )
     attached = _worktree_branches(info.parent_path, env=env)
     if branch in attached:
         raise PreconditionError(
