@@ -153,61 +153,70 @@ def test_prune_reports_path_reuse_even_on_a_matching_branch_name(repo_scenario):
     assert len(_rows(shared)) == 1
 
 
-@pytest.mark.matrix("T-REG-23")
-def test_v1_record_without_a_repository_is_still_cleanable(repo_scenario):
-    """Migration keeps pre-v2 records usable: liveness, not identity, decides."""
+def _downgrade_to_v1(env):
+    """Rewrite the registry exactly as a pre-v2 agent-fork would have left it."""
     from agent_fork.registry import registry_path
+
+    path = registry_path(env)
+    document = json.loads(path.read_text())
+    for row in document["forks"]:
+        row.pop("repository")
+    document["version"] = 1
+    path.write_text(json.dumps(document))
+    return path
+
+
+@pytest.mark.matrix("T-REG-23")
+def test_v1_record_authorizes_nothing_and_prune_clears_it(repo_scenario):
+    """A record with no repository cannot show it belongs here, so it is inert.
+
+    Two repositories can hold one worktree path on one branch name — ordinary
+    under the `central` layout, which keys on a repository's basename — so a
+    live match is not proof of ownership for a record that names no repository.
+    """
     from conftest import run_cli
 
     world = repo_scenario()
     created = _fork(world.env, world.parent_path, "legacy")
     assert created.returncode == 0
-
-    # Rewrite the registry exactly as agent-fork 1.0 would have left it.
-    path = registry_path(world.env)
-    document = json.loads(path.read_text())
-    for row in document["forks"]:
-        row.pop("repository")
-    document["version"] = 1
-    path.write_text(json.dumps(document))
+    worktree = _worktree_of(created.stdout)
+    _downgrade_to_v1(world.env)
 
     rows = _rows(world.env)
     assert rows and "repository" not in rows[0]
 
-    result = run_cli(
+    refused = run_cli(
         ["cleanup", "legacy", "--yes", "--allow-unpushed"],
         world.env,
         world.parent_path,
     )
-    assert result.returncode == 0, result.stderr
-    assert _rows(world.env) == []
+    assert refused.returncode == 5, refused.stdout
+    assert b"cleanup_registry_stale" in refused.stderr
+
+    # The fork itself is untouched, and remains removable by explicit path.
+    from pathlib import Path
+
+    assert Path(worktree).exists()
+
+    pruned = run_cli(["prune", "--yes"], world.env, world.parent_path)
+    assert pruned.returncode == 0, pruned.stderr
+    assert _rows(world.env) == [], "an unresolvable record must be clearable"
+    assert Path(worktree).exists(), "prune must not touch the worktree"
 
 
 @pytest.mark.matrix("T-REG-24")
-def test_forking_backfills_a_repository_onto_a_live_legacy_record(repo_scenario):
-    """Backfill takes its evidence from live enumeration, not a stored path."""
-    from agent_fork.registry import registry_path
-    from conftest import run_cli
-
+def test_forking_does_not_backfill_a_repository_onto_a_v1_record(repo_scenario):
+    """Backfill would manufacture the ownership the record cannot prove."""
     world = repo_scenario()
     assert _fork(world.env, world.parent_path, "legacy").returncode == 0
-    path = registry_path(world.env)
-    document = json.loads(path.read_text())
-    for row in document["forks"]:
-        row.pop("repository")
-    document["version"] = 1
-    path.write_text(json.dumps(document))
+    path = _downgrade_to_v1(world.env)
 
     assert _fork(world.env, world.parent_path, "fresh").returncode == 0
 
     rows = {row["name"]: row for row in _rows(world.env)}
-    assert rows["legacy"]["repository"] == rows["fresh"]["repository"]
-    assert rows["legacy"]["repository"] is not None
+    assert rows["legacy"].get("repository") is None, "v1 record gained an identity"
+    assert rows["fresh"]["repository"] is not None
     assert json.loads(path.read_text())["version"] == 2
-
-    # Unrelated bookkeeping only: the legacy fork is untouched on disk.
-    listed = run_cli(["list"], world.env, world.parent_path)
-    assert b"legacy" in listed.stdout
 
 
 @pytest.mark.matrix("T-REG-22")

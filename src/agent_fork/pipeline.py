@@ -27,7 +27,6 @@ from agent_fork.registry import add_entry, undo_add
 from agent_fork.repository import (
     WorktreeCreation,
     create_worktree_at_anchor,
-    live_worktree_pairs,
     validate_fork_guards,
 )
 from agent_fork.rollback import run_with_rollback
@@ -161,11 +160,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             mode="agent" if resolved_agent is not None else "git-only",
             repository=creation.common_dir,
         )
-        displaced = add_entry(
-            entry,
-            live=live_worktree_pairs(request.parent, env=env),
-            env=env,
-        )
+        displaced = add_entry(entry, env=env)
         if (
             resolved_agent is not None
             and resolved_agent.agent == "claude"

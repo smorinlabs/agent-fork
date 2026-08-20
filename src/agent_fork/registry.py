@@ -8,7 +8,6 @@ import os
 import time
 from collections.abc import Mapping
 from contextlib import contextmanager
-from dataclasses import replace
 from pathlib import Path
 
 from agent_fork.errors import PreconditionError, RegistryBusyError
@@ -131,16 +130,15 @@ def is_live(entry: RegistryEntry, live: LivePairs) -> bool:
 def add_entry(
     entry: RegistryEntry,
     *,
-    live: LivePairs = frozenset(),
     env: Mapping[str, str] | None = None,
     timeout: float = DEFAULT_LOCK_TIMEOUT,
 ) -> list[RegistryEntry]:
     """Record a fork, replacing only records this repository provably owns.
 
-    `live` is the invoking repository's worktree list. A same-named record is
-    replaced when it carries this repository's identity, or when the predicate
-    confirms it; a record that merely stores a matching path string is left
-    alone, because that path may since have been taken by another repository.
+    A same-named record is replaced when it carries this repository's
+    identity, and otherwise left alone. Nothing here consults live worktrees:
+    a record that merely stores a matching path and branch has not shown it
+    belongs here, because two repositories can hold that same pair.
 
     Returns the records this call displaced, so a caller that has to undo the
     fork can put them back rather than leaving the user's earlier fork
@@ -156,14 +154,16 @@ def add_entry(
                 and entry.repository is not None
                 and item.repository == entry.repository
             )
-            confirmed = is_live(item, live)
-            if item.name == entry.name and (same_repository or confirmed):
+            if item.name == entry.name and same_repository:
                 displaced.append(item)
                 continue
-            # Backfill an identity onto a row this repository demonstrably
-            # owns. The evidence is the live list, not the row's own path.
-            if item.repository is None and confirmed and entry.repository:
-                item = replace(item, repository=entry.repository)
+            # A record carrying no repository is not backfilled and is not
+            # replaced (owner decision 2026-08-20). Matching a live worktree
+            # does not show the record belongs to this repository: two
+            # repositories can hold the same path on the same branch name,
+            # which the `central` worktree layout makes ordinary because it
+            # keys on a repository's basename alone. Writing an identity on
+            # that evidence would manufacture the ownership it cannot prove.
             kept.append(item)
         kept.append(entry)
         _atomic_write(path, kept)
@@ -218,10 +218,19 @@ def undo_add(
     re-adding through `add_entry` would apply it a second time and could
     delete a record another process registered in the meantime. Records added
     concurrently under other names are preserved untouched.
+
+    Conditional on the inserted record still being present. If another writer
+    superseded it while this fork was failing, that writer's record is now the
+    live one, and restoring the record *this* call displaced would leave two
+    records for one name — making the later cleanup ambiguous instead of
+    repairing anything. In that case there is nothing to undo, so nothing is.
     """
     path = registry_path(env)
     with registry_lock(path, timeout=timeout):
-        remaining = [item for item in _decode(path) if item.token() != token]
+        entries = _decode(path)
+        if not any(item.token() == token for item in entries):
+            return
+        remaining = [item for item in entries if item.token() != token]
         present = {item.token() for item in remaining}
         remaining.extend(item for item in displaced if item.token() not in present)
         _atomic_write(path, remaining)

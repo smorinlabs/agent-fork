@@ -521,12 +521,23 @@ record names the repository it belongs to. Records written by agent-fork 1.2
 and earlier predate that field. They are read and preserved, not rejected, and no
 repository is inferred for them: the only path such a record carries is where
 its worktree was when the record was written, which is not evidence about what
-is there now. Such a record is repaired the next time you fork in the
-repository that owns it, which is when the worktree list proves the connection.
-Until then it still appears in `list` and is still removable by `cleanup` from
-its own repository, because `cleanup` confirms against live worktrees rather
-than against the recorded repository. Note that once agent-fork 1.3 writes the
-registry, earlier versions will not read it.
+is there now.
+
+Such a record **authorizes nothing**. It still appears in `list`, but
+`cleanup <name>` refuses it, and forking will not fill in its repository —
+matching a live worktree is not proof, because two repositories can hold the
+same path on the same branch name, which the `central` worktree layout makes
+ordinary since it keys on a repository's basename alone.
+
+The forks themselves are unaffected. To finish an older fork:
+
+```
+agent-fork cleanup /path/to/the/worktree --force   # removes the fork
+agent-fork prune                                   # clears the leftover records
+```
+
+`prune` never touches a worktree, so the order does not matter. Note that once
+agent-fork 1.3 writes the registry, earlier versions will not read it.
 
 | `[fork]` key | Default | Environment variable | Notes |
 |---|---|---|---|

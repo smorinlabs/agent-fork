@@ -11,7 +11,6 @@ from agent_fork.git import run_git
 from agent_fork.models import RegistryEntry
 from agent_fork.registry import (
     find_candidates,
-    is_live,
     match_live,
     registry_lock,
     registry_path,
@@ -214,12 +213,17 @@ def _owns(entry: RegistryEntry, anchor_common_dir: Path | None) -> bool:
     on it from repository B, because a stale value can only make this refusal
     more conservative. Selection ignores stored identity; this does not.
 
-    A record migrated from a v1 registry names no repository and so vetoes
-    nothing. Under exact path-and-branch reuse it remains indistinguishable
-    from a record of this repository's own; `prune` is the remedy.
+    A record migrated from a v1 registry names no repository, so it can never
+    show that it belongs here — and it authorizes nothing (owner decision
+    2026-08-20). An earlier revision permitted such records, reasoning that
+    the live predicate was proof enough. It is not: two repositories can hold
+    the same worktree path on the same branch name, which the `central`
+    worktree layout makes ordinary rather than exotic, because that layout
+    keys on a repository's basename alone. `prune` clears these records; an
+    older fork is still removable by explicit path.
     """
     if entry.repository is None:
-        return True
+        return False
     return anchor_common_dir is not None and entry.repository == str(anchor_common_dir)
 
 
@@ -284,30 +288,31 @@ def resolve_cleanup_target(
             f"cleanup target {target!r} was not created by agent-fork; "
             "use --force to extend targeting"
         )
-    candidate = Path(target).expanduser()
-    matches: list[tuple[Path, str | None]] = []
-    try:
-        matches = _worktrees(cwd, env=env)
-    except Exception:
-        if candidate.exists():
-            matches = _worktrees(candidate.resolve(), env=env)
-    resolved = candidate.resolve()
-    for path, branch in matches:
-        if resolved == path or target == branch:
-            if branch is None:
-                raise CleanupTargetError("cannot clean a detached worktree by branch")
+    # Unregistered targeting still confirms. `list_worktrees` reports what a
+    # repository has *recorded*, which includes a path whose directory was
+    # since replaced by another repository's worktree; only `live_worktree_pairs`
+    # asks each directory what it currently is. Taking the raw listing here
+    # would let `--force` aim deletions at whoever occupies the path now.
+    if anchor_path is None or anchor_common_dir is None:
+        raise CleanupTargetError(f"cleanup target not found: {target!r}")
+    confirmed = live_worktree_pairs(anchor_path, env=env)
+    resolved = str(Path(target).expanduser().resolve())
+    for observed_path, observed_branch in sorted(confirmed):
+        if resolved == observed_path or target == observed_branch:
             entry = RegistryEntry.create(
-                name=path.name, branch=branch, worktree=path, agent="unknown"
+                name=Path(observed_path).name,
+                branch=observed_branch,
+                worktree=Path(observed_path),
+                agent="unknown",
             )
-            # Unregistered targeting: `path` and `branch` came from a live
-            # enumeration a moment ago, not from a record, so they satisfy the
-            # same contract. The synthesized entry is for display only.
+            # The synthesized record is for display only; the fork's fields
+            # come from the confirmed observation, same as the owned path.
             return CleanupPlan(
                 entry,
                 ConfirmedFork.from_observation(
-                    (str(path), branch),
-                    anchor=path,
-                    git_root=_git_root(path, env=env),
+                    (observed_path, observed_branch),
+                    anchor=anchor_path,
+                    git_root=anchor_common_dir,
                 ),
                 False,
             )
@@ -558,17 +563,25 @@ def cleanup(
     # that changed while the user was deciding refuses here, with nothing
     # destroyed, rather than after the worktree is already gone.
     token = plan.entry.token()
+    stale = PreconditionError(
+        "cleanup_registry_stale",
+        "the fork changed while the removal was awaiting confirmation; "
+        "nothing was removed",
+    )
     with registry_lock(registry_path(env)):
         require_single(token, env=env)
-        # Revalidate against the same repository the plan was anchored to, not
-        # the invoking directory, which need not be inside one.
-        anchor = plan.anchor or cwd
-        if not is_live(plan.entry, live_worktree_pairs(anchor, env=env)):
-            raise PreconditionError(
-                "cleanup_registry_stale",
-                "the fork changed while the removal was awaiting confirmation; "
-                "nothing was removed",
-            )
+        # Everything the plan was built on is re-established here, not just
+        # the record. Consent has no time bound, so the anchor directory can
+        # have become a different repository in the interval — checking only
+        # that the pair is live would then confirm against the newcomer and
+        # destroy its work.
+        anchor = plan.anchor
+        if inspect_repository(anchor, env=env).common_dir != plan.git_root:
+            raise stale
+        if not _owns(plan.entry, plan.git_root):
+            raise stale
+        if match_live(plan.entry, live_worktree_pairs(anchor, env=env)) is None:
+            raise stale
         destroy()
         remove_locked(token, env=env)
     return CleanupResult(plan, True, notices, details)

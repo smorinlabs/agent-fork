@@ -140,6 +140,89 @@ def test_a_foreign_record_cannot_authorize_deletion_in_the_occupying_repository(
     ), "the occupying repository's branch was deleted"
 
 
+@pytest.mark.matrix("T-REG-30")
+def test_force_targeting_confirms_the_path_before_deleting_it(repo_scenario):
+    """--force extends targeting; it does not skip confirmation.
+
+    A repository keeps listing a worktree path whose directory was replaced,
+    so the raw listing is not evidence. Targeting such a path from the
+    repository that still lists it must refuse, not delete the newcomer.
+    """
+    from pathlib import Path
+
+    from conftest import run_cli
+
+    first = repo_scenario()
+    second = repo_scenario()
+    shared = {**second.env, "XDG_STATE_HOME": first.env["XDG_STATE_HOME"]}
+
+    created = _fork(first.env, first.parent_path, "handover")
+    assert created.returncode == 0
+    worktree = _worktree_of(created.stdout)
+    shutil.rmtree(worktree)
+    subprocess.run(
+        ["git", "worktree", "add", worktree, "-b", "newcomer"],
+        cwd=second.parent_path,
+        env=shared,
+        check=True,
+        capture_output=True,
+    )
+
+    # From the repository that still lists the path in its own metadata.
+    result = run_cli(
+        ["cleanup", worktree, "--force", "--yes", "--allow-unpushed"],
+        first.env,
+        first.parent_path,
+    )
+    assert result.returncode != 0, result.stdout
+    assert Path(worktree).exists(), "--force deleted the occupying worktree"
+    assert (
+        subprocess.run(
+            ["git", "-C", str(second.parent_path), "rev-parse", "--verify", "newcomer"],
+            env=shared,
+            capture_output=True,
+        ).returncode
+        == 0
+    ), "the occupying repository's branch was deleted"
+
+
+@pytest.mark.matrix("T-REG-31")
+def test_undo_add_does_not_resurrect_after_another_writer_supersedes(repo_scenario):
+    """A failed fork's compensation must not fight a later successful one."""
+    from agent_fork.models import RegistryEntry
+    from agent_fork.registry import add_entry, read_registry, undo_add
+
+    world = repo_scenario()
+    repository = str(world.parent_path / ".git")
+
+    def record(name, suffix):
+        return RegistryEntry.create(
+            name=name,
+            branch=f"fork/{suffix}",
+            worktree=world.parent_path.parent / f"wt-{suffix}",
+            agent=None,
+            repository=repository,
+        )
+
+    original = record("shared", "original")
+    add_entry(original, env=world.env)
+
+    # A fork displaces it, then a second writer supersedes that fork.
+    failing = record("shared", "failing")
+    displaced = add_entry(failing, env=world.env)
+    assert [item.token() for item in displaced] == [original.token()]
+    winner = record("shared", "winner")
+    add_entry(winner, env=world.env)
+
+    # Only now does the first fork fail and try to undo itself.
+    undo_add(failing.token(), displaced, env=world.env)
+
+    names = [(item.name, item.branch) for item in read_registry(env=world.env)]
+    assert names == [("shared", "fork/winner")], (
+        f"compensation resurrected a superseded record: {names}"
+    )
+
+
 @pytest.mark.matrix("T-REG-26")
 def test_force_does_not_override_the_stale_refusal(repo_scenario):
     """--force overrides the dirty and unpushed guards, never ownership."""

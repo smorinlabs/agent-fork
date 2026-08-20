@@ -52,6 +52,14 @@ def _classify(
     enumerated: dict[Path, frozenset[tuple[str, str]]] = {}
     for entry in entries:
         worktree = Path(entry.worktree)
+        if entry.repository is None:
+            # Carries no repository, so it can never authorize anything and
+            # can never gain one — nothing can show which repository it
+            # belonged to. It is inert bookkeeping, and clearing it destroys
+            # no work: any worktree still at that path stays on disk and is
+            # removable by explicit path.
+            missing.append(entry)
+            continue
         if not worktree.exists():
             # Nothing is there. Removing the row destroys no work, and this
             # judgement needs no repository context, so it is safe to make
