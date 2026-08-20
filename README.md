@@ -614,13 +614,8 @@ cleanup guard refusals use the cleanup schema shown above.
 | 0 | Success | — |
 | 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy` |
 | 2 | Usage error or required prompt disabled | `config_error` |
-<<<<<<< HEAD
-| 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown` |
-| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `cleanup_registry_stale`, `cleanup_registry_ambiguous` |
-=======
 | 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown` |
-| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits` |
->>>>>>> origin/main
+| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `cleanup_registry_stale`, `cleanup_registry_ambiguous` |
 | 130 / 143 | Interrupted by SIGINT / SIGTERM | — |
 
 Exit 4 remains reserved because this local tool has no authentication failure
