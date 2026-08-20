@@ -294,7 +294,13 @@ repository-controlled text raw).
     over an empty directory. Already validated against real child worktrees:
     the edited-file, untracked-file, and mixed-dirt cells go from rollback to
     success, and the staged-gitlink case keeps the check it passes today.
-    Handling for the unstaged-gitlink-advance case is an open owner decision.
+    The unstaged-gitlink-advance case gets a typed `PreconditionError` refusal
+    before any mutation (exit 5, owner decision 2026-08-20). That guard is
+    **conditional, not permanent**: matrix 2 shows the case forks correctly once
+    submodules are carried, so it is written against a "submodules not carried"
+    condition and survives A6b only on the `--no-with-submodules` path.
+    A6a's own gate-4 pass is waived (owner decision 2026-08-20); gate 6 is
+    unchanged.
   - **A6b — carry submodules identically.** The full recipe, recursive
     snapshot, `config_pins` at the `run_git` chokepoint, and recursive
     verification, per the design doc. Requires a further gate-4 pass.

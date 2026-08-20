@@ -446,21 +446,27 @@ plan is a safe stopping point.
 
 ## Open items
 
-**Three decisions are open and block the start of A6a.** They are stated in full
-in the session decision request of 2026-08-20; summarised here so this document
-is self-contained:
+**All three blocking decisions are resolved (owner, 2026-08-20).**
 
-1. **A6a's handling of the unstaged-gitlink-advance case (cell `c`).** Options:
-   a typed `PreconditionError` refusal before any mutation (exit 5); or
-   `--ignore-submodules=all` for the whole A6a filter, which lets the case fork
-   while hiding submodule state that A6a does carry; or leave it failing as it
-   does today.
-2. **Where A6b is tracked.** Options: stay in P02 as the second half of the A6
-   umbrella; or move to P03 (core enhancements) as a feature, letting P02 close
-   A6 when A6a merges.
-3. **Whether A6a needs its own gate-4 adversarial pass**, given its evidence is
-   already validated and its change is three call sites plus a notice, or
-   whether the process's per-item review requirement applies unconditionally.
+1. **Cell `c` — the unstaged gitlink advance — gets a typed refusal.**
+   `PreconditionError` raised in `validate_fork_guards` before any filesystem or
+   ref mutation, exit 5, naming the remedy. **The refusal is conditional, not
+   permanent** (owner question, same date): matrix 2 shows this case forks
+   correctly under copy mode — parent and child both read ` M vendor/module` and
+   the child's submodule HEAD matches the parent's — because the child has a
+   real submodule checkout to represent the advance. So the guard fires only
+   when submodule working trees are *not* being carried. In A6a that is always;
+   after A6b it is exactly the `--no-with-submodules` path. Two consequences for
+   implementation: the guard must be written against a "submodules not carried"
+   condition rather than unconditionally, so A6b gates it instead of deleting
+   it; and its message must not imply the limitation is permanent. A6b extends
+   the remedy list to include "let it be carried, which is the default".
+2. **A6b stays in P02** as the second half of the A6 umbrella. A6 closes when
+   both halves merge.
+3. **A6a's gate-4 adversarial pass is waived.** Its change is three call sites
+   plus a notice and a guard, on evidence measured against real child worktrees
+   rather than reasoned. Gate 6 — adversarial review of the implementation — is
+   unchanged and still applies. A6b's third gate-4 pass is still required.
 
 
 - **Gate 4 third pass required before implementation starts.** Two passes have
