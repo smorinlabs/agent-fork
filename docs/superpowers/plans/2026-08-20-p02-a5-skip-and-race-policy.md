@@ -281,6 +281,21 @@ because every fix is mechanism rather than policy.
 | No single observable snapshot instant: a mid-capture permission change raises at the same site as a pre-existing one, and `.worktreeinclude` has no snapshot at all. | yes | Boundary redefined as per-path observation time, with the residual gap stated and accepted. `.worktreeinclude` scoped to a plain readability guard. |
 | The N2 cell was a false problem under the gate's evidence standard, because the probe never asserted the omission. | yes, correct about the committed record | Re-probed with a readable-directory control; evidence recorded above. The finding stands and is now demonstrated. |
 
+### Gate 1 — Codex second lens, second pass, 2026-08-20
+
+Verdict: **needs-attention** again. Three high, two medium. Codex session
+`01a02191-1956-7e21-909f-0e01d23e44a8`. The N2 re-probe was accepted as now
+meeting the evidence standard. The five open findings are recorded here
+because they change the size of the item, which is an owner question.
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | **High.** The rule "manifest kind `absent` fails" rejects **legitimate tracked deletions**. `collect_inventory` deliberately keeps deletion and rename endpoints, and `_manifest_entry` renders their missing working-tree paths as `absent`. Verified empirically: an unstaged deletion forks cleanly today, exit 0, and `T-VER-26` is an explicit positive guard for it. | **Accepted.** The rule as written would break tested behavior. Requires distinguishing Git-recorded intentional absence from observed-then-deleted. |
+| 2 | **High.** A full retry has no rollback-and-recreate boundary. Worktree creation precedes `finish`, so catching the verification error inside `finish` replays patches against an already-mutated child. Separately, a stateful transport filter can fail once and succeed on retry with no parent drift, so second-attempt success does not prove the classifier's "transient drift" verdict. | **Accepted.** Needs an explicit attempt boundary with successful rollback between attempts, and a weaker classification claim. |
+| 3 | **High.** The accepted observation gap can still be **silent**, contradicting the claim that its worst case is a named skip. If a directory loses readability while `ls-files` is traversing, its descendants never enter `_manifest_entry` or the skipped set at all. The N2 evidence is itself the proof. | **Accepted.** The guarantee must be narrowed to paths Git already enumerated, with the pre-enumeration blind spot kept in the race model. |
+| 4 | Status normalization targets the wrong stream: `exact-copy-status` requests `--untracked-files=all`, so it never sees the collapsed `?? d/` form. That form appears in the raw `parent-untouched` bracket, which must **not** be normalized, because subtracting one skipped descendant from a collapsed record can hide drift in non-skipped siblings. | **Accepted.** Needs a record-aware NUL porcelain parser on expanded paths only. |
+| 5 | Post-verification `.worktreeinclude` copying remains an unchecked race. It resolves paths independently and runs after all verification, so a writer changing a file after `lstat` or during `copy2` yields torn or stale child content that nothing later detects. | **Accepted.** A plain readability guard does not close it; a per-copy stability bracket would. |
+
 ### Gates 4 and 6
 
 To be completed.
