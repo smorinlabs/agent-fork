@@ -126,9 +126,80 @@ a one-line change if the owner prefers it.
 - **`TEST-MATRIX.md`** must register every new test row, or `just check-matrix`
   fails.
 
-## Verification
+## Gate 1 — probe matrix, executed 2026-08-20
 
-To be completed at gates 1, 5, and 6.
+Machine: macOS 25.4 (APFS), system Git, `agent-fork` built from `46201c1` plus
+this branch. Every cell below was executed and its output captured. A cell is
+recorded as a problem only where a probe demonstrated one.
+
+### Static shapes, present before the fork
+
+| Entry state | Listed by `ls-files --others` | Fork exit | Worktree | Result |
+|---|---|---|---|---|
+| Regular untracked file (control) | yes | 0 | kept | pass |
+| **Unreadable untracked file** | yes | 1 | none | **fails in `capture_state`** |
+| **Unreadable tracked, modified file** | n/a (tracked) | 1 | none | **fails in `capture_state`** |
+| Unreadable directory, mode 000 | **no** — Git cannot traverse it | 0 | kept | **silent omission, see N2** |
+| FIFO | no | 0 | kept | pass, unreachable as predicted |
+| Unix socket | no | 0 | kept | pass, unreachable as predicted |
+| Symlink to regular file (control) | yes | 0 | kept | pass |
+| Dangling symlink | yes | 0 | kept | pass |
+| Unreadable ignored file, `--with-ignored` | yes | 1 | none | **fails; the flag widens exposure** |
+| Unreadable ignored file, default mode | not carried | 0 | kept | pass |
+| **Unreadable file matched by `.worktreeinclude`** | n/a | 1 | none | **fails after verification, see N3** |
+
+### Mid-window shapes, applied between snapshot and copy
+
+All five fail, which is what the governing rule requires.
+
+| Mutation inside the window | Exit | Failure |
+|---|---|---|
+| File deleted | 1 | `runtime_error: [Errno 2] No such file or directory` |
+| File made unreadable | 1 | `runtime_error: [Errno 13] Permission denied` |
+| Regular file swapped to FIFO | 1 | `runtime_error: unsupported untracked file type: zzz_target.txt` |
+| Tracked file edited | 1 | `verify_failed: parent-content, content-match` |
+| New untracked file appears | 1 | `verify_failed: exact-copy-status, parent-content` |
+
+The FIFO-swap row is the collision the owner decision resolved. It confirms
+the prediction: the non-regular branch is unreachable from a pre-existing
+entry and reachable only from a mid-fork swap, where failing is correct.
+
+The unreadable-mid-window row confirms the design is implementable: a
+pre-existing unreadable file fails inside `capture_state` before the worktree
+exists, while the same condition arriving mid-window fails inside
+`_copy_entry` afterwards. The two are distinguishable by site, which is what
+lets one skip and the other fail.
+
+### Cleanup operation
+
+| Fork worktree contains | `cleanup` exit | Worktree removed |
+|---|---|---|
+| Nothing unusual (control) | 0 | yes |
+| FIFO | 0 | yes |
+| **Unreadable directory, mode 000** | **1** | **no, see N4** |
+
+### Untestable on this machine
+
+Recorded as gaps rather than passes, following the precedent A2 set for
+`GIT_ATTR_NOSYSTEM`:
+
+- Linux and other case-sensitive filesystems.
+- Git versions other than the one installed here, in particular whether any
+  version lists non-regular entries.
+- Windows, which is out of scope for the project.
+
+## Findings beyond A5's original three
+
+| ID | Finding | Routing |
+|---|---|---|
+| N1 | An unreadable **tracked** file kills the fork identically. A5's title, "One bad **untracked** filesystem entry", is too narrow: the defect is in `capture_state`, which digests every carried path regardless of tracking state. | **Absorbed into A5.** Same site, same fix. |
+| N2 | A mode-000 **directory** makes Git blind to its contents, so the fork reports success and the child silently lacks the data, with no notice. Parent `git status` is equally blind, so verification passes. | **Route to an issue.** Opposite failure mode — silent, not loud — and detecting it requires walking the tree independently of Git, which is a scope increase. |
+| N3 | An unreadable file matched by `.worktreeinclude` kills the fork *after* verification, then rolls back. `include.py` skips on unsupported **type** but has no guard for **readability**, so it is not the clean policy exemplar the register claimed. | **Absorbed into A5.** The shared copy primitive must handle both conditions. |
+| N4 | An unreadable directory inside a fork worktree makes `cleanup` fail with an untyped `runtime_error` carrying raw Git output, leaving the worktree and its registry entry behind. | **Route to an issue**, noted against A7, which covers uncleanable registry entries. |
+
+## Verification of the implementation
+
+To be completed at gates 5 and 6.
 
 ## Review outcomes
 

@@ -316,11 +316,20 @@ repository-controlled text raw).
 
     Both surface as an untyped `runtime_error` carrying a raw errno string:
     no step attribution, no statement that skipping the entry was possible.
-    The include path already implements the intended policy for the same
-    situation — notice and skip (`include.py:80-85`) — so the defect is two
-    code paths answering one question differently. "Mid-copy deleted file" is
-    **not** part of this case: it is case (c) reaching a different tripwire
-    (`_copy_entry`'s `lstat`, `materialize.py:44`).
+    "Mid-copy deleted file" is **not** part of this case: it is case (c)
+    reaching a different tripwire (`_copy_entry`'s `lstat`,
+    `materialize.py:44`).
+
+    **Corrected 2026-08-20 by the gate 1 matrix, on two points.** First, the
+    earlier claim that `include.py:80-85` "already implements the intended
+    policy" is only half true: it skips an unsupported file *type* but has no
+    guard for *readability*, so an unreadable file matched by
+    `.worktreeinclude` still kills the fork, after verification has already
+    passed. Second, the fault is not confined to untracked entries — an
+    unreadable **tracked, modified** file fails identically, because
+    `capture_state` digests every carried path regardless of tracking state.
+    The entry's title, "One bad **untracked** filesystem entry", is therefore
+    too narrow; read it as "one bad carried entry".
 
   - **(c) Parent edited mid-fork — confirmed, deterministically reproduced;
     the rollback is correct and must stay.** The window runs from the status
@@ -388,6 +397,17 @@ repository-controlled text raw).
   **(c) medium** — no data is ever at risk, the cost is an undiagnosable
   failure and, for continuous writers, a repository that cannot be forked at
   all. Type: robustness + error reporting. Not data loss on current evidence.
+
+  **Gate 1 probe matrix executed 2026-08-20.** Eleven static entry shapes,
+  five mid-window mutations, and three cleanup shapes were run with captured
+  output; the full matrix lives in the
+  [A5 design doc](../docs/superpowers/plans/2026-08-20-p02-a5-skip-and-race-policy.md).
+  It confirmed the three verdicts above, and produced four findings beyond
+  them: N1 unreadable tracked files fail identically (absorbed here), N2 a
+  mode-000 directory makes the fork *silently* omit data while reporting
+  success (routed out), N3 `.worktreeinclude` has no readability guard
+  (absorbed here), N4 an unreadable directory makes `cleanup` fail and leaves
+  the worktree behind (routed out, noted against A7).
 
   **Unverified surface — the gate must probe before any fix.** macOS/APFS
   only, one Git version, `--no-agent` only. Untested: Linux and
