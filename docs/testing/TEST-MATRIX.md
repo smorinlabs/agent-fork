@@ -167,6 +167,7 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-23 | A6a — the refusal is gated on carrying state, so `--no-with-state` (the remedy the error recommends) is not itself refused | baseline | F | live | A6 design doc §Split |
 | T-GRD-24 | A6a gate-6 — a removed submodule directory is an ordinary `deleted file mode 160000` deletion that transports, so the guard must not refuse it; `--diff-filter=M` is what distinguishes it from an unrepresentable modified gitlink | baseline | F | live | A6 gate-6 finding 1 |
 | T-GRD-25 | A6a gate-6 — a conflicted gitlink reports as unmerged, not modified, so it is excluded by `--diff-filter=M`, and the mid-operation refusal that names the user's real state wins | baseline | F | live | A6 gate-6 finding 3 |
+| T-GRD-26 | A6a gate-6 pass 2 — a deleted submodule checkout forks end to end through the console script, not merely past the guard | baseline | F | live | A6 gate-6 pass-2 L2 |
 
 ---
 
@@ -286,6 +287,8 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-25 | A2 audit — reported staged/unstaged counts match the carried inventory for a staged rename; porcelain rename detection reported one path where transport carries both endpoints | baseline | F | live | A2 design doc §T9 |
 | T-MAT-26 | A6a — the materialize notice names the submodule state that was not carried instead of claiming `submodules copied opaquely` over an empty directory | baseline | F | live | A6 design doc §Matrix 1 correction 5 |
 | T-MAT-27 | A6a gate-6 — a submodule sitting at its recorded commit produces no loss notice; the notice reports only paths whose state the filter suppresses | baseline | F | live | A6 gate-6 finding 4 |
+| T-MAT-28 | A6a gate-6 pass 2 — a submodule both staged at a new commit and dirty inside reports its loss; the comparison is per status code (`MM` vs `M `), not per path membership | baseline | F | live | A6 gate-6 pass-2 M1 |
+| T-MAT-29 | A6a gate-6 pass 2 — a porcelain rename source record cannot fabricate a path that masks a genuinely dirty submodule | baseline | F | live | A6 gate-6 pass-2 M2 |
 
 ---
 
@@ -548,7 +551,7 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-35 | completion output choices are exactly those the parser accepts, so a removed alias cannot linger in completions | baseline | U | live | P02 A13(b); REQ-10 |
 | T-CLI-36 | A6a gate-6 — the console script forwards `--no-with-state` to the submodule guard, so the refusal and its remedy are proven through the real CLI rather than a direct call | baseline | F | live | A6 gate-6 finding 5 |
 | T-CLI-37 | A6a gate-6 — dry-run counts and notices describe the fork that will actually happen: a dirty submodule previews as zero unstaged paths and carries a loss notice | baseline | F | live | A6 gate-6 finding 2 |
-| T-CLI-38 | Every code in `ERROR_CATALOG` appears in the README exit-code table, so a stable identifier cannot ship undocumented | baseline | F | live | A6 gate-6 finding 7 |
+| T-CLI-38 | A6a gate-6 — `submodule_unrepresentable` appears in the README row for its own exit status, parsed from the table rather than searched for anywhere in the file | baseline | F | live | A6 gate-6 finding 7, narrowed in pass 2 |
 
 ---
 

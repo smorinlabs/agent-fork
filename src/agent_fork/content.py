@@ -139,6 +139,30 @@ def gitlink_paths(root: Path, *, env: Mapping[str, str] | None = None) -> list[s
     return sorted(paths)
 
 
+def parse_porcelain_status(data: bytes) -> dict[str, str]:
+    """Map each reported path to its two-letter status code.
+
+    Porcelain v1 with ``-z`` emits a rename or copy as **two** records: the
+    entry itself, then a bare source path carrying no status prefix. Slicing a
+    prefix off that second record fabricates a path — for a rename source of
+    ``abcvendor/submodule`` it yields ``vendor/submodule``, which can collide
+    with a real entry. The cursor below skips it, matching the parser in
+    ``cleanup.py``.
+    """
+    records = data.split(b"\0")
+    parsed: dict[str, str] = {}
+    index = 0
+    while index < len(records):
+        record = records[index]
+        if not record:
+            index += 1
+            continue
+        status = record[:2].decode("ascii", errors="replace")
+        parsed[os.fsdecode(record[3:])] = status
+        index += 2 if "R" in status or "C" in status else 1
+    return parsed
+
+
 def suppressed_submodules(
     root: Path, *, env: Mapping[str, str] | None = None
 ) -> list[str]:
@@ -146,28 +170,39 @@ def suppressed_submodules(
 
     This is what a fork actually leaves behind: submodules Git would call
     modified on working-tree grounds alone. A submodule sitting at its recorded
-    commit is not in this set, and a commit-level gitlink difference is not
-    either, because the filter keeps reporting that and the fork carries it.
+    commit is not in this set, and neither is a commit-level gitlink difference
+    alone, because the filter keeps reporting that and the fork carries it.
+
+    The comparison is per status **code**, not per path. A submodule can be both
+    staged at a new commit and dirty inside, which Git reports as ``MM`` and the
+    filter reduces to ``M ``: the path is present on both sides, so comparing
+    membership alone would miss the working-tree half that is genuinely lost.
     """
     gitlinks = set(gitlink_paths(root, env=env))
     if not gitlinks:
         return []
 
-    def reported(extra: list[str]) -> set[str]:
+    def reported(mode: str) -> dict[str, str]:
         result = run_git(
             root,
-            ["status", "--porcelain=v1", "-z", "--untracked-files=all", *extra],
+            [
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+                f"--ignore-submodules={mode}",
+            ],
             env=env,
         )
-        seen = set()
-        for record in result.stdout.split(b"\0"):
-            if len(record) > 3:
-                seen.add(os.fsdecode(record[3:]))
-        return seen
+        return parse_porcelain_status(result.stdout)
 
-    unfiltered = reported(["--ignore-submodules=none"])
-    filtered = reported(["--ignore-submodules=dirty"])
-    return sorted(gitlinks.intersection(unfiltered - filtered))
+    unfiltered = reported("none")
+    filtered = reported("dirty")
+    return sorted(
+        path
+        for path in gitlinks
+        if path in unfiltered and unfiltered[path] != filtered.get(path)
+    )
 
 
 def collect_inventory(

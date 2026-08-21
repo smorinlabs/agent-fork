@@ -421,19 +421,95 @@ def test_dry_run_counts_and_notices_match_what_the_fork_will_carry(repo_scenario
 
 
 @pytest.mark.matrix("T-CLI-38")
-def test_every_catalogued_error_code_is_documented():
+def test_the_new_error_code_is_published_in_its_own_exit_row():
     """Gate-6 finding 7 — a stable identifier nobody published is not stable.
 
     README calls error codes compatibility identifiers, so a client may switch
-    on them. `submodule_unrepresentable` was added to the catalog without being
-    listed, which would hand a conforming client an unknown code. This pins the
-    catalog and the published table together for every future code, not just
-    this one.
+    on them, and `submodule_unrepresentable` was added to the catalog without
+    being listed. The assertion reads the exit-code table and requires the code
+    in the row for its own configured exit status: a passing mention anywhere
+    else in the prose would satisfy a whole-file search while still leaving a
+    client unable to map the code to an exit status.
+
+    Scoped to this item's code by the gate-6 routing rule. Whole-catalog parity,
+    and the three pre-existing codes it exposed, are routed to their own work.
     """
     from pathlib import Path as _Path
 
     from agent_fork.errors import ERROR_CATALOG
 
+    code = "submodule_unrepresentable"
+    exit_code = ERROR_CATALOG[code].exit_code
     readme = (_Path(__file__).resolve().parents[2] / "README.md").read_text()
-    missing = sorted(code for code in ERROR_CATALOG if f"`{code}`" not in readme)
-    assert not missing, f"error codes missing from README: {missing}"
+    rows = [line for line in readme.splitlines() if line.startswith(f"| {exit_code} |")]
+    assert len(rows) == 1, f"expected one exit-{exit_code} row, found {len(rows)}"
+    assert f"`{code}`" in rows[0]
+
+
+@pytest.mark.matrix("T-MAT-28")
+def test_a_submodule_both_staged_and_dirty_still_reports_its_loss(repo_scenario):
+    """Gate-6 pass-2 — the loss notice compares status codes, not path membership.
+
+    A submodule can be staged at a new commit and dirty inside at the same time.
+    Git reports that as `MM`, and the filter reduces it to `M `: the path is
+    present on both sides, so a membership comparison sees no difference and
+    stays silent — while the staged commit is carried and the inner edit is not.
+    """
+    from agent_fork.content import suppressed_submodules
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="advanced-staged"),))
+    sub = world.parent_path / "vendor/submodule"
+    (sub / "tracked.txt").write_text("dirty on top of the staged advance\n")
+
+    assert b"MM vendor/submodule" in _status(world, world.parent_path)
+    assert suppressed_submodules(world.parent_path, env=world.env) == [
+        "vendor/submodule"
+    ]
+
+
+@pytest.mark.matrix("T-MAT-29")
+def test_a_rename_source_record_cannot_mask_a_dirty_submodule(repo_scenario):
+    """Gate-6 pass-2 — porcelain rename records carry a second, prefixless path.
+
+    `--porcelain=v1 -z` emits a rename as two records: the entry, then a bare
+    source path with no status prefix. Slicing a prefix off that second record
+    fabricates a path, and a source of `abcvendor/submodule` yields exactly
+    `vendor/submodule` — which then appears on both sides of the comparison and
+    hides the real submodule's suppressed state.
+    """
+    from agent_fork.content import suppressed_submodules
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="modified"),))
+    parent = world.parent_path
+    decoy = parent / "abcvendor"
+    decoy.mkdir()
+    (decoy / "submodule").write_text("payload\n")
+    _git(world, parent, "add", "abcvendor/submodule")
+    _git(world, parent, "commit", "-qm", "add the decoy")
+    _git(world, parent, "mv", "abcvendor/submodule", "renamed.txt")
+
+    records = _status(world, parent).split(b"\0")
+    assert b"abcvendor/submodule" in records, "fixture must emit a rename source"
+    assert suppressed_submodules(parent, env=world.env) == ["vendor/submodule"]
+
+
+@pytest.mark.matrix("T-GRD-26")
+def test_a_deleted_submodule_checkout_forks_end_to_end(repo_scenario):
+    """Gate-6 pass-2 — T-GRD-24 proved the guard allows it; this proves it works.
+
+    Passing the guard is not the same as transporting: the deletion still has to
+    survive materialization and verification. Driving the console script pins the
+    whole path, so a later transport regression cannot hide behind a guard-only
+    assertion.
+    """
+    import shutil
+
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="modified"),))
+    shutil.rmtree(world.parent_path / "vendor/submodule")
+
+    completed = run_cli(
+        ["fork", "deleted", "--no-agent", "-o", "json"], world.env, world.parent_path
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
