@@ -337,11 +337,11 @@ def test_terminating_the_hook_group_reaches_survivors_after_the_leader_exits(tmp
         assert process.poll() is not None, "the hook's own shell never exited"
         survivor = int(recorded.read_text())
 
-        include._ACTIVE.process = process
+        include._ACTIVE.group = include._HookGroup(process)
         try:
             include.terminate_active_setup_hook()
         finally:
-            include._ACTIVE.process = None
+            include._ACTIVE.group = None
 
         for _ in range(300):
             try:

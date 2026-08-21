@@ -35,9 +35,26 @@ LEFTOVER_NOTICE = (
 _REAP_GRACE_SECONDS = 1.0
 _POLL_SLICE_SECONDS = 0.05
 
-# The active hook process, mirroring `git._ACTIVE` so `rollback.interrupt()`
+# The active hook group, mirroring `git._ACTIVE` so `rollback.interrupt()`
 # can reach a running hook's process group during signal cleanup.
 _ACTIVE = threading.local()
+
+
+@dataclass
+class _HookGroup:
+    """One spawned hook, plus the one-way fact that its group has emptied.
+
+    ``emptied`` is a latch, never cleared. A PID is reserved as its process
+    group's id only while the group still holds a member; once the last one
+    exits the kernel may reuse that PID for an unrelated process, and a
+    ``killpg`` issued afterwards would signal a stranger. Every signalling path
+    — the reap ladder's SIGKILL escalation and
+    ``terminate_active_setup_hook()`` — reads this one record, so a single
+    observation of emptiness retires the PID for all of them.
+    """
+
+    process: subprocess.Popen[bytes]
+    emptied: bool = False
 
 
 @dataclass(frozen=True)
@@ -170,9 +187,7 @@ def copy_worktree_includes(
     return IncludeResult(tuple(copied), tuple(notices))
 
 
-def _signal_hook_group(
-    process: subprocess.Popen[bytes], signum: signal.Signals
-) -> None:
+def _signal_hook_group(group: _HookGroup, signum: signal.Signals) -> None:
     """Signal the hook's whole process group, whether or not its leader is alive.
 
     Deliberately narrower than ``git.signal_process_group()``, which returns
@@ -182,15 +197,20 @@ def _signal_hook_group(
     leader is gone and whose remaining members are exactly what needs the
     signal.
 
-    Addressing the group by the leader's pid stays safe after the leader has
-    been reaped, because the kernel keeps that pid reserved as the group id for
-    as long as any member remains; it can never name an unrelated process. An
-    empty group answers ``ESRCH``, which is the success case here.
+    Addressing the group by the leader's pid stays safe *while the group still
+    holds a member*: the kernel reserves that pid as the group id for exactly
+    that long, and no longer. Once the group has emptied the pid is free to
+    name something unrelated, so ``_group_is_empty()`` runs first — both to
+    honour the latch, which makes emptiness permanent, and to shrink the
+    unavoidable check-to-signal gap to a single syscall.
     """
+    if _group_is_empty(group):
+        return
+    process = group.process
     try:
         os.killpg(process.pid, signum)
     except ProcessLookupError:
-        return
+        group.emptied = True
     except PermissionError:
         # macOS can report EPERM in the window between a member's exit and its
         # reaping. Cleanup stays best-effort so the original timeout or
@@ -202,26 +222,35 @@ def _signal_hook_group(
                 pass
 
 
-def _group_is_empty(process: subprocess.Popen[bytes]) -> bool:
+def _group_is_empty(group: _HookGroup) -> bool:
     """Report whether the hook's process group still holds any process.
 
-    ``poll()`` runs first so an unreaped leader — a zombie is still a group
-    member as far as ``killpg`` is concerned — does not read as a survivor.
+    The latch is read before anything else: after the group has been seen
+    empty, a probe that answers "alive" is a reused pid rather than a survivor,
+    and believing it would put an unrelated process group back in range of the
+    reap ladder.
+
+    ``poll()`` runs before the probe so an unreaped leader — a zombie is still
+    a group member as far as ``killpg`` is concerned — does not read as a
+    survivor.
     """
-    process.poll()
+    if group.emptied:
+        return True
+    group.process.poll()
     try:
-        os.killpg(process.pid, 0)
+        os.killpg(group.process.pid, 0)
     except ProcessLookupError:
+        group.emptied = True
         return True
     except PermissionError:
         return False
     return False
 
 
-def _await_empty_group(process: subprocess.Popen[bytes], seconds: float) -> bool:
+def _await_empty_group(group: _HookGroup, seconds: float) -> bool:
     deadline = time.monotonic() + seconds
     while True:
-        if _group_is_empty(process):
+        if _group_is_empty(group):
             return True
         if time.monotonic() >= deadline:
             return False
@@ -230,13 +259,13 @@ def _await_empty_group(process: subprocess.Popen[bytes], seconds: float) -> bool
 
 def terminate_active_setup_hook() -> None:
     """Terminate the current setup-hook process group during signal cleanup."""
-    process = getattr(_ACTIVE, "process", None)
-    if process is None:
+    group = getattr(_ACTIVE, "group", None)
+    if group is None:
         return
-    _signal_hook_group(process, signal.SIGKILL)
+    _signal_hook_group(group, signal.SIGKILL)
 
 
-def _reap(process: subprocess.Popen[bytes]) -> tuple[str, ...]:
+def _reap(group: _HookGroup) -> tuple[str, ...]:
     """Escalate SIGTERM then SIGKILL over the hook's whole process group.
 
     Escalation is decided by probing the group, not by waiting on the leader:
@@ -245,15 +274,15 @@ def _reap(process: subprocess.Popen[bytes]) -> tuple[str, ...]:
     stays best-effort so the original timeout or interruption remains the
     observable outcome.
     """
-    _signal_hook_group(process, signal.SIGTERM)
-    if _await_empty_group(process, _REAP_GRACE_SECONDS):
+    _signal_hook_group(group, signal.SIGTERM)
+    if _await_empty_group(group, _REAP_GRACE_SECONDS):
         return ()
-    _signal_hook_group(process, signal.SIGKILL)
-    if _await_empty_group(process, _REAP_GRACE_SECONDS):
+    _signal_hook_group(group, signal.SIGKILL)
+    if _await_empty_group(group, _REAP_GRACE_SECONDS):
         return ()
     return (
-        f"setup hook process group {process.pid} did not exit after SIGKILL; "
-        "surviving processes may need manual cleanup",
+        f"setup hook process group {group.process.pid} did not exit after "
+        "SIGKILL; surviving processes may need manual cleanup",
     )
 
 
@@ -451,6 +480,7 @@ def run_setup_hook(
     )
     started = time.monotonic()
     process: subprocess.Popen[bytes] | None = None
+    group: _HookGroup | None = None
     spawn_error: OSError | None = None
     timed_out = False
     reap_notices: tuple[str, ...] = ()
@@ -473,15 +503,10 @@ def run_setup_hook(
             )
         except OSError as error:
             spawn_error = error
-        finally:
-            # Registered from a `finally`, and inside the same protected block
-            # as the spawn, so an interrupt arriving between `Popen` returning
-            # and this assignment cannot leak the group: CPython runs a signal
-            # handler between bytecodes, and a group registered nowhere is
-            # reachable by neither `rollback.interrupt()` nor the ladder below.
-            if process is not None:
-                _ACTIVE.process = process
-        if process is not None:
+        else:
+            group = _HookGroup(process)
+            _ACTIVE.group = group
+        if process is not None and group is not None:
             stdout, stderr, outcome = _collect_output(
                 process,
                 leader_deadline=started + policy.timeout_seconds,
@@ -489,7 +514,7 @@ def run_setup_hook(
             )
             if outcome == "timed_out":
                 timed_out = True
-                reap_notices = _reap(process)
+                reap_notices = _reap(group)
                 # The hook itself is now dead, so only the drain bound applies.
                 stdout, stderr, outcome = _collect_output(
                     process,
@@ -497,12 +522,12 @@ def run_setup_hook(
                     drain_seconds=SETUP_HOOK_DRAIN_SECONDS,
                 )
     except BaseException:
-        if process is not None:
-            _reap(process)
+        if group is not None:
+            _reap(group)
         raise
     finally:
-        if process is not None and getattr(_ACTIVE, "process", None) is process:
-            _ACTIVE.process = None
+        if group is not None and getattr(_ACTIVE, "group", None) is group:
+            _ACTIVE.group = None
 
     if spawn_error is not None:
         detail = escape_terminal_text(str(spawn_error))
@@ -515,10 +540,11 @@ def run_setup_hook(
             notices=(f"setup hook failed to start: {detail}",),
         )
     assert process is not None
+    assert group is not None
 
     if outcome == "detached":
         _abandon_pipes(process)
-    descendants_cleared = outcome != "detached" and _group_is_empty(process)
+    descendants_cleared = outcome != "detached" and _group_is_empty(group)
     duration = round(time.monotonic() - started, 3)
     stdout_text, stdout_bytes, stdout_truncated = _bounded(stdout)
     stderr_text, stderr_bytes, stderr_truncated = _bounded(stderr)

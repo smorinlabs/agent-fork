@@ -461,12 +461,20 @@ from opposite ends. The rule the corrected code follows is: **a process group
 can still hold live members after its leader is gone, so every decision is made
 about the group, never about the leader.**
 
+**Amended 2026-08-21 (gate-6 round 3).** Every signalling path now goes through
+one `_HookGroup` record — the `Popen` plus an `emptied` latch — instead of
+through the bare `Popen`. `_group_is_empty()` sets the latch the first time the
+group answers `ESRCH`, reads it before probing, and `_signal_hook_group()`
+returns without signalling whenever it is set. Emptiness is therefore terminal:
+once observed, that PID is never signalled again by anything.
+
 Reap ladder, used identically on the timeout path and the signal path:
 
-1. `_signal_hook_group(process, SIGTERM)`
+1. `_signal_hook_group(group, SIGTERM)` — probes first, so an already-empty
+   group is never signalled
 2. probe the group for up to 1 s (`killpg(pgid, 0)` answering `ESRCH` means
-   empty)
-3. still populated: `_signal_hook_group(process, SIGKILL)`
+   empty, and latches `group.emptied`)
+3. still populated: `_signal_hook_group(group, SIGKILL)`
 4. probe again for up to 1 s
 5. still populated: give up and append a notice naming the PID — cleanup stays
    best-effort so the original interruption remains observable.
@@ -481,9 +489,12 @@ Two deliberate divergences from `git.py:117-127`, both required:
   whenever `process.poll()` shows the leader exited. That gate is right for
   Git, whose children do not outlive it, and wrong for a hook, where the
   survivors are the entire point. Addressing the group by the leader's pid is
-  safe after the leader has been reaped: the kernel keeps that pid reserved as
-  the group id while any member remains, so it can never name an unrelated
-  process. `git.py` is unchanged, and `T-RBK-07` still pins its behavior.
+  safe after the leader has been reaped *for as long as the group holds a
+  member* — the kernel reserves the pid as the group id for exactly that long.
+  It is **not** safe afterwards: an emptied group's pid is free for the kernel
+  to hand to an unrelated process, which is why emptiness latches and no
+  further signal is issued once it has (`T-INC-18`). `git.py` is unchanged, and
+  `T-RBK-07` still pins its behavior.
 
 Execution path — two bounds, because a pipe outlives its writer's parent:
 
