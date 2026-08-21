@@ -69,6 +69,7 @@ def _apply_patch(
     args: Sequence[str],
     *,
     env: Mapping[str, str] | None,
+    config_pins: Sequence[tuple[str, str]] = (),
 ) -> bool:
     if not patch:
         return False
@@ -77,6 +78,7 @@ def _apply_patch(
         ["apply", "--binary", "--whitespace=nowarn", *args],
         env=env,
         input_bytes=patch,
+        config_pins=config_pins,
     )
     return True
 
@@ -111,6 +113,7 @@ def materialize(
     with_ignored: bool = False,
     inventory: Inventory | None = None,
     env: Mapping[str, str] | None = None,
+    config_pins: Sequence[tuple[str, str]] = (),
 ) -> MaterializeResult:
     """Transport staged → ITA/unstaged → untracked → optional ignored state.
 
@@ -120,6 +123,11 @@ def materialize(
     and a file that appeared or vanished since the snapshot would be carried
     without being checked. The pipeline always supplies it; the parameter stays
     optional for callers transporting a tree they resolved themselves.
+
+    ``config_pins`` is inert by default (A6b step 2). A6b reuses this function
+    one level down for each carried submodule, and pins are what let that reuse
+    stay "one added argument" rather than a second transport implementation —
+    see the design doc's "Semantic pins on recursive commands".
     """
     if with_ignored and not with_state:
         raise ValueError("with_ignored requires with_state")
@@ -128,7 +136,11 @@ def materialize(
     try:
         if inventory is None:
             inventory = collect_inventory(
-                parent, with_state=with_state, with_ignored=with_ignored, env=env
+                parent,
+                with_state=with_state,
+                with_ignored=with_ignored,
+                env=env,
+                config_pins=config_pins,
             )
         ita_paths = list(inventory.intent_to_add)
         staged = run_git(
@@ -143,8 +155,11 @@ def materialize(
                 "HEAD",
             ],
             env=env,
+            config_pins=config_pins,
         ).stdout
-        staged_applied = _apply_patch(child, staged, ["--index"], env=env)
+        staged_applied = _apply_patch(
+            child, staged, ["--index"], env=env, config_pins=config_pins
+        )
 
         for path in ita_paths:
             ita_patch = run_git(
@@ -159,12 +174,14 @@ def materialize(
                     f":(literal){path}",
                 ],
                 env=env,
+                config_pins=config_pins,
             ).stdout
-            _apply_patch(child, ita_patch, [], env=env)
+            _apply_patch(child, ita_patch, [], env=env, config_pins=config_pins)
             run_git(
                 child,
                 ["add", "--intent-to-add", "--", f":(literal){path}"],
                 env=env,
+                config_pins=config_pins,
             )
 
         unstaged_args = [
@@ -182,8 +199,12 @@ def materialize(
                     *(f":(exclude,literal){path}" for path in ita_paths),
                 ]
             )
-        unstaged = run_git(parent, unstaged_args, env=env).stdout
-        unstaged_applied = _apply_patch(child, unstaged, [], env=env)
+        unstaged = run_git(
+            parent, unstaged_args, env=env, config_pins=config_pins
+        ).stdout
+        unstaged_applied = _apply_patch(
+            child, unstaged, [], env=env, config_pins=config_pins
+        )
 
         untracked = list(inventory.untracked)
         for path in untracked:

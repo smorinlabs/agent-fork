@@ -100,9 +100,25 @@ def run_git(
     env: Mapping[str, str] | None = None,
     input_bytes: bytes | None = None,
     check: bool = True,
+    config_pins: Sequence[tuple[str, str]] = (),
 ) -> GitResult:
-    """Invoke `git` by name on every call so current PATH shims are observable."""
-    command = ("git", "-C", str(cwd), *args)
+    """Invoke `git` by name on every call so current PATH shims are observable.
+
+    ``config_pins`` prepends ``-c key=value`` for each pair, before the
+    subcommand. This is the one chokepoint every Git invocation passes
+    through, which is why it is where recursive submodule commands pin
+    semantics such as ``diff.ignoreSubmodules`` (A6's design doc). It is a
+    distinct, explicit channel from the environment: `without_config_injection`
+    below strips inline configuration injected through `GIT_CONFIG_COUNT` and
+    friends (A2), and pins are not routed through that stripped environment.
+    """
+    command = (
+        "git",
+        *(flag for key, value in config_pins for flag in ("-c", f"{key}={value}")),
+        "-C",
+        str(cwd),
+        *args,
+    )
     process = subprocess.Popen(
         command,
         env=without_config_injection(env),
