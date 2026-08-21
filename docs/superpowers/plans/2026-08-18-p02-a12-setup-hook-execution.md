@@ -472,8 +472,9 @@ Reap ladder, used identically on the timeout path and the signal path:
 
 1. `_signal_hook_group(group, SIGTERM)` — probes first, so an already-empty
    group is never signalled
-2. probe the group for up to 1 s (`killpg(pgid, 0)` answering `ESRCH` means
-   empty, and latches `group.emptied`)
+2. probe the group for up to 1 s — a live leader is "not empty" with no syscall
+   at all, and once it has been reaped `killpg(pgid, 0)` answering `ESRCH`
+   means empty and latches `group.emptied`
 3. still populated: `_signal_hook_group(group, SIGKILL)`
 4. probe again for up to 1 s
 5. still populated: give up and append a notice naming the PID — cleanup stays
@@ -508,13 +509,13 @@ stdout, stderr, outcome = _collect_output(
 )
 if outcome == "timed_out":
     timed_out = True
-    reap_notices = _reap(process)
+    reap_notices = _reap(group)
     stdout, stderr, outcome = _collect_output(   # bounded drain, never open-ended
         process, leader_deadline=time.monotonic(), drain_seconds=SETUP_HOOK_DRAIN_SECONDS
     )
 if outcome == "detached":
     _abandon_pipes(process)
-descendants_cleared = outcome != "detached" and _group_is_empty(process)
+descendants_cleared = outcome != "detached" and _group_is_empty(group)
 ```
 
 `leader_deadline` bounds how long the hook's own process may run;
