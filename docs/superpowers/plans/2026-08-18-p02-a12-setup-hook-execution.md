@@ -28,8 +28,8 @@ plugins, and no interactive behavior.
 
 | P02 gate | State |
 |---|---|
-| 1. Adversarial verification, including Codex | **CONFIRMED-WITH-CORRECTION** on 2026-08-17; executed evidence recorded below |
-| 2. Owner scope decision | **three constraints settled**; recorded below. Four open questions remain, listed at the end |
+| 1. Adversarial verification, including Codex | **CONFIRMED-WITH-CORRECTION** on 2026-08-17 (this document's Gate-1 evidence); independently reconfirmed **CONFIRMED-WITH-CORRECTIONS** on 2026-08-20 via a fresh live repro plus a Codex source-trace, committed at `30f5e76` on `worktree-p02-a12-ts12-reverify` |
+| 2. Owner scope decision | **three constraints settled** at scoping time, recorded below. The plan's four open design questions are now **all settled** — see Owner decisions |
 | 3. Design document | **this document** |
 | 4. Implementation plan and adversarial review, including Codex | pending |
 | 5. Test-driven implementation | pending |
@@ -858,8 +858,7 @@ Stated so no reviewer mistakes them for oversights.
 
 ## Owner decisions
 
-Four items needed an owner decision. Three are now settled (2026-08-20); one
-remains open.
+Four items needed an owner decision. All four are now settled (2026-08-20).
 
 1. **Timeout default — DECIDED: 300 seconds.** The plan had proposed 120 s;
    the owner chose 300 s, favoring tolerance for heavy dependency installs
@@ -875,11 +874,12 @@ remains open.
    equivalent is `--setup-hook-policy off`. The Contracts section, `doctor`
    disclosure section, and Step 4/5 test rows have been updated to the enum
    shape throughout.
-3. **Whether the success output tail is always in the JSON — STILL OPEN.**
-   This document proposes yes, always, bounded at 4096 bytes per stream
-   (option C1). The alternative gates it behind a flag, at the cost of making
-   a machine consumer pass an option to see a field it needs. Awaiting a
-   ruling before Step 4 can be written.
+3. **Whether the success output tail is always in the JSON — DECIDED: yes.**
+   The owner confirmed the plan's own recommendation: the bounded tail
+   (4096 bytes per stream, option C1) is always present, so a machine
+   consumer never needs to pass a flag to see a field it needs. No contract
+   change follows from this decision — `SetupHookResult`, the `fork --json`
+   examples, and `T-OUT-23` already reflect it as written.
 4. **Whether `doctor` may fail on a present-but-ineligible hook — DECIDED:
    yes.** The plan had recommended informational-only (`ok` always `true`),
    reasoning that every existing `doctor` failure is machine readiness, not
