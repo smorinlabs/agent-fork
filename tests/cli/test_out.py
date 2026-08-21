@@ -697,6 +697,76 @@ def test_setup_hook_is_structured_on_stdout_and_narrated_only_on_stderr(repo_sce
         assert lines[4].startswith(b"cd ")
 
 
+@pytest.mark.matrix("T-OUT-26")
+def test_human_output_echoes_the_hook_tails_on_failure_and_under_debug(repo_scenario):
+    """T-OUT-26 — Axis C1's human echo: the tails are shown, not just stored.
+
+    Axis C1 promises human mode echoes the bounded `stdout_tail`/`stderr_tail`
+    to stderr when the hook failed, timed out, or `--debug` is set. The failure
+    path only ever showed the tail by accident, folded into the failure notice
+    inside `include.py`, and `--debug` did nothing at all for the hook.
+
+    Given:  a failing hook, then a succeeding hook run with `--debug`
+    Expect: both echo the already-escaped, already-bounded tails to stderr, and
+            a succeeding hook without `--debug` echoes nothing
+    Source: P02 A12 Axis C1; R7.1, R7.6
+    """
+    from conftest import run_cli
+
+    failing = repo_scenario("plain@main")
+    _commit_setup_hook(
+        failing,
+        "#!/bin/sh\nprintf 'step one done\\n'\nprintf 'boom\\n' >&2\nexit 17\n",
+    )
+    failed = run_cli(["fork", "failed"], _agent_env(failing), failing.parent_path)
+    assert failed.returncode == 0, failed.stderr.decode()
+    assert b"setup hook stdout: step one done\\n" in failed.stderr
+    assert b"setup hook stderr: boom\\n" in failed.stderr
+
+    debugged_world = repo_scenario("plain@main")
+    _commit_setup_hook(debugged_world, "#!/bin/sh\nprintf 'installed\\n'\n")
+    debugged = run_cli(
+        # `--debug` is a top-level flag, so it precedes the subcommand.
+        ["--debug", "fork", "debugged"],
+        _agent_env(debugged_world),
+        debugged_world.parent_path,
+    )
+    assert debugged.returncode == 0, debugged.stderr.decode()
+    assert b"setup hook stdout: installed\\n" in debugged.stderr
+    assert b"setup hook" not in debugged.stdout
+
+    quiet_world = repo_scenario("plain@main")
+    _commit_setup_hook(quiet_world, "#!/bin/sh\nprintf 'installed\\n'\n")
+    quiet = run_cli(["fork", "quiet"], _agent_env(quiet_world), quiet_world.parent_path)
+    assert quiet.returncode == 0
+    assert b"setup hook: ok in " in quiet.stderr
+    assert b"setup hook stdout:" not in quiet.stderr
+
+
+@pytest.mark.requires_process_group_signals
+@pytest.mark.matrix("T-OUT-27")
+def test_human_output_echoes_the_hook_tails_on_timeout(repo_scenario):
+    """T-OUT-27 — the timeout branch of the same Axis C1 echo.
+
+    Given:  a hook that prints, then blocks past a one-second timeout
+    Expect: the timeout line and the bounded tail of what it printed first,
+            both on stderr, with the fork still succeeding
+    Source: P02 A12 Axis C1; R7.1, R7.6
+    """
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    _commit_setup_hook(world, "#!/bin/sh\nprintf 'started\\n'\nsleep 30\n")
+    timed = run_cli(
+        ["fork", "slow", "--setup-hook-timeout", "1"],
+        _agent_env(world),
+        world.parent_path,
+    )
+    assert timed.returncode == 0, timed.stderr.decode()
+    assert b"setup hook: timed out after 1s" in timed.stderr
+    assert b"setup hook stdout: started\\n" in timed.stderr
+
+
 @pytest.mark.matrix("T-OUT-25")
 def test_interrupt_error_codes_join_the_stable_catalog(repo_scenario):
     """T-OUT-25 — the two interrupt codes are published, not ad hoc.

@@ -660,6 +660,20 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         ),
         env=environment,
     )
+    hook = result.setup_hook
+    if output_kind != "json" and hook.status == "ran":
+        # Axis C1: human mode always gets the one-line status through
+        # `announce`, and the bounded tails as well when the hook failed, timed
+        # out, or `--debug` asked for diagnostics. The tails arrive already
+        # escaped and already bounded by `include.py`; re-cutting or re-escaping
+        # them here would either lose content or double-escape it.
+        if hook.timed_out or hook.exit_code != 0 or args.debug:
+            for stream, tail in (
+                ("stdout", hook.stdout_tail),
+                ("stderr", hook.stderr_tail),
+            ):
+                if tail:
+                    print(f"setup hook {stream}: {tail}", file=sys.stderr)
     notices = list(result.notices)
     if config.copy:
         notices.extend(copy_to_clipboard(result.launch.command))
