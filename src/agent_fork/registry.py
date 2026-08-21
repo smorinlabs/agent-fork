@@ -43,6 +43,11 @@ def _decode(path: Path) -> list[RegistryEntry]:
         return []
     try:
         document = json.loads(path.read_text())
+        if not isinstance(document, dict):
+            # `[]`, `"text"`, and `null` are valid JSON; without this they
+            # reach `.get` and raise AttributeError, escaping the
+            # "invalid agent-fork registry" contract this function promises.
+            raise ValueError("registry document must be an object")
         if document.get("version") not in SUPPORTED_REGISTRY_VERSIONS:
             raise ValueError("unsupported registry version")
         return [RegistryEntry(**item) for item in document["forks"]]

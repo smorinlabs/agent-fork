@@ -756,11 +756,20 @@ def cleanup(
         # that the pair is live would then confirm against the newcomer and
         # destroy its work.
         anchor = plan.anchor
-        if inspect_repository(anchor, env=env).common_dir != plan.git_root:
+        try:
+            anchor_common_dir = inspect_repository(anchor, env=env).common_dir
+            observed = live_worktree_pairs(anchor, env=env)
+        except Exception as error:
+            # The anchor can stop being a repository while consent is pending.
+            # That is the same fact the checks below establish — the plan no
+            # longer describes reality — so it reads as the same refusal
+            # rather than as a probe failure the user has to interpret.
+            raise stale from error
+        if anchor_common_dir != plan.git_root:
             raise stale
         if not _owns(plan.entry, plan.git_root):
             raise stale
-        if match_live(plan.entry, live_worktree_pairs(anchor, env=env)) is None:
+        if match_live(plan.entry, observed) is None:
             raise stale
         destroy()
         remove_locked(token, env=env)

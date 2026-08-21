@@ -404,7 +404,7 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-12 | temporary file is removed when serialization fails mid-write | baseline | U | live | REQ-41 |
 | T-REG-13 | `fsync=False` still writes the document and still applies owner-only mode — the disposable-cache path | baseline | U | live | REQ-41 |
 | T-REG-14 | same fork name created in two repositories under one registry → both records survive; neither clobbers the other | baseline | F | live | REQ-41 (A3); A3 repro 1 |
-| T-REG-15 | `cleanup <name>` from a repository that has no such fork → `cleanup_registry_stale`, the other repository's worktree is never named, registry unchanged | baseline | F | live | REQ-31 (A3); A3 repro 2 |
+| T-REG-15 | `cleanup <name>` from a repository that has no such fork → `cleanup_registry_stale`, the other repository's worktree is never targeted or deleted and no removal plan names it, registry unchanged | baseline | F | live | REQ-31 (A3); A3 repro 2 |
 | T-REG-16 | auto-named forks in two repositories on the same branch and day derive one name → both records survive | baseline | F | live | REQ-41 (A3); A3 repro 3 |
 | T-REG-17 | after an auto-name collision, `cleanup` plans against the invoking repository's own worktree, never the other's | baseline | F | live | REQ-31 (A3); A3 repro 4 |
 | T-REG-18 | staleness — worktree removed by hand → `cleanup` refuses with `cleanup_registry_stale` and keeps the record, instead of failing on a raw Git error against the missing path | baseline | F | live | REQ-31 (A3); overlaps A7 |

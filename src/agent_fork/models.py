@@ -111,12 +111,14 @@ class RegistryEntry:
     def token(self) -> tuple[object, ...]:
         """Identity for compare-and-swap removal.
 
-        Built from persisted fields only, never from `repository`. That field
-        is derived rather than intrinsic, so keeping it out means a record
-        stays recognisable to a caller holding a token even if the field's
-        meaning or population changes. `agent` is carried as-is rather than
-        coerced to a string, so a recorded absence stays distinct from an
-        empty name.
+        Every persisted field, `repository` included. An earlier revision
+        excluded it as "derived", which was true only while a backfill could
+        rewrite it mid-operation; with backfill gone it is written once and
+        never changes, so excluding it would let a record whose identity
+        changed during consent still satisfy the swap.
+
+        `agent` is carried as-is rather than coerced to a string, so a
+        recorded absence stays distinct from an empty name.
         """
         return (
             self.name,
@@ -125,4 +127,5 @@ class RegistryEntry:
             self.agent,
             self.created_at,
             self.mode,
+            self.repository,
         )

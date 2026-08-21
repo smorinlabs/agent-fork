@@ -557,7 +557,7 @@ ordinary since it keys on a repository's basename alone.
 
 The forks themselves are unaffected. To finish an older fork:
 
-```
+```bash
 agent-fork prune                                  # clears the unusable records
 agent-fork cleanup /path/to/the/worktree --force  # removes the fork itself
 ```
