@@ -5,7 +5,7 @@ from __future__ import annotations
 import shlex
 import subprocess
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,7 +18,14 @@ from agent_fork.agents import (
 )
 from agent_fork.content import capture_state, collect_inventory
 from agent_fork.git import run_git
-from agent_fork.include import copy_worktree_includes, run_setup_hook
+from agent_fork.include import (
+    DEFAULT_SETUP_HOOK_POLICY,
+    DEFAULT_SETUP_HOOK_TIMEOUT,
+    SetupHookPolicy,
+    SetupHookResult,
+    copy_worktree_includes,
+    run_setup_hook,
+)
 from agent_fork.lineage import LineageClaim, add_lineage
 from agent_fork.materialize import materialize
 from agent_fork.models import RegistryEntry
@@ -49,6 +56,9 @@ class ForkRequest:
     git_version_output: str | None = None
     child_session_id: str | None = None
     codex_session_name_resolution: bool = True
+    setup_hook_policy: str = DEFAULT_SETUP_HOOK_POLICY
+    setup_hook_timeout: int = DEFAULT_SETUP_HOOK_TIMEOUT
+    progress: Callable[[str], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +68,7 @@ class ForkResult:
     notices: tuple[str, ...]
     verification: bool
     included: tuple[str, ...]
+    setup_hook: SetupHookResult
     agent: AgentContext | None = None
     parent_session_name: str | None = None
 
@@ -134,7 +145,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         request.parent, request.branch, request.destination, env=env
     )
 
-    def finish() -> tuple[tuple[str, ...], tuple[str, ...]]:
+    def finish() -> tuple[tuple[str, ...], SetupHookResult]:
         materialized = materialize(
             request.parent,
             creation.path,
@@ -155,8 +166,18 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             )
         included = copy_worktree_includes(request.parent, creation.path, env=env)
         notices.extend(included.notices)
-        hook_notices = run_setup_hook(request.parent, creation.path, env=env)
-        notices.extend(hook_notices)
+        setup_hook = run_setup_hook(
+            request.parent,
+            creation.path,
+            anchor=creation.anchor,
+            policy=SetupHookPolicy(
+                mode=request.setup_hook_policy,
+                timeout_seconds=request.setup_hook_timeout,
+            ),
+            env=env,
+            progress=request.progress,
+        )
+        notices.extend(setup_hook.notices)
         add_entry(
             RegistryEntry.create(
                 name=request.name,
@@ -187,15 +208,16 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             except Exception:
                 remove_entry(request.name, env=env)
                 raise
-        return included.copied, hook_notices
+        return included.copied, setup_hook
 
-    included, _ = run_with_rollback(creation, finish, env=env)
+    included, setup_hook = run_with_rollback(creation, finish, env=env)
     return ForkResult(
         creation,
         launch,
         tuple(notices),
         request.verify,
         included,
+        setup_hook,
         resolved_agent,
         agent_check.parent_session_name if agent_check is not None else None,
     )

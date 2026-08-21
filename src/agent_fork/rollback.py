@@ -28,8 +28,14 @@ def run_with_rollback(creation, operation, *, env=None):
 
     def interrupt(signum, _frame):
         from agent_fork.git import terminate_active_git
+        from agent_fork.include import terminate_active_setup_hook
 
         terminate_active_git()
+        # The setup hook is the second owned process group. Reaping it here,
+        # before rollback removes the worktree, is what stops its descendants
+        # from being reparented to PID 1 and left writing into a deleted
+        # directory (A12 Gate-1 fact 6).
+        terminate_active_setup_hook()
         raise OperationInterrupted(signum)
 
     for signum in (signal.SIGINT, signal.SIGTERM):
