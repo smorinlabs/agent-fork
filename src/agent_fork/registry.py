@@ -205,7 +205,7 @@ def remove_entry(
 
 
 def undo_add(
-    token: tuple[object, ...],
+    inserted: RegistryEntry,
     displaced: list[RegistryEntry],
     *,
     env: Mapping[str, str] | None = None,
@@ -219,17 +219,32 @@ def undo_add(
     delete a record another process registered in the meantime. Records added
     concurrently under other names are preserved untouched.
 
-    Conditional on the inserted record still being present. If another writer
-    superseded it while this fork was failing, that writer's record is now the
-    live one, and restoring the record *this* call displaced would leave two
-    records for one name — making the later cleanup ambiguous instead of
-    repairing anything. In that case there is nothing to undo, so nothing is.
+    Absence of the inserted record has two very different causes, and they are
+    distinguished by whether a *successor* exists — another record with the
+    same repository and name:
+
+    - **Superseded.** Another fork took the name while this one was failing.
+      That record is the live one now, and putting back what this call
+      displaced would leave two records under one name, making a later cleanup
+      ambiguous rather than repairing anything. Do nothing.
+    - **Cleaned up.** Someone removed the fork this call inserted. No
+      successor holds the name, so the record this call displaced is still the
+      right one to restore, and skipping it would silently unregister a
+      worktree that still exists.
     """
     path = registry_path(env)
+    token = inserted.token()
     with registry_lock(path, timeout=timeout):
         entries = _decode(path)
         if not any(item.token() == token for item in entries):
-            return
+            superseded = any(
+                item.name == inserted.name
+                and item.repository is not None
+                and item.repository == inserted.repository
+                for item in entries
+            )
+            if superseded:
+                return
         remaining = [item for item in entries if item.token() != token]
         present = {item.token() for item in remaining}
         remaining.extend(item for item in displaced if item.token() not in present)

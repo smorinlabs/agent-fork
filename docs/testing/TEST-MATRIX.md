@@ -388,6 +388,8 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-29 | a record naming another repository cannot authorize deletion even when invoked from the repository that now holds its path and branch — the stored repository vetoes, though it never authorizes | baseline | F | live | REQ-31 (A3); gate-6 r2 P0 |
 | T-REG-30 | `--force` extends targeting without skipping confirmation — a listed path whose directory another repository now occupies is refused, not deleted | baseline | F | live | REQ-31 (A3); gate-6 r3 |
 | T-REG-31 | a failed fork's compensation does not resurrect the record it displaced once another writer has superseded it | baseline | F | live | REQ-41 (A3); gate-6 r3 |
+| T-REG-32 | `prune` clears a v1 record without touching its worktree, after which the now-unregistered fork is removable by explicit path with `--force` | baseline | F | live | REQ-31a (A3); gate-6 r4 |
+| T-REG-33 | absence is not supersession — when no successor holds the name, compensation restores the record the failed fork displaced | baseline | F | live | REQ-41 (A3); gate-6 r4 |
 
 ---
 

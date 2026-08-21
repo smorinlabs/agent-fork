@@ -156,9 +156,17 @@ def test_force_targeting_confirms_the_path_before_deleting_it(repo_scenario):
     second = repo_scenario()
     shared = {**second.env, "XDG_STATE_HOME": first.env["XDG_STATE_HOME"]}
 
-    created = _fork(first.env, first.parent_path, "handover")
-    assert created.returncode == 0
-    worktree = _worktree_of(created.stdout)
+    # The worktree must be UNREGISTERED, or cleanup refuses on the record
+    # before the force fallback is ever reached and the test proves nothing.
+    worktree = str(first.parent_path.parent / "handover")
+    subprocess.run(
+        ["git", "worktree", "add", worktree, "-b", "handover"],
+        cwd=first.parent_path,
+        env=first.env,
+        check=True,
+        capture_output=True,
+    )
+    assert not _rows(first.env), "the target must not be in the registry"
     shutil.rmtree(worktree)
     subprocess.run(
         ["git", "worktree", "add", worktree, "-b", "newcomer"],
@@ -215,11 +223,50 @@ def test_undo_add_does_not_resurrect_after_another_writer_supersedes(repo_scenar
     add_entry(winner, env=world.env)
 
     # Only now does the first fork fail and try to undo itself.
-    undo_add(failing.token(), displaced, env=world.env)
+    undo_add(failing, displaced, env=world.env)
 
     names = [(item.name, item.branch) for item in read_registry(env=world.env)]
     assert names == [("shared", "fork/winner")], (
         f"compensation resurrected a superseded record: {names}"
+    )
+
+
+@pytest.mark.matrix("T-REG-33")
+def test_undo_add_restores_when_cleanup_removed_the_record(repo_scenario):
+    """Absence is not supersession: with no successor, the original returns.
+
+    A concurrent cleanup can remove the record a failing fork inserted. No
+    other record then holds the name, so what that fork displaced is still the
+    right record — dropping it would silently unregister a live worktree.
+    """
+    from agent_fork.models import RegistryEntry
+    from agent_fork.registry import add_entry, read_registry, remove_entry, undo_add
+
+    world = repo_scenario()
+    repository = str(world.parent_path / ".git")
+
+    def record(name, suffix):
+        return RegistryEntry.create(
+            name=name,
+            branch=f"fork/{suffix}",
+            worktree=world.parent_path.parent / f"wt-{suffix}",
+            agent=None,
+            repository=repository,
+        )
+
+    original = record("shared", "original")
+    add_entry(original, env=world.env)
+    failing = record("shared", "failing")
+    displaced = add_entry(failing, env=world.env)
+
+    # Someone cleans up the fork that is about to fail. No successor exists.
+    remove_entry(failing.token(), env=world.env)
+
+    undo_add(failing, displaced, env=world.env)
+
+    names = [(item.name, item.branch) for item in read_registry(env=world.env)]
+    assert names == [("shared", "fork/original")], (
+        f"the displaced record was not restored: {names}"
     )
 
 

@@ -245,7 +245,7 @@ than starting a new one.
 | `agent-fork session [validate]` | Inspect session evidence, construct its native fork and resume commands, or assert expected identity and lineage |
 | `agent-fork list` | List forks created by `agent-fork` |
 | `agent-fork cleanup <name\|branch\|worktree> --yes` | Remove a registered fork |
-| `agent-fork prune [--dry-run] --yes` | Remove registry records whose worktree no longer exists |
+| `agent-fork prune [--dry-run] --yes` | Remove registry records that are gone or unusable; never touches a worktree |
 | `agent-fork doctor` | Diagnose Git, agent, config, and XDG readiness |
 | `agent-fork config view\|get\|set\|validate` | Inspect or update configuration |
 | `agent-fork completion bash\|zsh\|fish` | Generate a shell completion script |

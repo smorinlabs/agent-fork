@@ -193,15 +193,52 @@ def test_v1_record_authorizes_nothing_and_prune_clears_it(repo_scenario):
     assert refused.returncode == 5, refused.stdout
     assert b"cleanup_registry_stale" in refused.stderr
 
-    # The fork itself is untouched, and remains removable by explicit path.
     from pathlib import Path
 
     assert Path(worktree).exists()
 
+    # The documented recovery, in the documented order and exactly as the
+    # README prints it. A null record vetoes nothing, so the explicit path
+    # reaches confirmed discovery without needing --force.
+    removed = run_cli(
+        ["cleanup", worktree, "--yes", "--allow-unpushed"],
+        world.env,
+        world.parent_path,
+    )
+    assert removed.returncode == 0, removed.stderr
+    assert not Path(worktree).exists()
+
     pruned = run_cli(["prune", "--yes"], world.env, world.parent_path)
     assert pruned.returncode == 0, pruned.stderr
     assert _rows(world.env) == [], "an unresolvable record must be clearable"
+
+
+@pytest.mark.matrix("T-REG-32")
+def test_prune_clears_a_v1_record_without_touching_its_worktree(repo_scenario):
+    """Pruning first is also valid: it is bookkeeping, never disk state."""
+    from pathlib import Path
+
+    from conftest import run_cli
+
+    world = repo_scenario()
+    created = _fork(world.env, world.parent_path, "legacy")
+    assert created.returncode == 0
+    worktree = _worktree_of(created.stdout)
+    _downgrade_to_v1(world.env)
+
+    pruned = run_cli(["prune", "--yes"], world.env, world.parent_path)
+    assert pruned.returncode == 0, pruned.stderr
+    assert _rows(world.env) == []
     assert Path(worktree).exists(), "prune must not touch the worktree"
+
+    # Now genuinely unregistered, so the force route applies as documented.
+    removed = run_cli(
+        ["cleanup", worktree, "--force", "--yes", "--allow-unpushed"],
+        world.env,
+        world.parent_path,
+    )
+    assert removed.returncode == 0, removed.stderr
+    assert not Path(worktree).exists()
 
 
 @pytest.mark.matrix("T-REG-24")

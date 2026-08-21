@@ -18,15 +18,21 @@ not, both recorded here rather than left in commit messages:
 - **`git worktree list` reports a hand-deleted worktree as `prunable`.** The
   predicate initially accepted such a record, and cleanup then died on a raw
   git error against the missing path — which is A7's registered symptom,
-  reproduced from inside A3's own fix. `live_worktree_pairs` now excludes
-  `prunable` and detached records, so "freshly observed" means present, not
-  merely listed. This turns A7's dead-end into a typed refusal as a side
-  effect.
-- **Migration costs less than the design assumed.** Because the predicate
-  consults live state and never the stored identity, a v1 record with no
-  repository is still cleanable from its own repository. The design expected
-  such records to be unusable until backfilled; they are not. T-REG-18 and
-  T-REG-19 prove both halves rather than asserting them.
+  reproduced from inside A3's own fix. `live_worktree_pairs` excludes it, so
+  "freshly observed" means present, not merely listed. This turns A7's
+  dead-end into a typed refusal as a side effect. *(Amended 2026-08-20: the
+  exclusion is no longer done by reading the `prunable` field. Enumeration now
+  goes through main's `list_worktrees`, and each listed path is probed for the
+  repository and branch it currently has, which excludes a gone or replaced
+  directory without parsing that field at all.)*
+- **~~Migration costs less than the design assumed.~~** *(Retracted
+  2026-08-20, gate 6 round 3.)* This said a v1 record with no repository was
+  still cleanable from its own repository, because the predicate consults live
+  state rather than stored identity. That was wrong: matching a live worktree
+  shows the fork exists, not that it belongs here, and two repositories can
+  hold one path on one branch name. Such a record now authorizes nothing. See
+  the null-identity section under Design; `T-REG-23` and `T-REG-24` assert the
+  corrected behaviour.
 
 **One user-visible behavior change**, surfaced by an existing test that had
 relied on the old global lookup: `cleanup <name>` now requires the invoking
@@ -306,28 +312,31 @@ A v1 row becomes a v2 row with `repository: null`, meaning *unknown*. Decoding
 is purely structural: `_decode` accepts versions 1 and 2, rejects unknown
 ones, and runs no subprocess. Read paths never write.
 
-**A null identity does not make a row inert.** This is the substantive change
-from earlier revisions. Because the predicate governs actionability and does
-not consult the stored identity, a pre-upgrade fork whose worktree still
-exists is cleaned up normally — by name, with the dirty and unpushed guards
-intact, no `--force` required. Two earlier revisions made null rows
-unreachable and then went looking for an escape hatch; the escape hatch is
-unnecessary once the predicate, not the field, is what authorizes.
+**A null identity authorizes nothing** (owner decision 2026-08-20, gate 6
+round 3). An earlier revision of this section said the opposite: that the
+predicate governs actionability without consulting the stored identity, so a
+pre-upgrade fork could be cleaned up by name. That was wrong, and the reason
+matters. Matching a live worktree does not establish *ownership*, because two
+repositories can hold one path on one branch name — ordinary rather than
+exotic under the `central` worktree layout, which keys on a repository's
+basename alone, so two checkouts named alike collide by configuration.
 
-**Safe backfill.** When a fork is created in repository `R`, any row whose
-`(worktree, branch)` pair is live in `R` and whose identity is null has `R`
-written into it, under the same lock as the fork's own row.
+**No backfill, for the same reason.** An earlier revision wrote the current
+repository onto any null row whose pair was live here, and argued this was
+"the probe done correctly" because the enumeration started from the user's
+working directory rather than from the row's stored path. The direction was
+indeed better; the conclusion still did not follow. A live pair is consistent
+with the row belonging here, and consistent with it belonging to a repository
+that used the path first. Writing an identity on that evidence manufactures
+the ownership it cannot prove.
 
-This is the round-3 probe done correctly, and the contrast is the whole point.
-The rejected probe took a path *from a row* and asked which repository was
-there — memory supplying the input. The backfill enumerates what is live in
-the repository the user is standing in and asks which rows correspond to it —
-the user's working directory supplying the input. Same field populated;
-opposite direction; only one of them is evidence.
-
-Without backfill, re-forking a name in a repository whose row predates the
-upgrade would leave two rows for one worktree, which the predicate then
-reports as ambiguous. With it, identities repair themselves as the user works.
+**What a user with pre-upgrade records does.** By name, cleanup refuses and
+names `prune`. By explicit path it works — a path the user typed is fresh
+input, and a null row vetoes nothing, so the target reaches confirmed
+discovery with the dirty and unpushed guards intact and no `--force` needed.
+`prune` then clears the records; it never touches a worktree, so either order
+is safe. Removing backfill also removed `add_entry`'s `live` parameter: with
+no backfill, its replacement rule is purely `(repository, name)`.
 
 Two consequences are documented rather than engineered around: rows already
 clobbered under v1 are unrecoverable, and once a v2 write lands, older
@@ -367,9 +376,15 @@ unactionable. Without a way to remove such a row, A3 would leave every user a
 growing set of entries that cannot be used and cannot be cleared — the
 dead-end recorded as fault A7. The owner directed that A3 ship the exit.
 
-`agent-fork prune` removes registry rows whose recorded worktree path **does
-not exist on disk**. It never runs a destructive git command and never touches
-a worktree; it only deletes bookkeeping rows.
+`agent-fork prune` removes two kinds of row, and never runs a destructive git
+command or touches a worktree — it only deletes bookkeeping:
+
+- rows whose recorded worktree path **does not exist on disk**;
+- rows carrying **no repository** (added 2026-08-20 with the null-identity
+  decision). Such a row can never authorize anything and can never gain an
+  identity, so it is inert by construction. Clearing it destroys no work: a
+  worktree still at that path stays on disk and remains removable by explicit
+  path.
 
 - **Its predicate is deliberately different from the actionability
   predicate.** Actionability is repository-scoped: a row belonging to another
@@ -483,7 +498,8 @@ Call sites that must change together:
 - `add_entry` replacement identity is `(repository, name)`, with a non-null
   guard on both sides so two null rows never compare equal, and it replaces a
   row only when the predicate confirms that row belongs to this repository.
-- Safe backfill of null identities from live enumeration, under the same lock.
+- No backfill of null identities: a live pair is consistent with the record
+  belonging elsewhere, so it cannot establish ownership.
 - Removal is compare-and-swap on the row token.
 - `pipeline.py` builds one named entry from `creation.common_dir`
   (`repository.py:336-343`) and hands that same object to the lineage-failure

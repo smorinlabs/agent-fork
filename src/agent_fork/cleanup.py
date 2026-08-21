@@ -272,18 +272,34 @@ def resolve_cleanup_target(
             ),
             True,
         )
-    if candidates:
-        # Not overridable by --force: this is the only evidence that the
-        # worktree still belongs to the repository its record names, and
-        # --force is routinely passed for the unrelated dirty/unpushed guards.
-        stale = candidates[0]
+    # An explicit existing path is fresh input from the user, so a record that
+    # authorizes nothing need not stand in its way. A bare name or branch has
+    # only the record behind it, so it still refuses — with the hint that says
+    # how to clear the record.
+    target_is_path = Path(target).expanduser().exists()
+    identified = [
+        entry
+        for entry in candidates
+        if entry.repository is not None or not target_is_path
+    ]
+    if identified:
+        # Not overridable by --force: a record naming a repository is the only
+        # evidence that the worktree still belongs to it, and --force is
+        # routinely passed for the unrelated dirty and unpushed guards.
+        stale = identified[0]
         raise PreconditionError(
             "cleanup_registry_stale",
             f"registry records {_escape_terminal_text(stale.worktree)} on "
             f"{_escape_terminal_text(stale.branch)}, which is not a worktree of "
             f"this repository; run 'agent-fork prune' if the fork is gone",
         )
-    if not force:
+    # Every candidate names no repository. Such a record authorizes nothing,
+    # but it vetoes nothing either, so the target is effectively unregistered
+    # and falls through to confirmed discovery below. Deliberately without
+    # demanding --force: that flag also waives the dirty and unpushed guards,
+    # and a user finishing a fork left over from an older release should not
+    # have to waive them to do it.
+    if not candidates and not force:
         raise CleanupTargetError(
             f"cleanup target {target!r} was not created by agent-fork; "
             "use --force to extend targeting"

@@ -186,7 +186,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                 # whatever goes wrong here, the failure that triggered it is
                 # the one worth reporting, so nothing is allowed to mask it.
                 with suppress(Exception):
-                    undo_add(entry.token(), displaced, env=env)
+                    undo_add(entry, displaced, env=env)
                 raise
         return included.copied, hook_notices
 
