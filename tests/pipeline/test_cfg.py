@@ -86,3 +86,68 @@ def test_explicit_config_flag_replaces_discovery_entirely(repo_scenario):
         resolve_discovered_config(world.parent_path, world.env, explicit_path=invalid)
     assert "unknown key fork.unknown" in str(caught.value)
     assert "do-not-echo-this-secret" not in str(caught.value)
+
+
+@pytest.mark.matrix("T-CFG-29")
+def test_branch_prefix_predicate_parity_with_real_git(repo_scenario):
+    """T-CFG-29 — the pure `branch_prefix_reason()` predicate agrees with
+    real `git check-ref-format --branch` on a composed-sample corpus.
+
+    A11 Gate-4 finding F7: the oracle is `--branch` mode (matching the
+    existing `cli.py` guard and `git worktree add -b`'s actual validation
+    surface), not the fully-qualified `refs/heads/<name>` form — bare
+    `check-ref-format` was empirically found *not* to enforce the
+    leading-`-` rule that `--branch` mode does (`refs/heads/-bad/ok` is
+    accepted; `--branch '-bad/ok'` is refused), so switching oracles would
+    have silently dropped that rule's own verification. Entries containing
+    `@{` are excluded from the git comparison — `--branch` mode resolves
+    that sequence as reflog shorthand (non-deterministic across repo state),
+    but such entries are already, and independently, rejected by this
+    predicate's static `@{` rule, so no case needs the oracle to confirm it.
+    """
+    import subprocess
+
+    from agent_fork.config import branch_prefix_reason
+
+    world = repo_scenario("plain@main")
+    corpus = (
+        "fork/",
+        "wt/",
+        "user/name-",
+        "topic.",
+        "foolock",
+        "",
+        "-bad/",
+        "a..b/",
+        "a~b/",
+        "a^b/",
+        "a:b/",
+        "a?b/",
+        "a*b/",
+        "a[b/",
+        "a\\b/",
+        "/abs/",
+        "a//b/",
+        ".hidden/",
+        "a.lock/",
+        "trailing.",
+        "a b/",
+    )
+    for prefix in corpus:
+        composed = f"{prefix}x"
+        if "@{" in composed:
+            continue
+        predicate_reason = branch_prefix_reason(prefix)
+        real = subprocess.run(
+            ["git", "check-ref-format", "--branch", composed],
+            cwd=world.parent_path,
+            env=world.env,
+            capture_output=True,
+            text=True,
+        )
+        assert (predicate_reason is None) == (real.returncode == 0), (
+            prefix,
+            predicate_reason,
+            real.returncode,
+            real.stderr,
+        )
