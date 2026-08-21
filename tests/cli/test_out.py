@@ -665,6 +665,34 @@ def test_setup_hook_is_structured_on_stdout_and_narrated_only_on_stderr(repo_sce
     assert absent.returncode == 0
     assert json.loads(absent.stdout)["setup_hook"]["status"] == "absent"
 
+    # A skipped hook under `--json`: stdout stays one parseable line carrying
+    # the reason, and the skip *notice* still reaches stderr as plain text.
+    # That plain text is the pre-existing duplicate-notice defect A13(a),
+    # tracked as P02-T13ABF and explicitly out of A12's scope — the design keeps
+    # notices flowing for backward compatibility. Asserted here so the exception
+    # to "machine-mode stderr is exactly one JSON error object" is a pinned,
+    # named behavior rather than an unnoticed leak.
+    skipped_world = repo_scenario("plain@main")
+    hook = skipped_world.parent_path / ".agent-fork/worktree-setup.sh"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/bin/sh\nprintf 'never\\n'\n")
+    hook.chmod(0o755)
+    skipped = run_cli(
+        ["fork", "skipped", "--json"],
+        _agent_env(skipped_world),
+        skipped_world.parent_path,
+    )
+    assert skipped.returncode == 0, skipped.stderr.decode()
+    assert skipped.stdout.count(b"\n") == 1
+    document = json.loads(skipped.stdout)
+    assert document["setup_hook"]["status"] == "skipped"
+    assert document["setup_hook"]["eligibility"] == "untracked"
+    assert document["setup_hook"]["reason"] == (
+        "present but not committed at the fork anchor"
+    )
+    assert b"setup hook: " not in skipped.stderr  # progress stays suppressed
+    assert b"setup hook skipped: " in skipped.stderr  # the P02-T13ABF notice
+
     hooked_world = repo_scenario("plain@main")
     hooked_env = _agent_env(hooked_world)
     _commit_setup_hook(hooked_world, "#!/bin/sh\nexit 0\n")
