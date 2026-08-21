@@ -340,10 +340,12 @@ def set_user_value(path: Path, key: str, value: str) -> None:
         allowed = _ENUM_KEYS[key]
         raise ConfigError(f"{key} expects {', '.join(allowed[:-1])}, or {allowed[-1]}")
     if key in _INT_KEYS:
-        try:
-            number = int(value)
-        except ValueError:
-            raise ConfigError(f"{key} expects a whole number of seconds") from None
+        # Digits only, before `int()` sees it: `int("1_000")` is 1000, so
+        # `config set setup_hook_timeout 1_000` used to write a value the user
+        # never typed.
+        if not (value.isascii() and value.isdigit()):
+            raise ConfigError(f"{key} expects a whole number of seconds")
+        number = int(value)
         if number <= 0:
             raise ConfigError(f"{key} expects a value greater than zero seconds")
     existing = load_config(path) if path.exists() else ConfigValues()

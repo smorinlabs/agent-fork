@@ -109,7 +109,9 @@ def setup_hook_plan_line(hook: dict[str, object] | None) -> str | None:
     state = (
         "eligible at the fork anchor"
         if hook["eligibility"] == "eligible"
-        else hook["reason"]
+        # Every reason-less eligibility is handled above today; the fallback
+        # keeps a future one from rendering the literal string "None" at a user.
+        else hook["reason"] or f"eligibility {hook['eligibility']}"
     )
     if hook["would_run"]:
         return (

@@ -144,6 +144,9 @@ def test_invalid_setup_hook_values_are_rejected_at_validate_time(repo_scenario):
     for key, value in (
         ("setup_hook_timeout", "0"),
         ("setup_hook_timeout", "never"),
+        # Python's `int()` accepts digit-group underscores, so `1_000` used to
+        # be written to the file as 1000 — a value the user never typed.
+        ("setup_hook_timeout", "1_000"),
         ("setup_hook_policy", "nonsense"),
     ):
         refused = run_cli(["config", "set", key, value], world.env, world.parent_path)

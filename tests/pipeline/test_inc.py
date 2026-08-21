@@ -382,6 +382,21 @@ def test_successful_hook_output_is_retained_and_bounded(repo_scenario):
     assert len(loud.setup_hook.stdout_tail) == OUTPUT_TAIL_BYTES
     assert loud.setup_hook.truncated is True
 
+    # The bound itself: exactly OUTPUT_TAIL_BYTES is kept whole and is not
+    # reported as truncated, since `truncated` means bytes were dropped.
+    exact = repo_scenario()
+    _commit_support(
+        exact,
+        hook=(
+            "#!/bin/sh\n"
+            f"awk 'BEGIN {{ while (i++ < {OUTPUT_TAIL_BYTES}) printf \"c\" }}'\n"
+        ),
+    )
+    bounded = fork(_request(exact, name="hook-exact"), env=exact.env)
+    assert bounded.setup_hook.stdout_bytes == OUTPUT_TAIL_BYTES
+    assert len(bounded.setup_hook.stdout_tail) == OUTPUT_TAIL_BYTES
+    assert bounded.setup_hook.truncated is False
+
 
 @pytest.mark.matrix("T-INC-15")
 def test_successful_hook_output_is_escaped(repo_scenario):
