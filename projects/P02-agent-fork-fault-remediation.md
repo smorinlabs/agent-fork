@@ -403,11 +403,18 @@ repository-controlled text raw).
   output; the full matrix lives in the
   [A5 design doc](../docs/superpowers/plans/2026-08-20-p02-a5-skip-and-race-policy.md).
   It confirmed the three verdicts above, and produced four findings beyond
-  them: N1 unreadable tracked files fail identically (absorbed here), N2 a
-  mode-000 directory makes the fork *silently* omit data while reporting
-  success (routed out), N3 `.worktreeinclude` has no readability guard
-  (absorbed here), N4 an unreadable directory makes `cleanup` fail and leaves
-  the worktree behind (routed out, noted against A7).
+  them: N1 unreadable tracked files fail identically (absorbed here, as a
+  typed error rather than a skip), N2 a mode-000 directory makes the fork
+  *silently* omit data while reporting success (filed as
+  [#59](https://github.com/smorinlabs/agent-fork/issues/59)), N3
+  `.worktreeinclude` has no readability guard (absorbed here), N4 an
+  unreadable directory makes `cleanup` fail and leaves the worktree behind
+  (filed as [#60](https://github.com/smorinlabs/agent-fork/issues/60),
+  cross-referenced to A7). A5 also absorbs one narrow slice of
+  [#28](https://github.com/smorinlabs/agent-fork/issues/28): `lstat` must
+  classify only `ENOENT` and `ENOTDIR` as absent, because a `PermissionError`
+  currently masquerades as a deletion and would be silently swallowed by this
+  item's rule that absence is always legitimate.
 
   **Unverified surface — the gate must probe before any fix.** macOS/APFS
   only, one Git version, `--no-agent` only. Untested: Linux and

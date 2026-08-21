@@ -106,6 +106,28 @@ This also removes work from the fix: no patch exclusion, no rename pairing,
 and the only records that can be filtered from `exact-copy-status` are
 expanded untracked entries.
 
+### Dependency on issue #28: absence must mean absence
+
+Discovered 2026-08-20 while filing #59. `_manifest_entry` catches **every**
+`OSError` from `lstat` and returns kind `absent`, so a `PermissionError` — the
+error raised when an ancestor directory lacks traversal permission — is
+recorded as a missing file rather than an unreadable one. Issue #28 documents
+this and recommends treating only `ENOENT` and `ENOTDIR` as absent.
+
+This is not cosmetic for A5. The design states that absence is always
+legitimate, because deletions and rename endpoints are legitimately absent. If
+an unreadable path can *masquerade* as absent, that rule silently swallows it:
+the path is treated as a deletion, the child never receives it, the parent
+after verification looks equally absent, and the fork succeeds while quietly
+incomplete. That is precisely the failure mode being routed out as #59,
+reintroduced through the back door.
+
+**A5 therefore absorbs the narrow part of #28 it depends on:** classify only
+`ENOENT` and `ENOTDIR` as absent, and route every other `OSError` from `lstat`
+into the skip path for untracked and ignored entries, or into the typed
+failure for tracked ones. The rest of #28 — root-confined traversal, no-follow
+descriptors, rollback recovery preservation — stays in #28.
+
 ### `.worktreeinclude`
 
 The same readability guard is added beside the file-type guard `include.py`
@@ -243,9 +265,9 @@ Recorded as gaps rather than passes, following the precedent A2 set for
 | ID | Finding | Routing |
 |---|---|---|
 | N1 | An unreadable **tracked** file kills the fork identically. Skip semantics for a tracked path: exclude it from the `diff-index` and `diff-files` patches with `:(exclude,literal)`, the pathspec pattern A13's T13E established, so the child keeps the last-committed content and the entry is reported as "modification not carried". Gate 4 must verify that Git can generate a repository-wide patch at all with an unreadable file present. A5's title, "One bad **untracked** filesystem entry", is too narrow: the defect is in `capture_state`, which digests every carried path regardless of tracking state. | **Absorbed into A5.** Same site, same fix. |
-| N2 | A mode-000 **directory** makes Git blind to its contents, so the fork reports success and the child silently lacks the data, with no notice. Parent `git status` is equally blind, so verification passes. | **Route to an issue.** Opposite failure mode — silent, not loud — and detecting it requires walking the tree independently of Git, which is a scope increase. |
+| N2 | A mode-000 **directory** makes Git blind to its contents, so the fork reports success and the child silently lacks the data, with no notice. Parent `git status` is equally blind, so verification passes. | **Filed as [#59](https://github.com/smorinlabs/agent-fork/issues/59)** on 2026-08-20. The owner's requirement is recorded there: walk the worktree independently of Git, carry what can be carried, warn by default and fail under `--strict`. |
 | N3 | An unreadable file matched by `.worktreeinclude` kills the fork *after* verification, then rolls back. `include.py` skips on unsupported **type** but has no guard for **readability**, so it is not the clean policy exemplar the register claimed. | **Absorbed into A5.** The shared copy primitive must handle both conditions. |
-| N4 | An unreadable directory inside a fork worktree makes `cleanup` fail with an untyped `runtime_error` carrying raw Git output, leaving the worktree and its registry entry behind. | **Route to an issue**, noted against A7, which covers uncleanable registry entries. |
+| N4 | An unreadable directory inside a fork worktree makes `cleanup` fail with an untyped `runtime_error` carrying raw Git output, leaving the worktree and its registry entry behind. | **Filed as [#60](https://github.com/smorinlabs/agent-fork/issues/60)** on 2026-08-20, cross-referenced to A7. |
 
 ## Verification of the implementation
 
