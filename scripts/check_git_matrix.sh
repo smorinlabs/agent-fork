@@ -45,9 +45,11 @@ flox activate -d "$flox_root" -- bash -c '
 # so the number gets measured and written down, not assumed.
 #
 # Measured 2026-08-20, this machine, system Git (Apple Git), a 50,002-object
-# submodule (50,000 tracked files, one commit): with-submodule fork = 9s,
-# without-submodule fork = 0s, delta = ~9s. Re-run this function and update
-# the comment if the recipe's cost profile changes materially.
+# submodule (50,000 tracked files, one commit, gc.auto disabled so the
+# object count stays representative rather than getting silently packed):
+# with-submodule fork = 40-43s, without-submodule fork = 1s, delta = ~40s.
+# Re-run this function and update the comment if the recipe's cost profile
+# changes materially.
 measure_clone_cost() {
   local tmp agent_fork_bin
   tmp=$(mktemp -d)
@@ -57,6 +59,14 @@ measure_clone_cost() {
   git init -q "$sub"
   git -C "$sub" config user.email bench@example.com
   git -C "$sub" config user.name bench
+  # 50k loose objects exceeds the default gc.auto threshold (~6700): the
+  # commit below spawns a background `git gc --auto`, which races the
+  # submodule-add clone immediately after it and intermittently fails with
+  # "failed to copy file ... No such file or directory" when gc prunes a
+  # loose object the clone is mid-copy on. Disable it in this throwaway
+  # fixture rather than fixing the race by ordering (found by running this
+  # script for real: 3/3 failures until this fix, 0/N after).
+  git -C "$sub" config gc.auto 0
   local i
   for i in $(seq 1 50000); do
     printf '%d' "$i" >"$sub/file-$i.txt"
@@ -102,6 +112,13 @@ measure_clone_cost() {
 
   printf 'clone-cost: with-submodule=%ss without-submodule=%ss delta=%ss\n' \
     "$with_elapsed" "$without_elapsed" "$((with_elapsed - without_elapsed))"
+
+  # Deregister before removing $tmp: agent-fork's own cleanup needs the
+  # worktree path to still exist, so this must run first or it leaves an
+  # orphaned registry entry with no path left to clean it up by (the
+  # cleanup command needs to cd into the target).
+  "$agent_fork_bin" cleanup bench-with --force --yes >/dev/null 2>&1 || true
+  "$agent_fork_bin" cleanup bench-without --force --yes >/dev/null 2>&1 || true
 
   rm -rf "$tmp"
 }
