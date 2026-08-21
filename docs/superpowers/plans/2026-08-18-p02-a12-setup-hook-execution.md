@@ -53,7 +53,10 @@ following.
    register entry names `--no-setup-hook` as an example spelling; the owner
    chose a single three-way policy flag instead — see the Contracts section.)
 4. **Bounded.** Execution has a timeout. The hook runs in its own process
-   group, so a timeout kills the hook *and its children*, not just the shell.
+   group, so a timeout kills the hook *and every child that stayed in that
+   group*, not just the shell. A child that calls `setsid()` leaves the group
+   and cannot be killed with it; waiting on it is bounded instead, and the
+   result says so (see "Execution and reaping").
 5. **Reaped on interruption.** `SIGINT`/`SIGTERM` to the CLI kills and reaps the
    whole hook process group before rollback removes the worktree.
 6. **Correct interrupt exit code.** After rollback the CLI exits `130`
@@ -391,6 +394,7 @@ class SetupHookResult:
     reason: str | None           # populated for "skipped" and "failed_to_start"
     exit_code: int | None        # None unless status == "ran"
     timed_out: bool
+    descendants_cleared: bool    # False when the hook outlived itself
     duration_seconds: float | None
     timeout_seconds: int
     stdout_tail: str             # escaped, bounded
@@ -449,30 +453,91 @@ that reads the inherited TTY would block or take a `SIGTTIN` rather than fail
 cleanly. `DEVNULL` gives it a defined EOF instead. This is recorded in
 "Known limits" as a compatibility note.
 
-Reap ladder, used identically on the timeout path and the signal path, matching
-`git.py:117-127`:
+**Amended 2026-08-20 (gate-6 review, both lenses).** The ladder and the timeout
+path below are the corrected versions. What the first implementation shipped —
+and what an earlier revision of this section specified — decided cleanup from
+*the leader's exit status*, and two independent reviews falsified that premise
+from opposite ends. The rule the corrected code follows is: **a process group
+can still hold live members after its leader is gone, so every decision is made
+about the group, never about the leader.**
 
-1. `signal_process_group(process, SIGTERM)`
-2. `process.wait(timeout=1)`
-3. on `TimeoutExpired`: `signal_process_group(process, SIGKILL)`
-4. `process.wait(timeout=1)`
-5. on a second `TimeoutExpired`: give up and append a notice naming the PID —
-   cleanup stays best-effort so the original interruption remains observable.
+Reap ladder, used identically on the timeout path and the signal path:
 
-Timeout path:
+1. `_signal_hook_group(process, SIGTERM)`
+2. probe the group for up to 1 s (`killpg(pgid, 0)` answering `ESRCH` means
+   empty)
+3. still populated: `_signal_hook_group(process, SIGKILL)`
+4. probe again for up to 1 s
+5. still populated: give up and append a notice naming the PID — cleanup stays
+   best-effort so the original interruption remains observable.
+
+Two deliberate divergences from `git.py:117-127`, both required:
+
+- **The escalation is gated on the group being empty, not on
+  `process.wait()`.** `wait()` returns the moment the hook's own shell exits,
+  which skipped the SIGKILL its surviving children still needed.
+- **`include` has its own `_signal_hook_group()` rather than reusing
+  `git.signal_process_group()`.** The Git helper returns *before* `killpg`
+  whenever `process.poll()` shows the leader exited. That gate is right for
+  Git, whose children do not outlive it, and wrong for a hook, where the
+  survivors are the entire point. Addressing the group by the leader's pid is
+  safe after the leader has been reaped: the kernel keeps that pid reserved as
+  the group id while any member remains, so it can never name an unrelated
+  process. `git.py` is unchanged, and `T-RBK-07` still pins its behavior.
+
+Execution path — two bounds, because a pipe outlives its writer's parent:
 
 ```python
-try:
-    stdout, stderr = process.communicate(timeout=policy.timeout_seconds)
-except subprocess.TimeoutExpired:
-    _reap(process)
-    stdout, stderr = process.communicate()   # drains the pipes; the group is dead
+stdout, stderr, outcome = _collect_output(
+    process,
+    leader_deadline=started + policy.timeout_seconds,
+    drain_seconds=SETUP_HOOK_DRAIN_SECONDS,   # 2.0
+)
+if outcome == "timed_out":
     timed_out = True
+    reap_notices = _reap(process)
+    stdout, stderr, outcome = _collect_output(   # bounded drain, never open-ended
+        process, leader_deadline=time.monotonic(), drain_seconds=SETUP_HOOK_DRAIN_SECONDS
+    )
+if outcome == "detached":
+    _abandon_pipes(process)
+descendants_cleared = outcome != "detached" and _group_is_empty(process)
 ```
 
-The second `communicate()` cannot hang: every process that could still hold the
-pipe write end was in the group and has been `SIGKILL`ed. The result is
-`status="ran"`, `timed_out=True`, and a non-fatal notice —
+`leader_deadline` bounds how long the hook's own process may run;
+`drain_seconds` separately bounds how long its pipes may stay open *after* that
+process exits. `_collect_output()` re-calls `communicate(timeout=...)` in short
+slices — the documented retry pattern, where the buffers accumulate across calls
+and `TimeoutExpired` carries what has been read so far — and reports one of
+three outcomes:
+
+| Outcome | Meaning | Result |
+|---|---|---|
+| `completed` | both pipes reached EOF | the hook's own exit code decides ok/failed |
+| `timed_out` | the hook itself was still running at `leader_deadline` | `timed_out=True`, group reaped, then a bounded drain |
+| `detached` | the hook exited but its output stayed open past `drain_seconds` | pipes released, `descendants_cleared=False` |
+
+Keeping the two bounds separate is what fixes two defects the single
+`communicate(timeout=...)` produced. A hook that backgrounds a daemon and exits
+in milliseconds was reported `timed_out: true` — measured at 121 s of wall clock
+for a hook whose shell exited immediately — because "the pipes are still open"
+was read as "the hook is still running". And the follow-up drain was
+unbounded on the false premise quoted above: *"the second `communicate()` cannot
+hang: every process that could still hold the pipe write end was in the group
+and has been `SIGKILL`ed."* A process that calls `setsid()` is no longer in the
+group, was never signalled, and holds the write end for as long as it likes, so
+that drain hung forever.
+
+**The honest limit, stated rather than papered over.** A descendant that leaves
+the process group cannot be killed with it — that is Unix, not a defect, and no
+amount of ladder fixes it. What A12 owes is a bound and a true report, so:
+agent-fork stops waiting, releases the pipes, reports the hook's own exit code,
+and sets `descendants_cleared=False` with a notice. It does **not** kill
+leftovers on the success path; a hook that deliberately starts a background
+process is a legitimate pattern, and the timeout is the only place this step is
+licensed to kill anything.
+
+A timeout yields `status="ran"`, `timed_out=True`, and a non-fatal notice —
 **the fork still succeeds**, because a timeout is a hook problem, not a
 worktree problem, and the settled constraints say the timeout cannot undo what
 the hook already did.
@@ -481,7 +546,21 @@ Signal path: `rollback.interrupt()` fires inside `communicate()`, calls both
 `terminate_active_git()` and `terminate_active_setup_hook()`, and raises
 `OperationInterrupted`. `run_setup_hook()` wraps `communicate()` in
 `except BaseException: _reap(process); raise` with a `finally` that clears the
-active slot — again the `run_git` shape. `run_with_rollback()` then rolls back
+active slot — again the `run_git` shape. `terminate_active_setup_hook()` is
+load-bearing on its own, not merely the early half of the ladder: when the
+hook's own shell has already exited, `run_setup_hook()` can be past its ladder
+while group members it left behind are still running, and this call is what
+reaches them (`T-RBK-10`).
+
+**The `Popen`-to-registration window is inside the protected region.** The spawn
+and the `_ACTIVE` registration sit in one `try`, with the registration in a
+`finally`, all of it enclosed by the `except BaseException: _reap(...)` block.
+An interrupt arriving between `Popen` returning and the slot being written
+would otherwise leak the group — reachable by neither the handler nor the
+ladder. CPython runs a signal handler between bytecodes in the main thread, so
+enclosing the gap is the available lever; no OS-level signal blocking is
+involved. `git.py` has the same shape unprotected; that is pre-existing and
+out of scope for A12. `run_with_rollback()` then rolls back
 and re-raises. Because the group is reaped *before* rollback, nothing is still
 writing into the directory being removed, which is precisely the ordering that
 produced the PID-1 orphan in Gate-1 fact 6.
@@ -579,6 +658,7 @@ timeout, and skip reasons stay in `notices` for backward compatibility.
   "reason": null,
   "exit_code": 0,
   "timed_out": false,
+  "descendants_cleared": true,
   "duration_seconds": 0.418,
   "timeout_seconds": 300,
   "output": {
@@ -597,6 +677,7 @@ Absent hook:
 "setup_hook": {"path": ".agent-fork/worktree-setup.sh", "present": false,
                "policy": "tracked", "eligibility": "absent", "status": "absent",
                "reason": null, "exit_code": null, "timed_out": false,
+               "descendants_cleared": true,
                "duration_seconds": null, "timeout_seconds": 300,
                "output": {"stdout": "", "stderr": "", "stdout_bytes": 0,
                           "stderr_bytes": 0, "truncated": false}}
@@ -853,6 +934,15 @@ Stated so no reviewer mistakes them for oversights.
 7. **`doctor` reads `HEAD`, `fork` resolves its own anchor.** On a detached
    HEAD the two can differ. The doctor detail names `HEAD` so the user is not
    misled.
+8. **A descendant that leaves the process group cannot be terminated with it.**
+   `start_new_session=True` bounds everything the hook starts *and keeps in its
+   group*; a child that calls `setsid()` is in a different group, and `killpg`
+   by construction cannot reach it. Nothing agent-fork can do changes that —
+   the same shape of limit as "a timeout cannot undo side effects". What A12
+   guarantees instead is that such a process cannot make the fork hang: waiting
+   for the hook's output is bounded, the pipes are released, and
+   `descendants_cleared: false` plus a notice reports what was left behind.
+   Added 2026-08-20 from the gate-6 review.
 
 ---
 

@@ -33,10 +33,11 @@ def run_with_rollback(creation, operation, *, env=None):
         terminate_active_git()
         # The setup hook is the second owned process group, and it is killed in
         # the handler for the same reason Git's is: unwinding first would leave
-        # it writing into a directory rollback is about to remove. What actually
-        # reaches its descendants is `start_new_session=True` plus
-        # `run_setup_hook()`'s own reap ladder (A12 Gate-1 fact 6); this call is
-        # the earlier, synchronous half of the same guarantee.
+        # it writing into a directory rollback is about to remove. It is also
+        # load-bearing on its own — when the hook's own shell has already
+        # exited, `run_setup_hook()` can be past its reap ladder while group
+        # members it left behind are still running, and only this call reaches
+        # them (A12 Gate-1 fact 6; T-RBK-10).
         terminate_active_setup_hook()
         raise OperationInterrupted(signum)
 

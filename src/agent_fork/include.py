@@ -15,7 +15,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from agent_fork.git import GitCommandError, run_git, signal_process_group
+from agent_fork.git import GitCommandError, run_git
 from agent_fork.text import escape_terminal_text
 
 SETUP_HOOK_RELATIVE_PATH = ".agent-fork/worktree-setup.sh"
@@ -24,6 +24,16 @@ DEFAULT_SETUP_HOOK_POLICY = "tracked"
 DEFAULT_SETUP_HOOK_TIMEOUT = 300
 OUTPUT_TAIL_BYTES = 4096
 OVERRIDE_HINT = "run it anyway with --setup-hook-policy any"
+# How long the hook's output pipes may stay open after the hook's own process
+# has exited. Only something the hook started can still hold them, and one that
+# left the process group cannot be killed, so this is the bound on waiting.
+SETUP_HOOK_DRAIN_SECONDS = 2.0
+LEFTOVER_NOTICE = (
+    "setup hook left at least one process running; agent-fork stopped waiting "
+    "for it and did not terminate it"
+)
+_REAP_GRACE_SECONDS = 1.0
+_POLL_SLICE_SECONDS = 0.05
 
 # The active hook process, mirroring `git._ACTIVE` so `rollback.interrupt()`
 # can reach a running hook's process group during signal cleanup.
@@ -56,6 +66,11 @@ class SetupHookResult:
     reason: str | None = None
     exit_code: int | None = None
     timed_out: bool = False
+    # False when the hook outlived itself: a process still in its group, or one
+    # that left the group and still held its output open when agent-fork
+    # stopped waiting. Never a failure — the fork keeps going — but never
+    # silent either, because the group is the unit this step can bound.
+    descendants_cleared: bool = True
     duration_seconds: float | None = None
     timeout_seconds: int = DEFAULT_SETUP_HOOK_TIMEOUT
     stdout_tail: str = ""
@@ -76,6 +91,7 @@ class SetupHookResult:
             "reason": self.reason,
             "exit_code": self.exit_code,
             "timed_out": self.timed_out,
+            "descendants_cleared": self.descendants_cleared,
             "duration_seconds": self.duration_seconds,
             "timeout_seconds": self.timeout_seconds,
             "output": {
@@ -154,37 +170,153 @@ def copy_worktree_includes(
     return IncludeResult(tuple(copied), tuple(notices))
 
 
+def _signal_hook_group(
+    process: subprocess.Popen[bytes], signum: signal.Signals
+) -> None:
+    """Signal the hook's whole process group, whether or not its leader is alive.
+
+    Deliberately narrower than ``git.signal_process_group()``, which returns
+    before ``killpg`` whenever ``process.poll()`` shows the leader has exited.
+    That gate is right for Git, whose children do not outlive it, and wrong
+    here: a hook that backgrounds a process and returns leaves a group whose
+    leader is gone and whose remaining members are exactly what needs the
+    signal.
+
+    Addressing the group by the leader's pid stays safe after the leader has
+    been reaped, because the kernel keeps that pid reserved as the group id for
+    as long as any member remains; it can never name an unrelated process. An
+    empty group answers ``ESRCH``, which is the success case here.
+    """
+    try:
+        os.killpg(process.pid, signum)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        # macOS can report EPERM in the window between a member's exit and its
+        # reaping. Cleanup stays best-effort so the original timeout or
+        # interruption remains the observable outcome.
+        if process.poll() is None:
+            try:
+                process.send_signal(signum)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+
+def _group_is_empty(process: subprocess.Popen[bytes]) -> bool:
+    """Report whether the hook's process group still holds any process.
+
+    ``poll()`` runs first so an unreaped leader — a zombie is still a group
+    member as far as ``killpg`` is concerned — does not read as a survivor.
+    """
+    process.poll()
+    try:
+        os.killpg(process.pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    return False
+
+
+def _await_empty_group(process: subprocess.Popen[bytes], seconds: float) -> bool:
+    deadline = time.monotonic() + seconds
+    while True:
+        if _group_is_empty(process):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_POLL_SLICE_SECONDS)
+
+
 def terminate_active_setup_hook() -> None:
     """Terminate the current setup-hook process group during signal cleanup."""
     process = getattr(_ACTIVE, "process", None)
     if process is None:
         return
-    signal_process_group(process, signal.SIGKILL)
+    _signal_hook_group(process, signal.SIGKILL)
 
 
 def _reap(process: subprocess.Popen[bytes]) -> tuple[str, ...]:
     """Escalate SIGTERM then SIGKILL over the hook's whole process group.
 
-    Identical ladder to ``git.run_git``'s: a hook's descendants share its
-    session, so signalling the group is what actually reaches a backgrounded
-    grandchild. Cleanup stays best-effort so the original timeout or
-    interruption remains the observable outcome.
+    Escalation is decided by probing the group, not by waiting on the leader:
+    ``process.wait()`` returns the moment the hook's own shell exits, which
+    would skip the SIGKILL that its surviving children still need. Cleanup
+    stays best-effort so the original timeout or interruption remains the
+    observable outcome.
     """
-    signal_process_group(process, signal.SIGTERM)
-    try:
-        process.wait(timeout=1)
+    _signal_hook_group(process, signal.SIGTERM)
+    if _await_empty_group(process, _REAP_GRACE_SECONDS):
         return ()
-    except subprocess.TimeoutExpired:
-        pass
-    signal_process_group(process, signal.SIGKILL)
-    try:
-        process.wait(timeout=1)
-    except subprocess.TimeoutExpired:
-        return (
-            f"setup hook process group {process.pid} did not exit after SIGKILL; "
-            "surviving processes may need manual cleanup",
-        )
-    return ()
+    _signal_hook_group(process, signal.SIGKILL)
+    if _await_empty_group(process, _REAP_GRACE_SECONDS):
+        return ()
+    return (
+        f"setup hook process group {process.pid} did not exit after SIGKILL; "
+        "surviving processes may need manual cleanup",
+    )
+
+
+def _collect_output(
+    process: subprocess.Popen[bytes],
+    *,
+    leader_deadline: float,
+    drain_seconds: float,
+) -> tuple[bytes, bytes, str]:
+    """Read both of the hook's pipes to EOF under two independent bounds.
+
+    ``leader_deadline`` is an absolute ``time.monotonic()`` value bounding how
+    long the hook's own process may run. ``drain_seconds`` separately bounds how
+    long its pipes may stay open *after* that process has exited.
+
+    The bounds have to be separate because a pipe outlives the writer's parent.
+    Reading "the pipes are still open" as "the hook is still running" reports a
+    hook that finished in milliseconds as a timeout, and waiting for EOF with no
+    bound at all never returns at all once a process has called ``setsid()`` and
+    left the group where ``killpg`` could reach it.
+
+    Returns ``(stdout, stderr, outcome)``, where outcome is ``"completed"``
+    (both pipes reached EOF), ``"timed_out"`` (the hook was still running at
+    ``leader_deadline``), or ``"detached"`` (the hook exited but its output
+    stayed open past ``drain_seconds``). Re-calling ``communicate()`` after a
+    ``TimeoutExpired`` is the documented retry pattern: the buffers accumulate
+    across calls, and the exception carries what has been read so far.
+    """
+    stdout = stderr = b""
+    drain_deadline: float | None = None
+    while True:
+        limit = leader_deadline if drain_deadline is None else drain_deadline
+        try:
+            stdout, stderr = process.communicate(
+                timeout=max(0.0, min(_POLL_SLICE_SECONDS, limit - time.monotonic()))
+            )
+            return stdout, stderr, "completed"
+        except subprocess.TimeoutExpired as expired:
+            stdout = expired.stdout or stdout
+            stderr = expired.stderr or stderr
+        if drain_deadline is None and process.poll() is not None:
+            drain_deadline = time.monotonic() + drain_seconds
+        elif time.monotonic() >= limit:
+            return (
+                stdout,
+                stderr,
+                "timed_out" if drain_deadline is None else "detached",
+            )
+
+
+def _abandon_pipes(process: subprocess.Popen[bytes]) -> None:
+    """Let go of pipes a process outside the hook's group is holding open.
+
+    Nothing else can close them. Once the writer has left the process group it
+    is unreachable by ``killpg``, so releasing this end is the only bound
+    available on this side.
+    """
+    for pipe in (process.stdout, process.stderr):
+        if pipe is not None:
+            try:
+                pipe.close()
+            except OSError:
+                pass
 
 
 def setup_hook_eligibility(
@@ -318,21 +450,62 @@ def run_setup_hook(
         f"(timeout {policy.timeout_seconds}s)"
     )
     started = time.monotonic()
+    process: subprocess.Popen[bytes] | None = None
+    spawn_error: OSError | None = None
+    timed_out = False
+    reap_notices: tuple[str, ...] = ()
+    stdout = stderr = b""
+    outcome = "completed"
     try:
-        process = subprocess.Popen(
-            [str(hook)],
-            cwd=child,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            # A new session is what makes `killpg` reach the hook's own
-            # children; it also removes the controlling terminal, so stdin is
-            # DEVNULL rather than an inherited TTY the hook would block on.
-            start_new_session=True,
-        )
-    except OSError as error:
-        detail = escape_terminal_text(str(error))
+        try:
+            process = subprocess.Popen(
+                [str(hook)],
+                cwd=child,
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                # A new session is what makes `killpg` reach the hook's own
+                # children; it also removes the controlling terminal, so stdin
+                # is DEVNULL rather than an inherited TTY the hook would block
+                # on.
+                start_new_session=True,
+            )
+        except OSError as error:
+            spawn_error = error
+        finally:
+            # Registered from a `finally`, and inside the same protected block
+            # as the spawn, so an interrupt arriving between `Popen` returning
+            # and this assignment cannot leak the group: CPython runs a signal
+            # handler between bytecodes, and a group registered nowhere is
+            # reachable by neither `rollback.interrupt()` nor the ladder below.
+            if process is not None:
+                _ACTIVE.process = process
+        if process is not None:
+            stdout, stderr, outcome = _collect_output(
+                process,
+                leader_deadline=started + policy.timeout_seconds,
+                drain_seconds=SETUP_HOOK_DRAIN_SECONDS,
+            )
+            if outcome == "timed_out":
+                timed_out = True
+                reap_notices = _reap(process)
+                # The hook itself is now dead, so only the drain bound applies.
+                stdout, stderr, outcome = _collect_output(
+                    process,
+                    leader_deadline=time.monotonic(),
+                    drain_seconds=SETUP_HOOK_DRAIN_SECONDS,
+                )
+    except BaseException:
+        if process is not None:
+            _reap(process)
+        raise
+    finally:
+        if process is not None and getattr(_ACTIVE, "process", None) is process:
+            _ACTIVE.process = None
+
+    if spawn_error is not None:
+        detail = escape_terminal_text(str(spawn_error))
         announce(f"setup hook: failed to start: {detail}")
         return replace(
             base,
@@ -341,26 +514,11 @@ def run_setup_hook(
             reason=detail,
             notices=(f"setup hook failed to start: {detail}",),
         )
+    assert process is not None
 
-    _ACTIVE.process = process
-    timed_out = False
-    reap_notices: tuple[str, ...] = ()
-    try:
-        try:
-            stdout, stderr = process.communicate(timeout=policy.timeout_seconds)
-        except subprocess.TimeoutExpired:
-            reap_notices = _reap(process)
-            # Every process that could still hold the pipe write end shared the
-            # group and has been signalled, so this drain cannot hang.
-            stdout, stderr = process.communicate()
-            timed_out = True
-    except BaseException:
-        _reap(process)
-        raise
-    finally:
-        if getattr(_ACTIVE, "process", None) is process:
-            _ACTIVE.process = None
-
+    if outcome == "detached":
+        _abandon_pipes(process)
+    descendants_cleared = outcome != "detached" and _group_is_empty(process)
     duration = round(time.monotonic() - started, 3)
     stdout_text, stdout_bytes, stdout_truncated = _bounded(stdout)
     stderr_text, stderr_bytes, stderr_truncated = _bounded(stderr)
@@ -384,12 +542,20 @@ def run_setup_hook(
         )
     else:
         announce(f"setup hook: ok in {duration}s")
+    if not descendants_cleared:
+        # Reported rather than escalated: the hook's own outcome above is still
+        # the outcome, and killing a process the hook deliberately started is
+        # not this step's call to make.
+        if not reap_notices:
+            notices.append(LEFTOVER_NOTICE)
+        announce(f"setup hook: {LEFTOVER_NOTICE.removeprefix('setup hook ')}")
     return replace(
         base,
         eligibility=eligibility,
         status="ran",
         exit_code=process.returncode,
         timed_out=timed_out,
+        descendants_cleared=descendants_cleared,
         duration_seconds=duration,
         stdout_tail=escape_terminal_text(stdout_text),
         stderr_tail=escape_terminal_text(stderr_text),

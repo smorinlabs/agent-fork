@@ -643,6 +643,7 @@ def test_setup_hook_is_structured_on_stdout_and_narrated_only_on_stderr(repo_sce
         "reason": None,
         "exit_code": 0,
         "timed_out": False,
+        "descendants_cleared": True,
         "duration_seconds": document["setup_hook"]["duration_seconds"],
         "timeout_seconds": 300,
         "output": {
