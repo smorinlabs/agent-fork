@@ -1,8 +1,10 @@
 # P02-A5 — Skip policy for bad entries, and the parent-change race
 
-**Status:** gate 1 partially complete (register entry rewritten from executed
-evidence; exhaustive probe matrix and Codex second lens still owed). Gate 3
-design recorded below. Gates 4–6 not started.
+**Status:** gate 1 **open**. The probe matrix is executed and recorded, and
+seven Codex second-lens passes have run; new defects per pass were 1, 3, 2, 2,
+1, 0, and the seventh reopened two documentation defects. Gate 3 design is
+recorded below. Gate 4 has a plan, reviewed once and **not yet ready**. Gates
+5 and 6 not started.
 
 **Register entry:** A5 in
 [P02](../../../projects/P02-agent-fork-fault-remediation.md).

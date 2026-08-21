@@ -456,8 +456,12 @@ repository-controlled text raw).
   `--diff-filter=D` facet rather than inferred from absence. The sentinel is
   `(st_dev, st_ino, st_mode, st_size, st_mtime_ns, st_ctime_ns)`, recorded at
   observation and rechecked before success. Strict refusal is
-  `strict_skip_refused` (exit 1). Both codes carry stable `details` schemas and
-  are published in `README.md`. The design doc is the normative contract.
+  `strict_skip_refused` (exit 1). Both codes have specified `details` schemas
+  but **do not exist yet** in `errors.py` or `README.md`; publishing them is a
+  gate 4 step 0 requirement. The design doc is the normative contract, and its
+  "Skip preconditions" section governs: a skip requires an untracked or
+  ignored entry, a successful `lstat`, and no carried deletion. Anything else
+  raises `entry_unreadable`.
 
   Exit status is 0 when only skips occurred, non-zero under `--strict`. No
   skip is ever triggered by *absence*: `collect_inventory` keeps deletion and
