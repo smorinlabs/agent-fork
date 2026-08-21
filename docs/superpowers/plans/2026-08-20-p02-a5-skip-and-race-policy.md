@@ -174,8 +174,14 @@ every one of these holds. Otherwise it is a typed failure, `entry_unreadable`.
 
 ### The stability sentinel
 
-Recorded at observation time for every skipped path, and re-checked before the
-fork is reported successful. Any difference fails the fork.
+Recorded at observation time for every skipped path, and re-checked **at
+finalization** — after include copying and the setup hook, and before the
+registry write. Any difference fails the fork.
+
+The timing is load-bearing. Checking during verification leaves a window: the
+pipeline runs include copying and then the setup hook, which receives
+`REPO_ROOT` and can mutate the parent, so a skipped file could change after a
+verification-time check and the fork would still be registered successful.
 
     (st_dev, st_ino, st_mode, st_size, st_mtime_ns, st_ctime_ns)
 
