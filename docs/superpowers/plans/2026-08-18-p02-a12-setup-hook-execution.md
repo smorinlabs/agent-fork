@@ -48,8 +48,10 @@ following.
 2. **Provenance-gated by default.** Only a hook committed at the anchor and
    byte-identical on disk runs. An untracked or modified hook is skipped with a
    named reason, and runs only under an explicit opt-in.
-3. **Opt-out.** `--no-setup-hook` and a matching `[fork]` config key stop the
-   step entirely, before any eligibility check or execution.
+3. **Opt-out.** `--setup-hook-policy off` and a matching `[fork]` config key
+   stop the step entirely, before any eligibility check or execution. (A12's
+   register entry names `--no-setup-hook` as an example spelling; the owner
+   chose a single three-way policy flag instead — see the Contracts section.)
 4. **Bounded.** Execution has a timeout. The hook runs in its own process
    group, so a timeout kills the hook *and its children*, not just the shell.
 5. **Reaped on interruption.** `SIGINT`/`SIGTERM` to the CLI kills and reaps the
@@ -109,7 +111,7 @@ to translate the exception. A12 must add that missing CLI-level row.
 These three are decided. The design accommodates them; it does not relitigate
 them.
 
-1. **A timeout cannot undo side effects.** A hook killed at 120 s may already
+1. **A timeout cannot undo side effects.** A hook killed at 300 s may already
    have pushed a branch, written `~/.npmrc`, or mutated shared repository
    configuration. The timeout bounds *duration*, not *blast radius*, and every
    user-facing string must say so rather than implying a rollback of the hook's
@@ -319,50 +321,60 @@ meaning. Mode is reported in the structured result; it does not gate.
 ### Policy resolution
 
 ```
-disabled   := not resolved.setup_hook            # --no-setup-hook wins over everything
-unreviewed := resolved.allow_unreviewed_setup_hook
-timeout    := resolved.setup_hook_timeout        # seconds, > 0
+mode    := resolved.setup_hook_policy   # "tracked" | "any" | "off"
+timeout := resolved.setup_hook_timeout  # seconds, > 0
 ```
 
-| `setup_hook` | Hook present | Eligible | Override | Outcome |
-|---|---|---|---|---|
-| `false` | any | any | any | `status="disabled"`, never executed, eligibility not evaluated |
-| `true` | no | — | — | `status="absent"` |
-| `true` | yes | yes | any | `status="ran"` |
-| `true` | yes | no | `false` | `status="skipped"`, `reason` names the eligibility failure |
-| `true` | yes | no | `true` | `status="ran"`, eligibility reported as observed |
+| `setup_hook_policy` | Hook present | Eligible | Outcome |
+|---|---|---|---|
+| `off` | any | any | `status="disabled"`, never executed, eligibility not evaluated |
+| `tracked` or `any` | no | — | `status="absent"` |
+| `tracked` or `any` | yes | yes | `status="ran"` |
+| `tracked` | yes | no | `status="skipped"`, `reason` names the eligibility failure |
+| `any` | yes | no | `status="ran"`, eligibility reported as observed |
 
-`--no-setup-hook` dominates the override: disabled means disabled. Eligibility
-is still *reported* when the override is on, so the structured result never
-hides that unreviewed code ran.
+`off` dominates: disabled means disabled. Under `any`, eligibility is still
+*reported* even though the hook runs, so the structured result never hides
+that unreviewed code ran.
+
+**Owner decision (2026-08-20):** the plan originally proposed two paired
+boolean flags (`--setup-hook`/`--no-setup-hook` and
+`--allow-unreviewed-setup-hook`), following this repository's `--verify`/
+`--no-verify` convention. The owner chose the single three-way enum below
+instead. One consequence: the literal `--no-setup-hook` spelling named in
+A12's original register entry (`projects/P02-agent-fork-fault-remediation.md:326-334`)
+no longer exists as its own flag — the equivalent is
+`--setup-hook-policy off`. `REQUIREMENTS.md`/`README.md` updates in Step 6
+must use the enum spelling, not the register's original literal text.
 
 ### Flags and configuration keys
 
-Following the `--verify` / `[fork] verify` pairing already in the repository
-(`cli.py:145-150`, `config.py:27`, README's `[fork]` table):
-
 | Flag | argparse form | `[fork]` key | Type | Default |
 |---|---|---|---|---|
-| `--setup-hook` / `--no-setup-hook` | `BooleanOptionalAction`, `default=None` | `setup_hook` | bool | `true` |
-| `--allow-unreviewed-setup-hook` / `--no-allow-unreviewed-setup-hook` | `BooleanOptionalAction`, `default=None` | `allow_unreviewed_setup_hook` | bool | `false` |
-| `--setup-hook-timeout SECONDS` | `type=int`, `default=None` | `setup_hook_timeout` | int (seconds) | `120` |
+| `--setup-hook-policy {tracked,any,off}` | `choices=[...]`, `default=None` | `setup_hook_policy` | str enum | `tracked` |
+| `--setup-hook-timeout SECONDS` | `type=int`, `default=None` | `setup_hook_timeout` | int (seconds) | `300` |
 
 Config plumbing:
 
-- `setup_hook` and `allow_unreviewed_setup_hook` join `_FORK_KEYS` and
-  `_BOOL_KEYS` (`config.py:21-30`).
-- `setup_hook_timeout` joins `_FORK_KEYS` and needs a new `_INT_KEYS = {"setup_hook_timeout"}`
-  validated as a positive `int` — note that `isinstance(True, int)` is true in
-  Python, so the check must reject `bool` explicitly. A value `<= 0` raises
-  `ConfigError` (exit 2). There is deliberately **no** "no timeout" sentinel:
-  an unbounded hook is the fault A12 exists to close.
-- `ConfigValues` and `ResolvedConfig` (`models.py`) gain the three fields;
-  `resolve_config()` gains three assignment blocks.
+- `setup_hook_policy` joins `_FORK_KEYS` and needs a new
+  `_ENUM_KEYS = {"setup_hook_policy": ("tracked", "any", "off")}`, validated
+  by membership. A value outside the three literals raises `ConfigError`
+  (exit 2) — same A11-guard reasoning as the timeout key below: a key that
+  passes `config validate` and later crashes `fork` is exactly the A11
+  pattern this design must not repeat.
+- `setup_hook_timeout` joins `_FORK_KEYS` and needs a new
+  `_INT_KEYS = {"setup_hook_timeout"}` validated as a positive `int` — note
+  that `isinstance(True, int)` is true in Python, so the check must reject
+  `bool` explicitly. A value `<= 0` raises `ConfigError` (exit 2). There is
+  deliberately **no** "no timeout" sentinel: an unbounded hook is the fault
+  A12 exists to close.
+- `ConfigValues` and `ResolvedConfig` (`models.py`) gain the two fields;
+  `resolve_config()` gains two assignment blocks.
 - `set_user_value()` gains int coercion so `config set setup_hook_timeout 300`
-  round-trips. A11 (`P02-TS11`) confirmed that `config validate` currently
-  passes values that later crash `fork`; A12 must not add a fourth such key, so
-  the positive-integer check lives in `load_config()`, where validation runs,
-  not only at the point of use.
+  round-trips, and enum-membership validation so
+  `config set setup_hook_policy tracked` round-trips while
+  `config set setup_hook_policy nonsense` fails at validate time, not at
+  `fork` time.
 
 ### `SetupHookResult`
 
@@ -371,7 +383,7 @@ Config plumbing:
 class SetupHookResult:
     path: str                    # always ".agent-fork/worktree-setup.sh"
     present: bool
-    policy: str                  # "run" | "disabled"
+    policy: str                  # "tracked" | "any" | "off" — the resolved policy in effect
     eligibility: str             # "eligible" | "untracked" | "modified"
                                  #  | "not_a_regular_blob" | "absent" | "unchecked"
     status: str                  # "ran" | "skipped" | "disabled" | "absent"
@@ -524,7 +536,7 @@ Human (`text` and `table`), on **stderr**, so stdout stays the paste-command
 surface:
 
 ```
-setup hook: running .agent-fork/worktree-setup.sh (timeout 120s)
+setup hook: running .agent-fork/worktree-setup.sh (timeout 300s)
 setup hook: ok in 0.42s
 ```
 
@@ -532,10 +544,10 @@ and the other terminal lines:
 
 ```
 setup hook: failed (exit 17) in 0.31s; fork kept
-setup hook: timed out after 120s; process group terminated. Changes it already made are not undone
-setup hook: skipped — present but not committed at the fork anchor (run it anyway with --allow-unreviewed-setup-hook)
-setup hook: skipped — present but modified since the fork anchor (run it anyway with --allow-unreviewed-setup-hook)
-setup hook: disabled (--no-setup-hook)
+setup hook: timed out after 300s; process group terminated. Changes it already made are not undone
+setup hook: skipped — present but not committed at the fork anchor (run it anyway with --setup-hook-policy any)
+setup hook: skipped — present but modified since the fork anchor (run it anyway with --setup-hook-policy any)
+setup hook: disabled (--setup-hook-policy off)
 ```
 
 The running line is emitted through a new optional
@@ -561,14 +573,14 @@ timeout, and skip reasons stay in `notices` for backward compatibility.
 "setup_hook": {
   "path": ".agent-fork/worktree-setup.sh",
   "present": true,
-  "policy": "run",
+  "policy": "tracked",
   "eligibility": "eligible",
   "status": "ran",
   "reason": null,
   "exit_code": 0,
   "timed_out": false,
   "duration_seconds": 0.418,
-  "timeout_seconds": 120,
+  "timeout_seconds": 300,
   "output": {
     "stdout": "installed 42 packages\n",
     "stderr": "",
@@ -583,9 +595,9 @@ Absent hook:
 
 ```json
 "setup_hook": {"path": ".agent-fork/worktree-setup.sh", "present": false,
-               "policy": "run", "eligibility": "absent", "status": "absent",
+               "policy": "tracked", "eligibility": "absent", "status": "absent",
                "reason": null, "exit_code": null, "timed_out": false,
-               "duration_seconds": null, "timeout_seconds": 120,
+               "duration_seconds": null, "timeout_seconds": 300,
                "output": {"stdout": "", "stderr": "", "stdout_bytes": 0,
                           "stderr_bytes": 0, "truncated": false}}
 ```
@@ -604,10 +616,10 @@ document says so with a `prediction: true` field rather than implying certainty.
 Human, one line added to `DryRunOutput.render()`:
 
 ```
-setup-hook: .agent-fork/worktree-setup.sh; eligible at anchor; would run; timeout 120s
-setup-hook: .agent-fork/worktree-setup.sh; not committed at anchor; would skip; override --allow-unreviewed-setup-hook
+setup-hook: .agent-fork/worktree-setup.sh; eligible at anchor; would run; timeout 300s
+setup-hook: .agent-fork/worktree-setup.sh; not committed at anchor; would skip; override --setup-hook-policy any
 setup-hook: none
-setup-hook: disabled (--no-setup-hook)
+setup-hook: disabled (--setup-hook-policy off)
 ```
 
 JSON, nested under the existing `plan` object so the dry-run schema keeps its
@@ -621,11 +633,11 @@ shape:
   "setup_hook": {
     "path": ".agent-fork/worktree-setup.sh",
     "present": true,
-    "policy": "run",
+    "policy": "tracked",
     "eligibility": "eligible",
     "would_run": true,
     "reason": null,
-    "timeout_seconds": 120,
+    "timeout_seconds": 300,
     "prediction": true
   }
 }
@@ -640,20 +652,30 @@ One additional `DoctorCheck`, which needs no JSON schema change because
 `doctor` already emits `checks[]` of `{name, ok, detail}` (`cli.py:710-724`):
 
 ```
-ok repository setup hook: .agent-fork/worktree-setup.sh present, eligible at HEAD, policy=run, timeout=120s
-ok repository setup hook: .agent-fork/worktree-setup.sh present, modified since HEAD (would be skipped; override --allow-unreviewed-setup-hook)
-ok repository setup hook: none in /path/to/repo
-ok repository setup hook: disabled by config
+ok    repository setup hook: .agent-fork/worktree-setup.sh present, eligible at HEAD, policy=tracked, timeout=300s
+FAIL  repository setup hook: .agent-fork/worktree-setup.sh present, modified since HEAD (blocked under policy=tracked; override --setup-hook-policy any)
+ok    repository setup hook: .agent-fork/worktree-setup.sh present, modified since HEAD (allowed to run under policy=any)
+ok    repository setup hook: none in /path/to/repo
+ok    repository setup hook: disabled by config
 ```
 
-**The check is informational: `ok` is always `true`.** Two options were
-weighed. Failing on a present-but-ineligible hook would be actionable, but it
-would also make `doctor` exit 1 in any worktree where someone is mid-edit on
-the hook — and every existing doctor failure is *machine readiness* (a missing
-or too-old binary, invalid config, an unwritable XDG path), not a repository's
-working-tree state. A12's mandate is disclosure, not a new failure mode. The
-detail string still names the exact reason and the exact override flag, so the
-diagnostic value is retained without the false alarm.
+**Owner decision (2026-08-20): the check fails.** The plan originally
+recommended an informational-only check (`ok` always `true`), reasoning that
+every existing `doctor` failure is *machine readiness*, not a repository's
+working-tree state, and that failing here would make `doctor` exit nonzero in
+any worktree where someone is mid-edit on the hook. The owner chose to treat
+a present-but-ineligible hook as a hard failure instead. This changes what
+`doctor`'s exit code has meant so far — it now also signals a
+repository-content problem, not only a machine-readiness one — so this
+distinction must be called out explicitly in `README.md`'s `doctor`
+documentation (Step 6) rather than left implicit.
+
+`ok` is `false` **only** when `setup_hook_policy` is `tracked` (the default)
+and a present hook fails the eligibility check — the same condition that
+makes `fork` skip the hook. It stays `true` when the hook is eligible, when
+`setup_hook_policy` is `any` (an ineligible hook is explicitly allowed to run,
+so it is not a failure), when `setup_hook_policy` is `off` (the hook is not
+evaluated), and when no hook is present at all.
 
 `doctor` evaluates against `HEAD` in the cwd's worktree, and the detail says
 `HEAD` explicitly, because `fork` resolves its own anchor
@@ -663,7 +685,7 @@ diagnostic value is retained without the false alarm.
 
 | Rule | A12 requirement |
 |---|---|
-| R5.x flags | New flags use `BooleanOptionalAction` with `default=None`, matching `--verify`; the integer flag names its unit in `--help` |
+| R5.x flags | `--setup-hook-policy` uses `choices=[...]` with `default=None`, so an unset flag falls through to config/default rather than forcing a value; the integer `--setup-hook-timeout` flag names its unit (seconds) in `--help` |
 | R6.1 | `130` / `143` become reachable process exit codes from `main()`; `config_error` (2) covers an invalid timeout |
 | R7.1, R7.6 | Progress and hook diagnostics on stderr; the fork result and the JSON line on stdout |
 | R7.2, R9.3 | `setup_hook` is additive; no existing field changes meaning |
@@ -701,7 +723,7 @@ Tier F (a real repository fixture is required — this is Git plumbing).
 | `T-INC-08` | A hook committed at the anchor and unchanged on disk runs; `SetupHookResult.eligibility == "eligible"`, `status == "ran"`, `exit_code == 0` |
 | `T-INC-09` | An **untracked** hook carried into the child is skipped by default: the hook's sentinel file does not exist, `eligibility == "untracked"`, `status == "skipped"`, and the notice names the override flag. This is the direct Gate-1 fact-1 regression |
 | `T-INC-10` | A committed hook **modified** in the parent working tree is carried into the child and skipped: `eligibility == "modified"`. Asserted by byte comparison, not by `git status`, per Axis B |
-| `T-INC-11` | With `allow_unreviewed=True`, both the untracked and the modified hook run, and `eligibility` still reports `"untracked"` / `"modified"` rather than being masked |
+| `T-INC-11` | With `policy="any"`, both the untracked and the modified hook run, and `eligibility` still reports `"untracked"` / `"modified"` rather than being masked |
 | `T-INC-12` | A hook recorded in the anchor tree as a symlink (`120000`), and separately a hook that is a symlink on disk, are both `not_a_regular_blob` and are skipped |
 | `T-INC-13` | Policy disabled: eligibility is never evaluated, no process is spawned (assert the sentinel is absent), `status == "disabled"` |
 | `T-INC-14` | Successful stdout and stderr reach `stdout_tail` / `stderr_tail`; a hook printing more than the bound sets `truncated: true` and the byte totals exceed the tail lengths. This is Gate-1 fact 3 |
@@ -710,7 +732,7 @@ Tier F (a real repository fixture is required — this is Git plumbing).
 `T-INC-04` and `T-INC-07` change mechanically only: `T-INC-04` reads
 `result.setup_hook.notices` instead of scanning `result.notices` (the notice
 strings themselves are unchanged, which is the point of the assertion), and
-`T-INC-07` passes `policy=SetupHookPolicy(allow_unreviewed=True)` so its bare
+`T-INC-07` passes `policy=SetupHookPolicy(mode="any", timeout_seconds=300)` so its bare
 `tmp_path` child needs no anchor. Its escaping assertion is untouched.
 `T-INC-03` and `T-INC-05` need the hook committed, which `_commit_support()`
 (`tests/pipeline/test_inc.py:17-26`) already does, so they stay green
@@ -750,7 +772,7 @@ read the grandchild PID from the sentinel file and assert it no longer exists.
 | Test ID | File | Required proof |
 |---|---|---|
 | `T-CLI-32` | `tests/cli/test_cli.py` | `fork --dry-run` human and JSON disclose the hook for all four states (eligible, ineligible, absent, disabled), the JSON carries `prediction: true`, `mutation_performed` stays `false`, and no branch or worktree is created |
-| `T-CLI-33` | `tests/cli/test_cli.py` | `doctor` human and JSON carry the `repository setup hook` row for all four states; overall `ok` is unchanged in every case, proving the check is informational |
+| `T-CLI-33` | `tests/cli/test_cli.py` | `doctor` human and JSON carry the `repository setup hook` row for all five states (eligible, ineligible-under-`tracked`, ineligible-but-allowed-under-`any`, absent, disabled); the row's `ok` is `false` only for the ineligible-under-`tracked` state, and `doctor`'s overall exit code goes nonzero in that state alone |
 | `T-OUT-23` | `tests/cli/test_out.py` | `fork --json` stdout is exactly one parseable line containing the full `setup_hook` object with **no** progress text; the same fork in `text` mode prints the running and result lines to stderr and leaves stdout byte-identical to today's |
 | `T-CLI-34` | `tests/cli/test_cli.py` | `main()` under a real `SIGINT` during the hook returns `130` and prints a rendered error, not a traceback; the `--json` variant prints exactly one JSON error object on stderr with code `interrupted_sigint`. Marked `requires_process_group_signals`. This is Gate-1 fact 7 and the missing CLI-boundary row |
 | `T-OUT-24` | `tests/cli/test_out.py` | `interrupted_sigint` and `interrupted_sigterm` satisfy the existing catalog-exactness and JSON round-trip invariants (`T-OUT-14`, `T-OUT-15` stay green unmodified) |
@@ -759,9 +781,9 @@ read the grandchild PID from the sentinel file and assert it no longer exists.
 
 | Test ID | File | Required proof |
 |---|---|---|
-| `T-CFG-18` | `tests/unit/test_cfg.py` | The three keys default to `true` / `false` / `120`; an explicit flag beats a config value; `--no-setup-hook` dominates `allow_unreviewed_setup_hook = true` |
-| `T-CFG-19` | `tests/cli/test_cfg.py` | `config set` / `config get` round-trip all three keys, including integer coercion for `setup_hook_timeout` |
-| `T-CFG-20` | `tests/unit/test_cfg.py` | `setup_hook_timeout = 0`, a negative value, a string, and a boolean each raise `ConfigError`; the CLI exits `2`. Directly guards against repeating the A11 pattern of a key that validates clean and crashes at use |
+| `T-CFG-18` | `tests/unit/test_cfg.py` | The two keys default to `tracked` / `300`; an explicit `--setup-hook-policy` flag beats a config value; `--setup-hook-policy off` dominates every other setting |
+| `T-CFG-19` | `tests/cli/test_cfg.py` | `config set` / `config get` round-trip both keys, including integer coercion for `setup_hook_timeout` and enum-membership validation for `setup_hook_policy` |
+| `T-CFG-20` | `tests/unit/test_cfg.py` | `setup_hook_timeout = 0`, a negative value, a string, and a boolean each raise `ConfigError`; `setup_hook_policy` set to a value outside `{tracked, any, off}` also raises `ConfigError`; the CLI exits `2` in every case. Directly guards against repeating the A11 pattern of a key that validates clean and crashes at use |
 
 ### Step 6 — Documentation and conformance
 
@@ -834,33 +856,42 @@ Stated so no reviewer mistakes them for oversights.
 
 ---
 
-## Open questions for the owner
+## Owner decisions
 
-Four items need an owner decision; everything else in this document is decided
-with its rationale.
+Four items needed an owner decision. Three are now settled (2026-08-20); one
+remains open.
 
-1. **Timeout default.** This document proposes **120 seconds**: long enough for
-   a realistic `uv sync` or `npm ci`, short enough that a hang is caught within
-   a coffee-refill. Alternatives worth a ruling: 300 s (favors heavy
-   dependency installs, tolerates a longer hang) or 60 s (catches hangs fast,
-   will interrupt real installs on a cold cache). Confirm or replace.
-2. **Override flag name.** This document proposes
-   `--allow-unreviewed-setup-hook` / `[fork] allow_unreviewed_setup_hook`,
-   paired with `--setup-hook` / `--no-setup-hook`. The alternative collapses
-   both into one enum, `--setup-hook-policy {tracked,any,off}` with
-   `[fork] setup_hook_policy = "tracked"`, which is one key instead of two but
-   abandons the `--verify` / `--no-verify` boolean-pair convention this CLI
-   uses everywhere else, and drops the literal `--no-setup-hook` spelling the
-   A12 register entry names.
-3. **Whether the success output tail is always in the JSON.** This document
-   says yes, always, bounded at 4096 bytes per stream (option C1). The
-   alternative gates it behind a flag, at the cost of making a machine consumer
-   pass an option to see a field it needs.
-4. **Whether `doctor` may fail on a present-but-ineligible hook.** This
-   document says no — the check is informational so that mid-edit worktrees do
-   not turn `doctor` red, and because every other doctor failure is machine
-   readiness rather than repository working-tree state. Reversing this is a
-   one-line change if the owner prefers a hard signal.
+1. **Timeout default — DECIDED: 300 seconds.** The plan had proposed 120 s;
+   the owner chose 300 s, favoring tolerance for heavy dependency installs
+   over catching a hang faster. Every `120` value in this document (contracts,
+   examples, test rows) has been updated to `300`.
+2. **Override flag shape — DECIDED: a single enum.** The plan had proposed
+   paired booleans (`--allow-unreviewed-setup-hook` alongside
+   `--setup-hook`/`--no-setup-hook`), matching this CLI's `--verify`/
+   `--no-verify` convention. The owner chose the alternative instead: one flag,
+   `--setup-hook-policy {tracked,any,off}`, with `[fork] setup_hook_policy`
+   as its config-key twin. Consequence: the literal `--no-setup-hook` spelling
+   A12's register entry names no longer exists as its own flag; the
+   equivalent is `--setup-hook-policy off`. The Contracts section, `doctor`
+   disclosure section, and Step 4/5 test rows have been updated to the enum
+   shape throughout.
+3. **Whether the success output tail is always in the JSON — STILL OPEN.**
+   This document proposes yes, always, bounded at 4096 bytes per stream
+   (option C1). The alternative gates it behind a flag, at the cost of making
+   a machine consumer pass an option to see a field it needs. Awaiting a
+   ruling before Step 4 can be written.
+4. **Whether `doctor` may fail on a present-but-ineligible hook — DECIDED:
+   yes.** The plan had recommended informational-only (`ok` always `true`),
+   reasoning that every existing `doctor` failure is machine readiness, not
+   repository working-tree state, and that failing here would flag any
+   worktree where someone is mid-edit on the hook. The owner chose to treat it
+   as a hard failure instead. `ok` is `false` only when `setup_hook_policy` is
+   `tracked` (the default) and a present hook is ineligible — the same
+   condition that makes `fork` skip it; it is unaffected under `any` (the
+   hook is explicitly allowed to run) or `off` (the hook is not evaluated).
+   `README.md`'s `doctor` documentation (Step 6) must now note explicitly that
+   `doctor`'s exit code can also signal a repository-content problem, not
+   only a machine-readiness one.
 
 ---
 
