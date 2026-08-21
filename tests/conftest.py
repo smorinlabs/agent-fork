@@ -726,13 +726,13 @@ def _apply_states(handle: WorldHandle, states: tuple[StateSpec, ...]) -> None:
                 )
             if extra.get("url_kind") == "relative":
                 relative_url = f"../{module.name}"
-                _rewrite_submodule_url(handle, parent, spec.path, relative_url)
+                _rewrite_submodule_url(handle, parent, config_name, relative_url)
             elif extra.get("url_kind") == "remote-unreachable":
                 # Syntactically valid, never resolves: reserved TEST-NET-1
                 # (RFC 5737), so this cannot flake by someone actually running
                 # a git server there.
                 _rewrite_submodule_url(
-                    handle, parent, spec.path, "https://192.0.2.1/unreachable.git"
+                    handle, parent, config_name, "https://192.0.2.1/unreachable.git"
                 )
             if "nested" in extra:
                 inner = parent.parent / f"module-inner-{path.name}"
@@ -834,9 +834,15 @@ def _dirty_submodule(
 
 
 def _rewrite_submodule_url(
-    handle: WorldHandle, parent: Path, relative: str, url: str
+    handle: WorldHandle, parent: Path, config_name: str, url: str
 ) -> None:
     """Point `.gitmodules` and the parent's own config at ``url``.
+
+    ``config_name`` must be the submodule's *config name* (`.gitmodules`
+    sections are `[submodule "<name>"]`, keyed by name, never by path) --
+    passing the path for a renamed submodule (name != path) silently writes
+    a spurious new section instead of editing the real one, leaving the
+    submodule's actual URL untouched.
 
     Runs only in the parent, before any child worktree exists — never in a
     linked worktree, where `submodule sync` would write into shared
@@ -848,12 +854,12 @@ def _rewrite_submodule_url(
         "config",
         "-f",
         ".gitmodules",
-        f"submodule.{relative}.url",
+        f"submodule.{config_name}.url",
         url,
     )
     _run_git(handle.env, parent, "add", "--", ".gitmodules")
-    _run_git(handle.env, parent, "commit", "-m", f"repoint {relative} url")
-    _run_git(handle.env, parent, "submodule", "sync", "--", relative)
+    _run_git(handle.env, parent, "commit", "-m", f"repoint {config_name} url")
+    _run_git(handle.env, parent, "submodule", "sync")
 
 
 def _apply_origin(handle: WorldHandle, spec: OriginSpec) -> None:

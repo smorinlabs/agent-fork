@@ -537,29 +537,23 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             branch,
             destination,
             with_state=config.with_state,
+            with_submodules=config.with_submodules,
             env=environment,
         )
 
         def count(arguments):
             return count_paths(parent_path, arguments, env=environment)
 
+        unstaged_args = ["diff", "--name-only", "-z", "--no-renames"]
+        if not config.with_submodules:
+            unstaged_args.append("--ignore-submodules=dirty")
         dry = DryRunOutput(
             branch,
             destination,
             count(["diff", "--cached", "--name-only", "-z", "--no-renames"])
             if config.with_state
             else 0,
-            count(
-                [
-                    "diff",
-                    "--name-only",
-                    "-z",
-                    "--no-renames",
-                    "--ignore-submodules=dirty",
-                ]
-            )
-            if config.with_state
-            else 0,
+            count(unstaged_args) if config.with_state else 0,
             count(["ls-files", "--others", "--exclude-standard", "-z"])
             if config.with_state
             else 0,
@@ -571,7 +565,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
                 (agent_check.notices if context is not None else ())
                 + (
                     submodule_loss_notices(parent_path, env=environment)
-                    if config.with_state
+                    if config.with_state and not config.with_submodules
                     else ()
                 )
             ),

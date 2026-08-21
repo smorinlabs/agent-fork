@@ -14,7 +14,7 @@ from agent_fork.content import (
 from agent_fork.errors import VerificationError
 from agent_fork.git import run_git
 from agent_fork.repository import WorktreeCreation
-from agent_fork.submodules import SubmoduleSnapshot, verify_submodules
+from agent_fork.submodules import SEMANTIC_PINS, SubmoduleSnapshot, verify_submodules
 from agent_fork.text import escape_terminal_text
 from agent_fork.worktree_list import list_worktrees
 
@@ -124,15 +124,34 @@ def verify_fork(
         status_args.append("--ignore-submodules=dirty")
     if with_ignored:
         status_args.append("--ignored")
-    child_status = run_git(creation.path, status_args, env=env).stdout
+    # The child's carried submodule is a fresh `submodule update --init`, so
+    # it never inherits the parent's own submodule's local git config
+    # (nothing copies arbitrary config, only tracked/working-tree state) --
+    # an ambient setting like `diff.ignoreSubmodules` inside the PARENT's
+    # submodule can therefore make the two raw `git status` outputs
+    # genuinely differ even though carry transported the content correctly
+    # (gate-6 finding 2, same root cause one more layer up). Pinning both
+    # sides to the same semantic policy is what makes the comparison
+    # apples-to-apples.
+    status_pins = SEMANTIC_PINS if with_submodules else ()
+    child_status = run_git(
+        creation.path, status_args, env=env, config_pins=status_pins
+    ).stdout
     if with_state:
-        parent_status = run_git(creation.parent_path, status_args, env=env).stdout
+        parent_status = run_git(
+            creation.parent_path, status_args, env=env, config_pins=status_pins
+        ).stdout
         if child_status != parent_status:
             failures.append("exact-copy-status")
     elif child_status:
         failures.append("clean-from-head")
 
     if with_state and parent_state_before is not None:
+        # SEMANTIC_PINS matches the pins pipeline.py applies to the snapshot
+        # it captured before the fork (gate-6 finding 2): recomputing here
+        # without them would create the same false-difference domain
+        # mismatch one more time, symmetrically, at the top level.
+        top_level_pins = SEMANTIC_PINS if with_submodules else ()
         parent_after = capture_state(
             creation.parent_path,
             collect_inventory(
@@ -141,8 +160,10 @@ def verify_fork(
                 with_ignored=with_ignored,
                 with_submodules=with_submodules,
                 env=env,
+                config_pins=top_level_pins,
             ),
             env=env,
+            config_pins=top_level_pins,
         )
         drift = compare_states(parent_state_before, parent_after)
         child_state = capture_state(
@@ -153,8 +174,10 @@ def verify_fork(
                 with_ignored=with_ignored,
                 with_submodules=with_submodules,
                 env=env,
+                config_pins=top_level_pins,
             ),
             env=env,
+            config_pins=top_level_pins,
         )
         content = compare_states(parent_state_before, child_state)
         if drift:

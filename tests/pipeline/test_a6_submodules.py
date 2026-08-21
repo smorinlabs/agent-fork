@@ -418,13 +418,51 @@ def test_cli_forwards_the_no_state_mode_to_the_submodule_guard(repo_scenario):
 
 @pytest.mark.matrix("T-CLI-37")
 def test_dry_run_counts_and_notices_match_what_the_fork_will_carry(repo_scenario):
-    """Gate-6 finding 2 — the preview must describe the fork that will happen.
+    """Gate-6 finding 2 (A6a) — the preview must describe the fork that will
+    happen. Scoped to `--no-with-submodules` (A6b's opt-out): under A6b's own
+    default, the preview counts and carries the submodule instead, covered
+    separately by T-CLI-39/T-GRD-29 — this test's original claim survives
+    only for the path where submodules stay opaque.
 
     The dry-run counts came from an unfiltered `git diff --name-only` while the
     real inventory filters submodule working-tree state, so a dirty submodule
     was previewed as one unstaged path that the fork then did not carry, with no
     warning. A preview that over-reports is worse than a bare count: it is the
     one place a user checks before committing to the operation.
+    """
+    import json
+
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="modified"),))
+    completed = run_cli(
+        [
+            "fork",
+            "preview",
+            "--no-agent",
+            "--no-with-submodules",
+            "--dry-run",
+            "-o",
+            "json",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+    document = json.loads(completed.stdout)
+
+    assert document["plan"]["files_to_carry"]["unstaged"] == 0
+    assert any("vendor/submodule" in notice for notice in document["notices"])
+
+
+@pytest.mark.matrix("T-CLI-39")
+def test_dry_run_counts_the_submodule_under_the_default_with_submodules(
+    repo_scenario,
+):
+    """Gate-6 finding 3 — dry-run's own unstaged count hardcoded
+    `--ignore-submodules=dirty` unconditionally, unaware of `with_submodules`
+    at all, so the preview undercounted under A6b's own default: a fork that
+    WOULD carry the submodule previewed as if it would not.
     """
     import json
 
@@ -439,8 +477,10 @@ def test_dry_run_counts_and_notices_match_what_the_fork_will_carry(repo_scenario
     assert completed.returncode == 0, completed.stderr.decode()
     document = json.loads(completed.stdout)
 
-    assert document["plan"]["files_to_carry"]["unstaged"] == 0
-    assert any("vendor/submodule" in notice for notice in document["notices"])
+    assert document["plan"]["files_to_carry"]["unstaged"] == 1
+    assert not any("not carried" in notice for notice in document["notices"]), (
+        "the default preview must not claim loss for what it will actually carry"
+    )
 
 
 @pytest.mark.matrix("T-CLI-38")

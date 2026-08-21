@@ -55,6 +55,7 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 | T-CFG-26 | A6b step 3 — `with_submodules=True` does not imply `with_state=True`; the coupling is deliberately one-directional, unlike `with_ignored` | baseline | U | live | A6 design doc §Flag |
 | T-CFG-27 | A6b step 3 — an explicit `with_submodules` flag outranks a configured source, matching `with_state`'s precedence | baseline | U | live | A6 design doc, implementation plan step 3 |
 | T-CFG-28 | A6b step 3 — `[fork] with_submodules` round-trips through a config file and validates as boolean | baseline | U | live | A6 design doc, implementation plan step 3 |
+| T-CFG-29 | Gate-6 finding 4 — a lower-precedence `with_state=false` does not permanently zero `with_submodules`; a later, higher-precedence source that only re-enables `with_state` restores the independently resolved default | baseline | U | live | gate-6 finding 4 |
 
 ---
 
@@ -175,6 +176,7 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-26 | A6a gate-6 pass 2 — a deleted submodule checkout forks end to end through the console script, not merely past the guard | baseline | F | live | A6 gate-6 pass-2 L2 |
 | T-GRD-27 | A6b step 6 — cell `c` (unstaged gitlink advance) no longer refuses under the default `with_submodules=True`; carrying makes it representable, so the guard must not fire | baseline | F | live | A6 design doc §Split; gate-4 pass 4 |
 | T-GRD-28 | A6b step 6 — the same cell `c` still refuses under `--no-with-submodules`; the guard's opt-out path is preserved, not deleted | baseline | F | live | A6 design doc §Split; gate-4 pass 4 |
+| T-GRD-29 | Gate-6 finding 3 — dry-run's own `validate_fork_guards` call never passed `with_submodules`, so a dry-run refused cell `c` under the tool's own default settings, disagreeing with what the real fork would do | baseline | F | live | gate-6 finding 3 |
 
 ---
 
@@ -321,6 +323,8 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-52 | A6b coverage gap — cell `f` (a dirty submodule alongside an ordinary dirty file) carries through the recipe; the two transport mechanisms genuinely coexist | baseline | F | live | A6 design doc §Matrix 1 cell `f`; coverage audit |
 | T-MAT-53 | A6b coverage gap — the offline URL override engages for a relative `.gitmodules` URL at the carry-recipe level, not only at the snapshot level | baseline | F | live | coverage audit |
 | T-MAT-54 | A6b coverage gap — depth-2 dirt: a dirty tracked file inside a submodule nested two levels deep carries, distinct from cell `h`'s clean-nested case | baseline | F | live | A6 design doc §Implementation plan step 1; coverage audit |
+| T-MAT-56 | Gate-6 finding 5 — a submodule config name containing a space parses correctly (`--null`, not a single-space split) and the offline override actually engages, proven against a remote-unreachable URL | baseline | F | live | gate-6 finding 5 |
+| T-MAT-57 | Gate-6 finding 5 — a submodule config name containing `=` cannot be expressed as a `-c key=value` override; skipped with a notice rather than silently falling through to the real, uncontrolled remote | baseline | F | live | gate-6 finding 5 |
 
 ---
 
@@ -378,6 +382,9 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 | T-VER-43 | A6b coverage gap — a mixed-time race between snapshot and carry is caught by verification: carry transports live bytes, verification compares against the frozen snapshot, so the race surfaces as a divergence rather than passing silently | baseline | F | live | coverage audit |
 | T-VER-44 | A6b coverage gap — gate-4 pass 1 finding 4: the semantic pin (`diff.ignoreSubmodules=none`) actually changes the output of the recursive `collect_inventory` calls it is threaded into, not merely present as an unused parameter | baseline | F | live | gate-4 pass 1 finding 4; coverage audit |
 | T-VER-45 | A6b coverage gap — `--with-ignored` inside a submodule: an ignored file carries and recursive verification's content rung must thread `with_ignored` rather than hardcoding `False`, which otherwise reports a correctly-carried ignored file as "no longer carried" | baseline | F | live | A6 design doc §Implementation plan step 1; coverage audit; found by this test (real bug, fixed) |
+| T-VER-46 | Gate-6 finding 2 — the real snapshot→carry→verify pipeline, not the primitive directly: ambient `diff.ignoreSubmodules=all` at snapshot time must not cause a false "newly carried" difference when carry and verify, both pinned, correctly see what the unpinned snapshot missed | baseline | F | live | gate-6 finding 2 |
+| T-VER-47 | Gate-6 finding 1 — rung 7 ("recursive parent-untouched") compared only dirty-inventory content, never the parent submodule's own HEAD; a clean commit-to-commit move between snapshot and verify must still be caught | baseline | F | live | gate-6 finding 1 |
+| T-VER-48 | Gate-6 finding 7 — rung 6 compared the bare, unqualified `plan.path` against `skipped`, which `carry_submodules` qualifies with its outer prefix (`outer/inner`); a skipped NESTED plan could never be detected as a result | baseline | F | live | gate-6 finding 7 |
 
 ---
 
@@ -591,6 +598,7 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-36 | A6a gate-6 — the console script forwards `--no-with-state` to the submodule guard, so the refusal and its remedy are proven through the real CLI rather than a direct call | baseline | F | live | A6 gate-6 finding 5 |
 | T-CLI-37 | A6a gate-6 — dry-run counts and notices describe the fork that will actually happen: a dirty submodule previews as zero unstaged paths and carries a loss notice | baseline | F | live | A6 gate-6 finding 2 |
 | T-CLI-38 | A6a gate-6 — `submodule_unrepresentable` appears in the README row for its own exit status, parsed from the table rather than searched for anywhere in the file | baseline | F | live | A6 gate-6 finding 7, narrowed in pass 2 |
+| T-CLI-39 | Gate-6 finding 3 — dry-run's own unstaged count hardcoded `--ignore-submodules=dirty` unconditionally, undercounting a submodule under the tool's own `with_submodules` default | baseline | F | live | gate-6 finding 3 |
 
 ---
 

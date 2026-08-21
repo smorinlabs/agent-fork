@@ -8,8 +8,8 @@ verification verdict through implementation sign-off.
 | 1. Adversarial verification | **CONFIRMED-WITH-CORRECTIONS** (2026-08-17) — matrices below; Codex second lens returned CONFIRM-WITH-CORRECTIONS, findings 5 and 6 narrow the verdict wording |
 | 3. Design doc | this document |
 | 4. Plan + adversarial plan review (incl. Codex) | **NOT-READY on four passes, closed by owner decision 2026-08-21 rather than pursuing a fifth.** Passes 1–3 summarized below this table's history (see git log on this file for the full text of each). Pass 4, 2026-08-21, scoped to the steps-6/7/8 merge: four findings, all absorbed — see the pass-4 commit (`d8099b9`) for the full list. Across four passes, zero mechanism-level defects survived past pass 2; every pass-3 and pass-4 finding was plan-prose precision, not a design flaw, and two of those findings were introduced by the prior round's own fix rather than pre-existing — the pattern of diminishing severity plus doc-editing risk outweighing review value is why the owner stopped here. Remaining precision risk is deferred to gate 6, which caught real bugs on A6a's own two rounds and reviews actual code rather than prose describing code that does not yet exist. |
-| 5. Implementation (TDD, subagent-driven) | **complete**, 2026-08-21 — all 8 steps landed plus a coverage-gap-closure pass (commits `1c760d8`..`83ce5e6`, this branch); `just all` green (572 passed, 1 skipped), `just check-matrix` green, `just test-git-matrix` green against both system Git and Flox Git |
-| 6. Adversarial implementation review (incl. Codex) | pending |
+| 5. Implementation (TDD, subagent-driven) | **complete**, 2026-08-21 — all 8 steps plus a coverage-gap-closure pass, this branch; `just all`, `just check-matrix`, `just test-git-matrix` all green |
+| 6. Adversarial implementation review (incl. Codex) | **round 1: REJECT** (2026-08-21, Codex) — 8 findings, all independently verified real by direct code reading and reproduction before any fix; absorbed in this branch (see commit for the full list). Round 2 pending. |
 
 ## Gate 4 — adversarial plan review, first pass
 
@@ -425,23 +425,37 @@ configuration — none of these may be assumed to hold their defaults or to be
 cloned.
 
 **Implementation-time finding (2026-08-21, during the coverage audit
-preceding gate 6).** `_SEMANTIC_PINS` ships with only `diff.ignoreSubmodules`.
-Verified empirically: an ambient `submodule.<name>.ignore=all` in the
-parent's own config defeats the `-c diff.ignoreSubmodules=none` pin on
-`collect_inventory`'s unstaged listing exactly as this section warned
-(command-line `--ignore-submodules=none` overrides it; the `-c` pin does
-not) — confirmed with a direct `git diff --name-only` comparison, pinned
-vs. unpinned vs. the explicit flag. But an end-to-end fork under this exact
-condition still carries and verifies correctly: `snapshot_submodules`,
-`carry_submodules`, and `verify_submodules` all enumerate via `.gitmodules`
-directly, and `capture_state` derives gitlink paths from the index
-(`GITLINK_MODE`), so none of the three correctness-critical paths trust
-`collect_inventory`'s filtered `unstaged` list for submodule membership. The
-gap is real but currently inert — its only observed effect is a cosmetic
-undercount in dry-run's `files_to_carry.unstaged`. `submodule.recurse` and
-`status.submoduleSummary` were not independently probed; `status.submoduleSummary`
-only affects git's human-readable long-format summary text, not `--porcelain`
-output, so it cannot affect any machine-parsed call agent-fork makes.
+preceding gate 6), corrected by gate 6 itself.** `SEMANTIC_PINS` originally
+shipped with only `diff.ignoreSubmodules`, applied to `carry_submodules` and
+`verify_submodules` but NOT to `snapshot_submodules`'s own internal
+`collect_inventory`/`capture_state` calls. The coverage-audit pass verified
+the `-c` pin loses to a command-line `--ignore-submodules` flag and to a
+per-submodule `submodule.<name>.ignore` config value (matching this
+section's own original warning), but concluded from that alone that the gap
+was "real but currently inert" because `snapshot_submodules`,
+`carry_submodules`, and `verify_submodules` all independently enumerate
+submodules via `.gitmodules`/the index, not via the vulnerable
+`collect_inventory` call. **That conclusion was wrong.** Gate 6 (finding 2)
+found the actual failure mode: with ambient `diff.ignoreSubmodules=all` set
+inside a submodule's own config and its inner submodule genuinely advanced,
+the UNPINNED snapshot's `plan.content` never recorded the advance, while
+carry (pinned) correctly transported it and verify (pinned) correctly
+detected it in the child — producing a false "newly carried" verification
+failure for a submodule carry did exactly the right thing on. The domain
+mismatch, not enumeration, was the real risk; the audit's own end-to-end
+test never actually drove the full snapshot→carry→verify pipeline, only the
+`collect_inventory` primitive directly, which is why it missed this. Fixed
+by threading `SEMANTIC_PINS` into `_snapshot_one`'s calls too, and — since
+the same masking can make the child's freshly-initialized submodule and the
+parent's own ambiently-configured one report genuinely different raw
+`git status` output even with correctly-carried content — into
+`pipeline.py`'s and `verify.py`'s own top-level `collect_inventory`/
+`capture_state`/status calls whenever submodules are carried. `T-VER-46` is
+the regression, driving the real pipeline. `submodule.recurse` was not
+independently probed and remains an open, disclosed risk.
+`status.submoduleSummary` only affects git's human-readable long-format
+summary text, not `--porcelain` output, so it cannot affect any
+machine-parsed call agent-fork makes.
 
 ### Recursive verification (finding 2)
 

@@ -351,3 +351,25 @@ def test_with_submodules_round_trips_through_config_file(repo_scenario):
     bad.write_text('[fork]\nwith_submodules = "yes"\n')
     with pytest.raises(ConfigError, match="must be boolean"):
         load_config(bad)
+
+
+@pytest.mark.matrix("T-CFG-29")
+def test_with_state_restored_by_a_later_source_restores_with_submodules_default(
+    repo_scenario,
+):
+    """Gate-6 finding 4 -- a LOWER-precedence with_state=False must not
+    permanently zero with_submodules once a HIGHER-precedence source
+    re-enables with_state. The prior implementation destructively reset
+    with_submodules to False inside the with_state branch, and nothing
+    restored it when a later source only touched with_state -- an explicit
+    `--with-state` meant to override a config file's with_state=false
+    silently left submodule carrying off, contrary to the documented
+    default.
+    """
+    from agent_fork.config import resolve_config
+
+    resolved = resolve_config(
+        sources=({"with_state": False},), flags={"with_state": True}
+    )
+    assert resolved.with_state is True
+    assert resolved.with_submodules is True

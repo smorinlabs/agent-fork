@@ -111,6 +111,7 @@ def materialize(
     *,
     with_state: bool = True,
     with_ignored: bool = False,
+    with_submodules: bool = False,
     inventory: Inventory | None = None,
     env: Mapping[str, str] | None = None,
     config_pins: Sequence[tuple[str, str]] = (),
@@ -226,5 +227,7 @@ def materialize(
         copied_untracked=len(untracked),
         copied_ignored=len(ignored),
         intent_to_add=tuple(ita_paths),
-        notices=submodule_loss_notices(parent, env=env),
+        notices=(
+            submodule_loss_notices(parent, env=env) if not with_submodules else ()
+        ),
     )

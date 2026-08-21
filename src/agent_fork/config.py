@@ -94,7 +94,14 @@ def resolve_config(
             with_state = source.with_state
             if not source.with_state:
                 with_ignored = False
-                with_submodules = False
+                # with_submodules is deliberately NOT reset here: the final
+                # `with_submodules and with_state` AND below already turns it
+                # off whenever with_state stays off. Resetting it here too was
+                # destructive across sources -- a later, higher-precedence
+                # source that only re-enables with_state (without touching
+                # with_submodules) must see with_submodules return to its own
+                # independently resolved value, not a value this branch
+                # permanently zeroed (gate-6 finding 4).
         if source.with_ignored is not None:
             with_ignored = source.with_ignored
             if source.with_ignored:

@@ -29,7 +29,7 @@ from agent_fork.repository import (
     validate_fork_guards,
 )
 from agent_fork.rollback import run_with_rollback
-from agent_fork.submodules import carry_submodules, snapshot_submodules
+from agent_fork.submodules import SEMANTIC_PINS, carry_submodules, snapshot_submodules
 from agent_fork.verify import verify_fork
 
 
@@ -122,15 +122,22 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
     parent_status = run_git(
         request.parent, ["status", "--porcelain=v1", "-z"], env=env
     ).stdout
+    # SEMANTIC_PINS applies to the top-level capture too, not just the
+    # recursive submodule calls, whenever submodules are carried (gate-6
+    # finding 2): ambient config anywhere in a carried submodule's tree can
+    # otherwise make the top-level inventory see less than what carry and
+    # verify -- both pinned -- see afterward, producing a false difference.
+    top_level_pins = SEMANTIC_PINS if request.with_submodules else ()
     inventory = collect_inventory(
         request.parent,
         with_state=request.with_state,
         with_ignored=request.with_ignored,
         with_submodules=request.with_submodules,
         env=env,
+        config_pins=top_level_pins,
     )
     parent_state = (
-        capture_state(request.parent, inventory, env=env)
+        capture_state(request.parent, inventory, env=env, config_pins=top_level_pins)
         if request.verify and request.with_state
         else None
     )
@@ -157,6 +164,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             creation.path,
             with_state=request.with_state,
             with_ignored=request.with_ignored,
+            with_submodules=request.with_submodules,
             inventory=inventory,
             env=env,
         )

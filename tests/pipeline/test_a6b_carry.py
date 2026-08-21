@@ -332,6 +332,132 @@ def test_carry_recurses_a_dirty_change_at_depth_two(repo_scenario):
     assert _status(world, child) == _status(world, world.parent_path)
 
 
+@pytest.mark.matrix("T-MAT-56")
+def test_carry_works_offline_with_a_space_in_the_submodule_name(repo_scenario):
+    """Gate-6 finding 5 -- `_gitmodules_names`'s naive `partition(" ")` broke on
+    a config name containing its own space (a legal, realistic Git submodule
+    name): `git config --get-regexp`'s output is `<key> <value>`
+    space-separated, but the KEY itself also contains the name's embedded
+    space, so a plain single-space split mis-parses the key/value boundary.
+    The parser must use `--null` (`key\\nvalue\\0`) instead. Combined with a
+    remote-unreachable URL, same as T-MAT-45, to prove the offline override
+    actually engages under the fixed parser rather than being masked.
+    """
+    world = repo_scenario(
+        "plain@main",
+        states=(submodule(name="evil name", url_kind="remote-unreachable"),),
+    )
+    child = world.parent_path.parent / "a6b-spaced-name"
+    result = _carry(world, child)
+    assert "vendor/submodule" in result.carried
+    assert (child / "vendor/submodule/.git").exists()
+
+
+@pytest.mark.matrix("T-MAT-57")
+def test_carry_skips_a_submodule_whose_name_contains_equals(repo_scenario):
+    """Gate-6 finding 5 -- a config name containing `=` cannot be expressed as
+    a command-scoped `-c submodule.<name>.url=...` pin: git's `-c key=value`
+    syntax has no way to distinguish the name's own `=` from the pin's
+    separator. Rather than silently apply a broken pin (which would fall
+    through to Git contacting the real, uncontrolled `.gitmodules` remote --
+    exactly the offline guarantee this recipe exists to provide), the
+    submodule must be skipped, with a notice naming why. Remote-unreachable
+    proves this: if carry attempted the remote fallback, it would hang or
+    fail against 192.0.2.1 rather than skip cleanly.
+    """
+    world = repo_scenario(
+        "plain@main",
+        states=(submodule(name="eq=name", url_kind="remote-unreachable"),),
+    )
+    child = world.parent_path.parent / "a6b-eq-name"
+    result = _carry(world, child)
+    assert "vendor/submodule" in result.skipped
+    assert "vendor/submodule" not in result.carried
+    assert any(
+        "vendor/submodule" in notice and "=" in notice for notice in result.notices
+    )
+    assert not (child / "vendor/submodule/.git").exists()
+
+
+@pytest.mark.matrix("T-VER-47")
+def test_rung_7_catches_the_parent_submodule_cleanly_moving_head(repo_scenario):
+    """Gate-6 finding 1 -- rung 7 ("recursive parent-untouched") compared only
+    dirty-inventory-derived content, never the parent submodule's own HEAD.
+    A clean commit-to-commit move (R -> S) between snapshot and verify leaves
+    the inventory empty at both R and S -- content comparison alone sees
+    nothing -- so without a HEAD check this passes even though the parent
+    changed. Mirrors rung 2's child HEAD-identity check, one side over.
+    """
+    from agent_fork.submodules import snapshot_submodules, verify_submodules
+
+    world = repo_scenario("plain@main", states=(submodule(committed=True),))
+    outer = world.parent_path / "vendor/submodule"
+    plans = snapshot_submodules(world.parent_path, with_state=True, env=world.env)
+    assert plans[0].head is not None
+
+    # The race: the parent submodule cleanly moves to a NEW commit after the
+    # snapshot was taken -- not a dirty change, a clean checkout elsewhere.
+    (outer / "tracked.txt").write_text("moved to a new commit\n")
+    _git(world, outer, "commit", "-qam", "advance cleanly")
+    new_head = _git(world, outer, "rev-parse", "HEAD").stdout.decode().strip()
+    assert new_head != plans[0].head
+
+    child = world.parent_path.parent / "a6b-parent-head-race"
+    from agent_fork.repository import create_worktree_at_anchor
+    from agent_fork.submodules import carry_submodules
+
+    create_worktree_at_anchor(
+        world.parent_path, "fork/a6b-parent-head-race", child, env=world.env
+    )
+    carry_submodules(world.parent_path, child, plans, with_state=True, env=world.env)
+
+    differences = verify_submodules(world.parent_path, child, plans, env=world.env)
+    assert differences, (
+        "the parent submodule's HEAD moved between snapshot and verify; "
+        "rung 7 must catch it even though the working tree stayed clean "
+        "at both commits"
+    )
+
+
+@pytest.mark.matrix("T-VER-48")
+def test_rung_6_detects_a_skipped_nested_submodule_via_its_qualified_path(
+    repo_scenario,
+):
+    """Gate-6 finding 7 -- carry_submodules qualifies a nested skipped path
+    with its outer prefix (`outer/inner`, T-MAT-48's own recursion pattern),
+    but verify_submodules compared the bare, unqualified `plan.path`
+    ("inner") against that globally-prefixed tuple at every recursion depth.
+    Rung 6 could never detect a skipped NESTED plan as a result -- only a
+    skip at the top level, where no prefix exists to mismatch. Direct
+    injection, per the design's own fault-injection style: fabricate exactly
+    the `skipped` shape carry_submodules would have produced.
+    """
+    from agent_fork.submodules import snapshot_submodules, verify_submodules
+
+    world = repo_scenario(
+        "plain@main", states=(submodule(nested=True, committed=True),)
+    )
+    plans = snapshot_submodules(world.parent_path, with_state=True, env=world.env)
+    inner_plan = plans[0].nested[0]
+    assert inner_plan.path == "inner"
+
+    differences = verify_submodules(
+        world.parent_path,
+        world.parent_path,  # child is irrelevant; rung 6 short-circuits
+        plans,
+        skipped=("vendor/submodule/inner",),
+        env=world.env,
+    )
+    skip_findings = [d for d in differences if d.check == "submodule-skipped"]
+    assert skip_findings, (
+        "rung 6 must catch a skipped NESTED plan, not just a top-level one"
+    )
+    assert skip_findings[0].path == "vendor/submodule/inner", (
+        "the difference itself must carry the qualified path -- a bare "
+        "'inner' is ambiguous when more than one submodule could have one"
+    )
+
+
 @pytest.mark.matrix("T-VER-43")
 def test_a_mixed_time_race_is_caught_by_verification_not_silently_carried(
     repo_scenario,

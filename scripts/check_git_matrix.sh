@@ -44,15 +44,24 @@ flox activate -d "$flox_root" -- bash -c '
 # gate-4 pass 1 finding 3 already complained about, in a different shape --
 # so the number gets measured and written down, not assumed.
 #
-# Measured 2026-08-20, this machine, system Git (Apple Git), a 50,002-object
+# Measured 2026-08-21, this machine, system Git (Apple Git), a 50,002-object
 # submodule (50,000 tracked files, one commit, gc.auto disabled so the
 # object count stays representative rather than getting silently packed):
-# with-submodule fork = 40-43s, without-submodule fork = 1s, delta = ~40s.
-# Re-run this function and update the comment if the recipe's cost profile
-# changes materially.
+# with-submodule fork = 40-63s across repeated runs (system-load-sensitive),
+# without-submodule fork = 1s. Re-run this function and update the comment
+# if the recipe's cost profile changes materially.
 measure_clone_cost() {
   local tmp agent_fork_bin
   tmp=$(mktemp -d)
+  # Gate-6 finding 8: this benchmark used the caller's REAL, shared XDG
+  # registry with fixed names (bench-with/bench-without) -- add_entry()
+  # replaces any same-name record, so a real fork the user happened to have
+  # registered under either name would be silently overwritten, and `set -e`
+  # meant a failing benchmark command skipped cleanup entirely. Isolating
+  # XDG_STATE_HOME to this run's own tmp dir removes both risks at once: the
+  # trap below cleans it up even on early exit.
+  export XDG_STATE_HOME="$tmp/xdg-state"
+  trap 'rm -rf "$tmp"' RETURN
   agent_fork_bin="$worktree_root/.venv/bin/agent-fork"
 
   local sub="$tmp/big-submodule"
@@ -113,14 +122,15 @@ measure_clone_cost() {
   printf 'clone-cost: with-submodule=%ss without-submodule=%ss delta=%ss\n' \
     "$with_elapsed" "$without_elapsed" "$((with_elapsed - without_elapsed))"
 
-  # Deregister before removing $tmp: agent-fork's own cleanup needs the
-  # worktree path to still exist, so this must run first or it leaves an
-  # orphaned registry entry with no path left to clean it up by (the
-  # cleanup command needs to cd into the target).
+  # Deregister before the RETURN trap removes $tmp (which now also holds the
+  # isolated registry): agent-fork's own cleanup needs the worktree path to
+  # still exist, so this must run first or it leaves an orphaned registry
+  # entry with no path left to clean it up by (the cleanup command needs to
+  # cd into the target). Harmless either way now that XDG_STATE_HOME is
+  # isolated -- this is a smoke test of the real cleanup path, not a safety
+  # requirement.
   "$agent_fork_bin" cleanup bench-with --force --yes >/dev/null 2>&1 || true
   "$agent_fork_bin" cleanup bench-without --force --yes >/dev/null 2>&1 || true
-
-  rm -rf "$tmp"
 }
 
 measure_clone_cost

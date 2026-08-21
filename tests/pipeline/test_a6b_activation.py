@@ -13,6 +13,7 @@ flip from red to green.
 from __future__ import annotations
 
 import subprocess
+from typing import cast
 
 import pytest
 
@@ -61,6 +62,13 @@ def test_default_fork_carries_a_dirty_submodule_and_verifies(repo_scenario):
         world, result.creation.path / "vendor/submodule", "status", "--porcelain=v1"
     ).stdout
     assert inner == b" M tracked.txt\n"
+    # Gate-6 finding 3 -- materialize() unconditionally emitted the "not
+    # carried" loss notice regardless of with_submodules, so a default fork
+    # reported both "carried" and "not carried" for the same submodule. The
+    # earlier version of this test never checked for the false notice's
+    # absence, which is exactly how the bug went unnoticed.
+    assert not any("not carried" in notice for notice in result.notices)
+    assert any("submodule carried" in notice for notice in result.notices)
 
 
 @pytest.mark.matrix("T-VER-41")
@@ -100,6 +108,24 @@ def test_cell_c_still_refuses_when_submodules_are_not_carried(repo_scenario):
     assert raised.value.code == "submodule_unrepresentable"
 
 
+@pytest.mark.matrix("T-GRD-29")
+def test_dry_run_does_not_refuse_cell_c_under_the_default(repo_scenario):
+    """Gate-6 finding 3 — the dry-run's own `validate_fork_guards` call never
+    passed `with_submodules`, so its default of False made a dry-run refuse
+    cell `c` (unstaged gitlink advance) under the tool's OWN default settings
+    -- a preview disagreeing with what the real fork would actually do.
+    """
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="advanced"),))
+    completed = run_cli(
+        ["fork", "preview", "--no-agent", "--dry-run", "-o", "json"],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+
+
 @pytest.mark.matrix("T-VER-42")
 def test_recursive_verification_catches_a_wrong_submodule_head(repo_scenario):
     """Rung 2 (HEAD identity) — the sharpest test in the whole design.
@@ -112,6 +138,7 @@ def test_recursive_verification_catches_a_wrong_submodule_head(repo_scenario):
     corrupting fork()'s own internals mid-flight isn't reachable from outside.
     """
     from agent_fork.content import capture_state, collect_inventory
+    from agent_fork.errors import VerificationError
     from agent_fork.repository import create_worktree_at_anchor, validate_fork_guards
     from agent_fork.submodules import carry_submodules, snapshot_submodules
     from agent_fork.verify import verify_fork
@@ -150,7 +177,7 @@ def test_recursive_verification_catches_a_wrong_submodule_head(repo_scenario):
         "HEAD",
     )
 
-    with pytest.raises(Exception) as raised:
+    with pytest.raises(VerificationError) as raised:
         verify_fork(
             creation,
             with_state=True,
@@ -160,9 +187,23 @@ def test_recursive_verification_catches_a_wrong_submodule_head(repo_scenario):
             submodule_plans=plans,
             env=world.env,
         )
-    assert (
-        "vendor/submodule" in str(raised.value) or "head" in str(raised.value).lower()
-    )
+    # Gate-6 finding 7 sharpening: assert the STRUCTURED failed_checks name
+    # rung 2 ("submodule-head") specifically, rather than only checking the
+    # human message mentions "vendor/submodule" or "head" -- the corruption
+    # also makes the submodule's own working tree differ (a new commit was
+    # made), so top-level exact-copy-status/content-match can independently
+    # fire too. That would make this assertion pass even if rung 2's own
+    # HEAD-identity check were deleted, undermining its claim to isolate
+    # what it tests. Structured kinds pin it to the recursive rung itself.
+    error = raised.value
+    assert error.details is not None
+    checks = cast("list[dict[str, object]]", error.details["failed_checks"])
+    kinds = {
+        entry["kind"]
+        for check in checks
+        for entry in cast("list[dict[str, object]]", check["differences"])
+    }
+    assert "submodule-head" in kinds
 
 
 @pytest.mark.matrix("T-OUT-24")
@@ -180,6 +221,37 @@ def test_json_output_carries_with_submodules_and_the_carry_notice(repo_scenario)
     document = json.loads(completed.stdout)
     assert document["fork"]["mode"]["with_submodules"] is True
     assert any("vendor/submodule" in notice for notice in document["notices"])
+
+
+@pytest.mark.matrix("T-VER-46")
+def test_ambient_config_at_snapshot_time_does_not_cause_a_false_verification_failure(
+    repo_scenario,
+):
+    """Gate-6 finding 2 -- the snapshot's own `collect_inventory`/`capture_state`
+    calls ran WITHOUT the semantic pins that `carry_submodules` and
+    `verify_submodules` both apply. Concretely: with ambient
+    `diff.ignoreSubmodules=all` set inside the outer submodule's own local
+    config, and its inner nested submodule genuinely advanced, the snapshot's
+    unpinned inventory call would not see `inner` as dirty (masked by the
+    ambient config), while carry (pinned) correctly transports it and verify
+    (pinned) correctly detects it in the child -- producing a false
+    "newly carried" / "unexpected" difference purely from the domain
+    mismatch between an unpinned snapshot and a pinned verify, even though
+    carry did exactly the right thing. Drives the real end-to-end pipeline,
+    not the primitive directly, so a domain-mismatch regression here fails
+    for the right reason.
+    """
+    world = repo_scenario(
+        "plain@main", states=(submodule(nested=True, committed=True),)
+    )
+    outer = world.parent_path / "vendor/submodule"
+    _git(world, outer, "config", "diff.ignoreSubmodules", "all")
+    (outer / "inner" / "tracked.txt").write_text("advanced\n")
+    _git(world, outer / "inner", "commit", "-qam", "advance the inner submodule")
+
+    result = _fork(world, "ambient-config-snapshot")
+    child_inner = result.creation.path / "vendor/submodule" / "inner" / "tracked.txt"
+    assert child_inner.read_text() == "advanced\n"
 
 
 @pytest.mark.matrix("T-VER-45")
