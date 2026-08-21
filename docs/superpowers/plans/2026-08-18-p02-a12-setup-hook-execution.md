@@ -31,8 +31,8 @@ plugins, and no interactive behavior.
 | 1. Adversarial verification, including Codex | **CONFIRMED-WITH-CORRECTION** on 2026-08-17 (this document's Gate-1 evidence); independently reconfirmed **CONFIRMED-WITH-CORRECTIONS** on 2026-08-20 via a fresh live repro plus a Codex source-trace, committed at `30f5e76` on `worktree-p02-a12-ts12-reverify` |
 | 2. Owner scope decision | **three constraints settled** at scoping time, recorded below. The plan's four open design questions are now **all settled** — see Owner decisions |
 | 3. Design document | **this document** |
-| 4. Implementation plan and adversarial review, including Codex | pending |
-| 5. Test-driven implementation | pending |
+| 4. Implementation plan and adversarial review, including Codex | **no separate artifact** — "Test-driven implementation plan" below is the plan, and no plan-level review document exists under `docs/reviews/` (only the gate-1 re-verification, `2026-08-20-p02-a12-ts12-reverification.md`). Recorded as observed rather than inferred |
+| 5. Test-driven implementation | **complete** — Steps 1–6 at `aa8948d`…`e88b915`, plus the gate-6 corrections below |
 | 6. Adversarial implementation review, including Codex | **CONFIRMED-WITH-CORRECTIONS** on 2026-08-20 — two independent lenses (Claude, Codex) found corroborating defects in the shipped implementation; all are fixed, with five new matrix rows. See "Gate-6 corrections" |
 
 ---

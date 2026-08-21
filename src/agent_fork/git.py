@@ -52,9 +52,12 @@ def signal_process_group(
 ) -> None:
     """Signal one owned process group without masking an active exception.
 
-    Public because ``include`` reuses it for the repository setup hook (A12).
-    Copying it would duplicate the macOS ``EPERM`` handling below, which
-    ``T-RBK-07`` exists to pin.
+    Made public for the repository setup hook (A12) and kept public for that
+    history; ``T-RBK-07`` pins the macOS ``EPERM`` handling below. A12's gate-6
+    review then found the early return on an already-exited leader wrong for a
+    hook, whose backgrounded children are the whole point of signalling, so
+    ``include`` now carries a deliberately divergent ``_signal_hook_group()``.
+    Git spawns nothing that outlives it, so this gate stays correct here.
     """
     if process.poll() is not None:
         return
