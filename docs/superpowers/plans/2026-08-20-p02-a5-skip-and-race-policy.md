@@ -49,6 +49,12 @@ state and the fork succeeds carrying a warning.
 2026-08-20). A path Git tracks is never skipped; see "Why tracked paths do not
 skip" below.
 
+**This table is a summary, not the contract.** "Skip Preconditions" below is
+the single normative statement: a skip additionally requires that `lstat`
+succeeded and that the fork carries no deletion. An implementer must read that
+section; following this table alone reintroduces both the unprovable skip and
+the rename-endpoint loss.
+
 | Condition met while copying | Default | `--strict` |
 |---|---|---|
 | Untracked or ignored file cannot be read | skip, warn, name every skipped path | fail, with the same warning |
@@ -188,8 +194,10 @@ implementations, and `ERROR_CATALOG` is asserted exactly by `tests/cli/test_out.
 | Summary | `--strict refused a fork with skipped entries` |
 | Companion code | `entry_unreadable`, exit `1`, for a carried entry that could not be read and could not be skipped |
 
-Both codes are added to `ERROR_CATALOG` **and** to the published catalog in
-`README.md`, which the exact-catalog test does not currently police.
+**Not yet implemented — this is a gate 4 requirement.** Neither code exists in
+`ERROR_CATALOG` or in the published catalog in `README.md` today. Both must be
+added in step 0, and the README entry matters because the exact-catalog test
+polices `errors.py` only.
 
 `entry_unreadable` carries its own stable `details` schema, because it names a
 path that was *not* skipped and may have to name the deletion blockers that
@@ -262,8 +270,21 @@ unreadable, and a file mutated during `copy2` can land torn with nothing
 detecting it. This race exists today; the readability guard neither creates
 nor closes it.
 
-Neither limit is introduced by A5. Both are pre-existing behaviours that A5
-declines to fix, and both fail toward a warning rather than toward silence.
+**Accuracy correction, 2026-08-20 (sixth review).** An earlier version of this
+section claimed that neither limit is introduced by A5 and that both fail
+toward a warning. Both halves were overstated. Corrected:
+
+| Limit | Pre-existing? | Fails toward |
+|---|---|---|
+| Ancestor race — the underlying TOCTOU | yes, exists today | — |
+| Ancestor race — the warn-and-omit *outcome* | **no, A5 introduces it.** Today `capture_state` performs `lstat` then an uncaught digest `open`, before the worktree exists, so this `EACCES` currently **fails** the fork. A5 converts that failure into a skip | a warning naming the path |
+| `.worktreeinclude` — unreadable after selection | yes | a warning naming the path |
+| `.worktreeinclude` — mutation during `copy2` | yes | **silence.** A torn copy can land with nothing detecting it |
+
+So one subcase is genuinely silent, and one consequence is new. The owner's
+acceptance of both limits stands and is not reopened by this correction; what
+changes is only that the record now states the tradeoff accurately rather than
+more comfortably than the evidence supports.
 
 ### Dropped from A5 by the narrowing
 
@@ -361,11 +382,13 @@ The FIFO-swap row is the collision the owner decision resolved. It confirms
 the prediction: the non-regular branch is unreachable from a pre-existing
 entry and reachable only from a mid-fork swap, where failing is correct.
 
-The unreadable-mid-window row confirms the design is implementable: a
-pre-existing unreadable file fails inside `capture_state` before the worktree
-exists, while the same condition arriving mid-window fails inside
-`_copy_entry` afterwards. The two are distinguishable by site, which is what
-lets one skip and the other fail.
+The unreadable-mid-window row records **current behaviour**, not intended
+policy: today a pre-existing unreadable file fails inside `capture_state`
+before the worktree exists, while the same condition arriving mid-window fails
+inside `_copy_entry` afterwards. An earlier draft of this design read that
+difference as a way to classify cause by failure site. That reading was
+abandoned — the governing rule is that the copy loop does not classify at all.
+See "Skip preconditions".
 
 ### Cleanup operation
 
@@ -495,7 +518,7 @@ registry write still enters rollback.
 | 1 | The `#28` paragraph still routed non-absence `lstat` errors into the skip path, contradicting the preconditions added in the same commit, and the register did not mirror the new rules. | refinement | **Fixed.** The `#28` paragraph now defers to the preconditions as the normative statement, and the register mirrors all three plus the sentinel and error codes. |
 | 2 | **NEW.** The sentinel is target-only, so an **ancestor** race defeats it: `lstat` on `d/file` succeeds, `d` becomes mode 000 before the separate open, the read fails and the entry is skipped, `d` is restored before verification, and every one of the six target fields is unchanged. The child omits a file that was readable at both boundaries. Renaming `d` away and back is the analogous path-identity race. | **new defect** | **Accepted as a known limit** by the owner, 2026-08-20. See "Known limits". |
 | 3 | The deletion precondition had no detector: `Inventory` keeps staged and unstaged paths name-only and discards status, so a staged `git rm --cached old` with an unreadable untracked `old` is invisible to absence-based detection. | refinement | **Fixed.** Explicit `--diff-filter=D` deletion facet, frozen alongside the inventory. |
-| 4 | `entry_unreadable` had no `details` schema and neither new code was added to the published `README.md` catalog, so an implementation could pass the catalog tests while exposing blocking paths only in an unstable message. | refinement | **Fixed.** Separate schema specified, including byte-wise ordered `deletion_blockers`; both codes published. |
+| 4 | `entry_unreadable` had no `details` schema and neither new code was added to the published `README.md` catalog, so an implementation could pass the catalog tests while exposing blocking paths only in an unstable message. | refinement | **Partly fixed.** The schema is specified. Publication was marked complete in error — neither code exists in `errors.py` or `README.md` yet; it is a gate 4 step 0 requirement. |
 
 #### Why finding 2 was accepted rather than fixed
 
