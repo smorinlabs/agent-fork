@@ -7,7 +7,7 @@ verification verdict through implementation sign-off.
 |---|---|
 | 1. Adversarial verification | **CONFIRMED-WITH-CORRECTIONS** (2026-08-17) — matrices below; Codex second lens returned CONFIRM-WITH-CORRECTIONS, findings 5 and 6 narrow the verdict wording |
 | 3. Design doc | this document |
-| 4. Plan + adversarial plan review (incl. Codex) | **NOT-READY** on three passes; fourth pending. First pass 2026-08-17: nine findings, four high, all absorbed. Re-validated against main 2026-08-20 (fault unchanged; `:(literal)` requirement added). Second pass 2026-08-20: two blockers absorbed (pins-vs-verbatim-reuse collision; carrying activated before its flag/verifier). Re-validated against A6a's shipped code 2026-08-21 (`9956f4a`): the opt-out row and step 6 assumed filtering that was never built; corrected to gate A6a's actual, more precise implementation. Third pass 2026-08-21: 8/9 first-pass findings confirmed genuinely absorbed, finding 8 reopened (Flag table self-contradicted its own prose) and fixed; five new findings fixed (recursive verification specified, owed coverage scheduled into step 1, resolved URL added to the frozen snapshot, stale citations corrected, Notices section de-staled); one structural finding — the second pass's own fix had re-split what must land atomically, across steps 6/7/8 — resolved 2026-08-21 by merging those three into one atomic step 6. **Fourth pass required, scoped to the merge** |
+| 4. Plan + adversarial plan review (incl. Codex) | **NOT-READY** on four passes; fifth pending. Passes 1–3 summarized below this table's history (see git log on this file for the full text of each). Pass 4, 2026-08-21, scoped to the steps-6/7/8 merge: four findings, absorbed — (1, high) the merge stated the gating relationship in prose but never pinned the exact booleans (`with_state and not with_submodules` for A6a's existing protection; `with_state and with_submodules` for carry and recursive verification), now a table in step 6; (2, medium) rung 6 (nested-plan completeness) needs both the frozen plan and the carry step's `skipped paths` return value, not the frozen plan alone, now stated; (3, medium) the merge silently dropped old step 8's `output.py`/JSON and configuration-fidelity-caveat obligations, restored; (4, low) "no point inside this step" was literally false against the bullets' own listed order, reworded to "no reviewed or merged commit boundary," with the safe internal TDD order (red tests first, both protections briefly coexist, old protection flipped off last) now stated. **Fifth pass required, scoped to this absorption** |
 | 5. Implementation (TDD, subagent-driven) | blocked on gate 4 re-review |
 | 6. Adversarial implementation review (incl. Codex) | pending |
 
@@ -193,7 +193,7 @@ The work therefore splits, mirroring the `P02-T13` umbrella convention:
 | Solves | The repository is unforkable | The submodule's work is not carried |
 | Change | `--ignore-submodules` filtering at three sites, accurate notice | Full recipe, recursive snapshot, `config_pins`, recursive verification |
 | Evidence | Validated 2026-08-17 against real child worktrees | Manual prototype only, 8 local depth-1 cells |
-| Gate 4 | Small enough that its need for a pass is an open question | Third pass required |
+| Gate 4 | Waived — evidence measured, not reasoned (see "Open items" below) | See the gate-4 row in the table at the top of this document for current status |
 | Size | Days | The eight-step plan below |
 
 The owner's carry-by-default decision is unchanged: `--with-submodules` remains
@@ -574,32 +574,63 @@ the default path less protected than before the step started.
    carried paths, skipped paths, and notices. Unit-tested directly; not yet
    called by the pipeline.
 6. **Activation — the one step where default behaviour changes, landed as one
-   commit.** Four things happen together; none is meaningful alone:
+   commit.** Four things happen together; none is meaningful alone. Exact
+   predicates (gate-4 pass 4 finding 1 — the merge stated the relationship in
+   prose but never pinned the booleans an implementer actually writes):
+
+   | | Condition |
+   |---|---|
+   | A6a's existing protection (guard + three filters) | `with_state and not with_submodules` |
+   | Carry, and recursive verification | `with_state and with_submodules` |
+   | `with_state=False` | neither fires, matching A6a's existing carve-on — no state carried, nothing to protect or carry (`repository.py`'s docstring on `with_state`) |
+
    - **Gate A6a's existing protection off for the carrying path.**
      `--ignore-submodules=dirty` at `verify.py:114`, `content.py`'s unstaged
      listing (~line 245), `cli.py:551`, and the guard condition in
-     `repository.py`'s `validate_fork_guards` all ship unconditionally today.
-     Make each conditional on `not with_submodules`.
-   - **Wire carry on.** Consume the frozen plan (step 4) through the recipe
-     (step 5): carry after `create_worktree_at_anchor`, before verification.
-     The sixteen cells from step 1 flip from red to green here — not nine;
-     step 1 was expanded by finding 3's absorption.
+     `repository.py`'s `validate_fork_guards` (currently `if with_state`, per
+     `repository.py:346-348`) all ship unconditionally-on-`with_state` today.
+     Change each to `with_state and not with_submodules` — **and**, not a bare
+     replacement of the existing condition.
+   - **Wire carry on**, gated on `with_state and with_submodules`. Consume the
+     frozen plan (step 4) through the recipe (step 5), which returns carried
+     paths, skipped paths, and notices; carry after `create_worktree_at_anchor`,
+     before verification. The sixteen cells from step 1 flip from red to
+     green here — not nine; step 1 was expanded by finding 3's absorption.
    - **Add the seven recursive verification rungs** specified under "Recursive
-     verification" above (init parity, HEAD identity, detached state, status
-     parity, content parity, nested-plan completeness, recursive
-     parent-untouched), scoped to the `with_submodules=True` path.
-   - **Gate the notice.** `submodule_loss_notices()` (`materialize.py:84`)
-     stays the opt-out message, now conditional the same way as the filters;
-     add the new "what was carried" notice for a successful carry (the
-     "Copy mode — still to build" bullet under "Notices" above).
+     verification" above, gated on the same `with_state and with_submodules`
+     condition. Rung 6, nested-plan completeness, needs **both** inputs from
+     the two bullets above — the frozen plan (every submodule that should have
+     been carried) and the carry step's own `skipped paths` return value
+     (which ones actually were) — a rung that reads only the frozen plan
+     cannot detect a submodule the carry step silently skipped, which is
+     exactly the failure this rung exists to catch (gate-4 pass 4 finding 2).
+   - **Gate the notice, and restore what old step 8 specified before the
+     merge compressed it away** (gate-4 pass 4 finding 3): `output.py`'s
+     `ForkOutput` JSON document carries the notices produced here, same as any
+     other notice; `submodule_loss_notices()` (`materialize.py:84`) stays the
+     opt-out message, now conditional on `with_state and not with_submodules`;
+     the new "what was carried" notice (the "Copy mode — still to build"
+     bullet under "Notices" above) fires on a successful carry and **must
+     state the configuration-fidelity limit from recipe step 3** — only
+     `remote.origin.url` is restored, not fetch refspecs or
+     `submodule.<name>.active`.
 
    `pipeline.py:119` and `verify.py:158` — the `parent-untouched` rung — stay
    unfiltered on both sides throughout, unconditionally, matching what A6a
    already does; this rung is not part of the four and does not change here.
 
-   Because these four land together, there is no point inside this step where
-   the default path has a submodule protection gap — the property the ordering
-   rule requires holds for the step as a whole, not step-by-step within it.
+   Because these four land together, **no reviewed or merged commit boundary**
+   has a submodule protection gap (gate-4 pass 4 finding 4 — the earlier
+   wording, "no point inside this step," was false: the bullets above are
+   listed by concern, not by build order, and gating old protection off before
+   carry and verification exist is a real, permitted mid-step WIP state).
+   TDD's own discipline gives the safe internal order for free: write the
+   red tests for carry, recursive verification, and the new notice first;
+   implement and turn them green while the old protection is still active
+   (both protections briefly coexist, which is safe — belt and suspenders,
+   never a gap); only then flip the guard/filter condition to exclude
+   `with_submodules`, confirm every test in the sixteen-cell matrix (step 1)
+   is green under both flag values, and make one commit.
 7. **`scripts/check_git_matrix.sh`** — copy-mode rows against both system Git
    and Flox Git, covering at minimum the `submodule.<name>.update=none`
    variance from finding 2's original repro; worktree/submodule interaction has
@@ -634,17 +665,19 @@ the default path less protected than before the step started.
 3. **A6a's gate-4 adversarial pass is waived.** Its change is three call sites
    plus a notice and a guard, on evidence measured against real child worktrees
    rather than reasoned. Gate 6 — adversarial review of the implementation — is
-   unchanged and still applies. A6b's third gate-4 pass is still required.
+   unchanged and still applies. A6b's gate-4 review continues until a pass
+   returns clean; see the gate table at the top of this document for the
+   current pass count and outcome of each.
 
 
-- **Gate 4 third pass required before implementation starts.** Two passes have
-  returned NOT-READY. The second pass's two blockers are absorbed above, but its
-  full report — including the per-finding absorption audit of the first pass's
-  nine findings — was lost when its sandbox mounted the worktree read-only and
-  `apply_patch` was rejected. Only the two findings recorded in its job log were
-  recovered, so **no pass has yet confirmed that findings 1–9 are genuinely
-  absorbed rather than cosmetically reworded.** The third pass must return its
-  report as its final message rather than writing a file.
+- **Gate 4 — additional pass required before implementation starts.** Current
+  status, live in the gate table above; do not hardcode a pass number here
+  (this bullet has drifted stale three times already from doing so). Pass 3
+  completed the audit the second pass's lost report could not: all nine
+  first-pass findings individually re-verified, eight confirmed genuinely
+  absorbed and one (8) reopened and fixed. Each pass since has required its
+  report as its final message, never a file — the loss that made pass 3's
+  audit necessary in the first place must not recur.
 - ~~Cells the matrix still owes~~ — **superseded**: these seven axes are now
   required rows in implementation plan step 1, not a bullet with no owner.
 - The gate's probe scripts are session scaffolding, not repository artifacts;
