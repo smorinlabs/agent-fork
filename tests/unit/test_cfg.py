@@ -254,3 +254,42 @@ def test_codex_session_name_resolution_config_and_flag_precedence(repo_scenario)
         ).codex_session_name_resolution
         is True
     )
+
+
+@pytest.mark.matrix("T-CFG-24")
+def test_setup_hook_keys_default_and_obey_precedence(repo_scenario):
+    """T-CFG-24 — A12 policy resolution.
+
+    Given:  no source, a config-file source, and an explicit flag
+    Expect: `setup_hook_policy` defaults to `tracked` and `setup_hook_timeout`
+            to 300 seconds; an explicit flag beats a config value; and
+            `off` dominates whatever a lower-precedence source asked for
+    Source: P02 A12; REQ-12; REQ-13
+    """
+    from agent_fork.config import load_config, resolve_config
+
+    world = repo_scenario()
+    default = resolve_config()
+    assert default.setup_hook_policy == "tracked"
+    assert default.setup_hook_timeout == 300
+
+    path = world.parent_path / "hook.toml"
+    path.write_text('[fork]\nsetup_hook_policy = "any"\nsetup_hook_timeout = 45\n')
+    loaded = load_config(path)
+    configured = resolve_config(sources=(loaded,))
+    assert configured.setup_hook_policy == "any"
+    assert configured.setup_hook_timeout == 45
+
+    flagged = resolve_config(
+        sources=(loaded,),
+        flags={"setup_hook_policy": "tracked", "setup_hook_timeout": 10},
+    )
+    assert flagged.setup_hook_policy == "tracked"
+    assert flagged.setup_hook_timeout == 10
+
+    assert (
+        resolve_config(
+            sources=(loaded,), flags={"setup_hook_policy": "off"}
+        ).setup_hook_policy
+        == "off"
+    )

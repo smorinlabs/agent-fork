@@ -50,6 +50,9 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 | T-CFG-21 | shared XDG resolver returns the base itself when no trailing segments are given | baseline | U | live | REQ-41 |
 | T-CFG-22 | an empty XDG value counts as unset per the specification, so state never resolves relative to the current working directory | baseline | U | live | REQ-41 |
 | T-CFG-23 | an empty `HOME` counts as unset too — `env.get("HOME", "~")` returns the empty string when the variable is set but empty, so the default never applies | baseline | U | live | REQ-41 |
+| T-CFG-24 | A12 — `setup_hook_policy` defaults to `tracked` and `setup_hook_timeout` to 300 seconds; an explicit flag beats a config value; `off` dominates every lower-precedence source | baseline | U | live | P02 A12; REQ-12; REQ-13 |
+| T-CFG-25 | A12 — `config set` / `config get` round-trip both hook keys, the enum as a quoted string and the timeout as an unquoted integer, without disturbing an existing unrelated key | baseline | C | live | P02 A12; REQUIREMENTS §3.2 |
+| T-CFG-26 | A12 / A11 guard — a zero, negative, string, or boolean `setup_hook_timeout` and an out-of-enum `setup_hook_policy` are all rejected as `ConfigError` at `config validate` and `load_config()` time, with exit 2, never validating clean and crashing at `fork` time | baseline | C | live | P02 A12; P02 A11; REQ-12; R6.1 |
 
 ---
 
