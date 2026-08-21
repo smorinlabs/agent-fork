@@ -538,6 +538,25 @@ warning naming the skipped path, so the outcome is a *misattributed* skip
 rather than an unreported omission, and the owner's own requirement is that an
 unreadable file is skipped and named.
 
+### Gate 1 — Codex second lens, sixth pass, 2026-08-20
+
+Verdict: **needs-attention**, but **0 new defects and 3 refinements** — every
+remaining item was documentation, which is the signal the design converged.
+Codex session `01a02242-107b-7f73-90d4-ec5c52505484`.
+
+Confirmed correct: the `--diff-filter=D` facet does cover the staged
+`git rm --cached` case, the register mirrors the three preconditions, and both
+`details` schemas are specified.
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | The "policy, in full" table and a stale probe passage both contradicted the normative preconditions, so an implementer following either could reintroduce an unprovable skip or the rename-endpoint loss. | **Fixed.** The table defers explicitly to "Skip preconditions", and the probe passage is relabelled as current behaviour with the abandoned by-site reading called out. |
+| 2 | Catalog publication was claimed in the present tense and marked fixed in the ledger, but neither code exists in `errors.py` or `README.md`. | **Fixed.** Restated as a gate 4 step 0 requirement; the ledger row corrected to "partly fixed". |
+| 3 | The accepted-limit summary overstated observability and provenance: include mutation during `copy2` is genuinely silent, and A5 *introduces* the ancestor race's warn-and-omit outcome, because that `EACCES` fails the fork today. | **Fixed.** Subcases split into a table stating which are pre-existing and which fail toward silence. Owner acceptance unchanged. |
+
+**Gate 1 status: ready to close** once a pass returns clean. Six passes; new
+defects per pass ran 1, 3, 2, 2, 1, 0.
+
 ## Gate 4 — implementation plan
 
 Written 2026-08-20. Test-first throughout: each step lands its RED rows before
@@ -636,5 +655,3 @@ users will meet them.
 ### Not in this plan
 
 The two accepted known limits, issues #59 and #60, and the remainder of #28.
-
-## Review outcomes
