@@ -522,6 +522,8 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-21 | `fork --dry-run -o json` and `fork --dry-run --json` emit the same parseable preview object with every planned mutation and perform no mutation | baseline | C | live | REQ-17; REQ-18; issue #14; R4.2; R8.6 |
 | T-OUT-22 | `agent_signal_incomplete` is cataloged at exit 3 and emits exact non-secret `status`, `present`, and `missing` machine details | agent-signal=incomplete-marker | C | live | P02 A9; REQ-17; R7.8; R7.12 |
 | T-OUT-23 | bidirectional formatting characters are escaped by the renderer and rejected by the command-safety predicate, which share one control set | baseline | U | live | REQ-17 |
+| T-OUT-24 | A12 — `fork --json` stdout stays exactly one parseable line carrying the whole `setup_hook` object with no progress text, while `text` mode narrates the hook on stderr and leaves stdout unchanged | baseline | C | live | P02 A12; REQ-17; R7.1/R7.6/R7.8 |
+| T-OUT-25 | A12 — `interrupted_sigint` (130) and `interrupted_sigterm` (143) are cataloged stable codes with exactly one class each, keeping T-OUT-14's catalog-exactness invariant green | baseline | C | live | P02 A12; REQ-22; R7.12 |
 
 ---
 
@@ -584,6 +586,9 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-48 | the freshness-write-failure notice reflects only whether THIS target's write failed under `--all --record-all`, not whether the corpus-wide counter is merely nonzero: two independently recordable targets, only the first's write fails, only the first's document carries the notice | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
 | T-CLI-49 | `analyzed_at` on the human `parent inference:` line is escaped through `terminal_text` like its neighbors on the same line; JSON output keeps the raw value | freshness=A10 | C | live | P02 A10 gate-6; REQ-17 |
 | T-CLI-50 | a corrupted freshness index at the target's location does not block `delete`: the primary record is still removed and the command still exits 0, with `removed_freshness_entry: false` and a "could not confirm" notice | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
+| T-CLI-51 | A12 — `fork --dry-run` discloses the setup hook in human and JSON for all four states (eligible, ineligible, absent, disabled), with `prediction: true`, `mutation_performed: false`, and no branch or worktree created | baseline | C | live | P02 A12; REQ-24; R8.6 |
+| T-CLI-52 | A12 — `doctor` carries a `repository setup hook` row for all five states; its `ok` is false, and `doctor`'s exit code nonzero, only when a present hook is ineligible under the default `tracked` policy | baseline | C | live | P02 A12; REQ-24; R9.10 |
+| T-CLI-53 | A12 Gate-1 fact 7 — a real SIGINT during the setup hook makes `main()` return 130 with a rendered error rather than a traceback and exit 1; `--json` prints exactly one JSON error object with code `interrupted_sigint` | baseline | C | live | REQ-22; P02 A12 |
 
 ---
 

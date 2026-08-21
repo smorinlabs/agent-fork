@@ -1110,3 +1110,234 @@ def test_incomplete_dry_run_refuses_before_any_mutation(repo_scenario):
         missing=("CLAUDE_CODE_SESSION_ID",),
     )
     assert _fork_state(world, environment, destination) == before
+
+
+HOOK_RELATIVE = ".agent-fork/worktree-setup.sh"
+
+
+def _commit_hook(world, body, *, mode=0o755, commit=True):
+    """Place the repository setup hook, optionally leaving it uncommitted."""
+    hook = world.parent_path / HOOK_RELATIVE
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(body)
+    hook.chmod(mode)
+    if commit:
+        for arguments in (["add", "."], ["commit", "-m", "add setup hook"]):
+            subprocess.run(
+                ["git", "-C", str(world.parent_path), *arguments],
+                env=world.env,
+                capture_output=True,
+                check=True,
+            )
+    return hook
+
+
+@pytest.mark.matrix("T-CLI-51")
+def test_dry_run_discloses_the_setup_hook_without_mutating(repo_scenario):
+    """T-CLI-51 — A12 outcome 1: the hook is disclosed before it can run.
+
+    Given:  `fork --dry-run` against an eligible, an ineligible, an absent, and
+            a disabled setup hook
+    Expect: human and JSON disclose path, eligibility, whether it would run, and
+            the timeout; the JSON says `prediction: true`; `mutation_performed`
+            stays false and nothing is created
+    Source: P02 A12; R8.6
+    """
+    from conftest import run_cli
+
+    common = ["--dry-run", "--no-agent", "--json"]
+
+    eligible = repo_scenario("plain@main")
+    _commit_hook(eligible, "#!/bin/sh\nexit 0\n")
+    completed = run_cli(["fork", "ok", *common], eligible.env, eligible.parent_path)
+    assert completed.returncode == 0, completed.stderr.decode()
+    document = json.loads(completed.stdout)
+    hook = document["plan"]["setup_hook"]
+    assert hook == {
+        "path": HOOK_RELATIVE,
+        "present": True,
+        "policy": "tracked",
+        "eligibility": "eligible",
+        "would_run": True,
+        "reason": None,
+        "timeout_seconds": 300,
+        "prediction": True,
+    }
+    assert document["mutation_performed"] is False
+    assert not (eligible.parent_path.parent / "ok").exists()
+    human = run_cli(
+        ["fork", "ok", "--dry-run", "--no-agent"], eligible.env, eligible.parent_path
+    )
+    assert f"setup-hook: {HOOK_RELATIVE}".encode() in human.stdout
+    assert b"would run" in human.stdout and b"timeout 300s" in human.stdout
+
+    ineligible = repo_scenario("plain@main")
+    _commit_hook(ineligible, "#!/bin/sh\nexit 0\n", commit=False)
+    skipped = run_cli(["fork", "skip", *common], ineligible.env, ineligible.parent_path)
+    hook = json.loads(skipped.stdout)["plan"]["setup_hook"]
+    assert hook["eligibility"] == "untracked"
+    assert hook["would_run"] is False
+    assert hook["reason"] == "present but not committed at the fork anchor"
+    skipped_human = run_cli(
+        ["fork", "skip", "--dry-run", "--no-agent"],
+        ineligible.env,
+        ineligible.parent_path,
+    )
+    assert b"would skip" in skipped_human.stdout
+    assert b"--setup-hook-policy any" in skipped_human.stdout
+
+    absent = repo_scenario("plain@main")
+    empty = run_cli(["fork", "none", *common], absent.env, absent.parent_path)
+    hook = json.loads(empty.stdout)["plan"]["setup_hook"]
+    assert hook["present"] is False and hook["eligibility"] == "absent"
+    assert hook["would_run"] is False
+    absent_human = run_cli(
+        ["fork", "none", "--dry-run", "--no-agent"], absent.env, absent.parent_path
+    )
+    assert b"setup-hook: none" in absent_human.stdout
+
+    disabled = repo_scenario("plain@main")
+    _commit_hook(disabled, "#!/bin/sh\nexit 0\n")
+    off = run_cli(
+        ["fork", "off", *common, "--setup-hook-policy", "off"],
+        disabled.env,
+        disabled.parent_path,
+    )
+    hook = json.loads(off.stdout)["plan"]["setup_hook"]
+    assert hook["policy"] == "off"
+    assert hook["eligibility"] == "unchecked"
+    assert hook["would_run"] is False
+    off_human = run_cli(
+        ["fork", "off", "--dry-run", "--no-agent", "--setup-hook-policy", "off"],
+        disabled.env,
+        disabled.parent_path,
+    )
+    assert b"setup-hook: disabled (--setup-hook-policy off)" in off_human.stdout
+
+
+@pytest.mark.matrix("T-CLI-52")
+def test_doctor_reports_and_can_fail_on_the_repository_setup_hook(repo_scenario):
+    """T-CLI-52 — A12 owner decision 4: an ineligible hook is a doctor failure.
+
+    Given:  `doctor` in a worktree whose hook is eligible, ineligible under the
+            default `tracked` policy, ineligible but allowed under `any`,
+            absent, or disabled
+    Expect: a `repository setup hook` row in both renderings whose `ok` is false
+            only in the ineligible-under-`tracked` state, and a nonzero doctor
+            exit code in that state alone
+    Source: P02 A12 owner decision 4; R9.10
+    """
+    from conftest import run_cli
+
+    name = "repository setup hook"
+
+    eligible = repo_scenario()
+    environment = _doctor_env(eligible)
+    _commit_hook(eligible, "#!/bin/sh\nexit 0\n")
+    completed = run_cli(["doctor", "--json"], environment, eligible.parent_path)
+    assert completed.returncode == 0, completed.stdout.decode()
+    _, checks = _doctor_checks(completed)
+    assert checks[name]["ok"] is True
+    assert "eligible at HEAD" in checks[name]["detail"]
+    assert "policy=tracked" in checks[name]["detail"]
+    assert "timeout=300s" in checks[name]["detail"]
+    human = run_cli(["doctor"], environment, eligible.parent_path)
+    assert f"ok {name}:".encode() in human.stdout
+
+    modified = repo_scenario()
+    modified_env = _doctor_env(modified)
+    _commit_hook(modified, "#!/bin/sh\nexit 0\n")
+    _commit_hook(modified, "#!/bin/sh\nexit 1\n", commit=False)
+    blocked = run_cli(["doctor", "--json"], modified_env, modified.parent_path)
+    assert blocked.returncode != 0
+    document, checks = _doctor_checks(blocked)
+    assert checks[name]["ok"] is False and document["ok"] is False
+    assert "modified since HEAD" in checks[name]["detail"]
+    assert "--setup-hook-policy any" in checks[name]["detail"]
+    blocked_human = run_cli(["doctor"], modified_env, modified.parent_path)
+    assert f"FAIL {name}:".encode() in blocked_human.stdout
+
+    config_path = modified.parent_path / ".agent-fork/agent-fork_config.toml"
+    config_path.write_text('[fork]\nsetup_hook_policy = "any"\n')
+    allowed = run_cli(["doctor", "--json"], modified_env, modified.parent_path)
+    assert allowed.returncode == 0
+    _, checks = _doctor_checks(allowed)
+    assert checks[name]["ok"] is True
+    assert "policy=any" in checks[name]["detail"]
+
+    config_path.write_text('[fork]\nsetup_hook_policy = "off"\n')
+    off = run_cli(["doctor", "--json"], modified_env, modified.parent_path)
+    assert off.returncode == 0
+    _, checks = _doctor_checks(off)
+    assert checks[name]["ok"] is True and "disabled" in checks[name]["detail"]
+
+    absent = repo_scenario()
+    absent_env = _doctor_env(absent)
+    empty = run_cli(["doctor", "--json"], absent_env, absent.parent_path)
+    assert empty.returncode == 0
+    _, checks = _doctor_checks(empty)
+    assert checks[name]["ok"] is True and "none in " in checks[name]["detail"]
+
+
+@pytest.mark.requires_process_group_signals
+@pytest.mark.matrix("T-CLI-53")
+def test_main_translates_a_signal_during_the_hook_into_exit_130(repo_scenario):
+    """T-CLI-53 — A12 Gate-1 fact 7: `OperationInterrupted` escaped `main()`.
+
+    `OperationInterrupted` derives from `BaseException` and `main()` caught only
+    `Exception`, so a signal mid-pipeline produced a traceback and exit 1 —
+    contradicting REQ-22 and README's published "SIGINT and SIGTERM exit 130 and
+    143 after rollback". T-RBK-03/04 assert at the library boundary and never
+    exercised `main()`, which is why the gap survived.
+
+    Given:  a real SIGINT delivered to the CLI while the setup hook blocks
+    Expect: exit 130 with a rendered error and no traceback; `--json` prints
+            exactly one JSON error object on stderr with code `interrupted_sigint`
+    Source: REQ-22; README interrupt contract; P02 A12 Gate-1 fact 7
+    """
+    import signal
+    import sys
+    import time
+
+    def interrupt(world, extra):
+        _commit_hook(
+            world,
+            '#!/bin/sh\n: > "$REPO_ROOT/hook-ready"\nsleep 120\n',
+        )
+        executable = Path(sys.executable).with_name("agent-fork")
+        process = subprocess.Popen(
+            [str(executable), "fork", "interrupted", "--no-agent", *extra],
+            env=world.env,
+            cwd=world.parent_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        ready = world.parent_path / "hook-ready"
+        for _ in range(1000):
+            if ready.exists():
+                break
+            time.sleep(0.01)
+        assert ready.exists(), "setup hook never signalled readiness"
+        os.kill(process.pid, signal.SIGINT)
+        stdout, stderr = process.communicate(timeout=30)
+        return process.returncode, stdout, stderr
+
+    human_world = repo_scenario("plain@main")
+    code, _, stderr = interrupt(human_world, [])
+    assert code == 130, stderr.decode()
+    assert b"Traceback" not in stderr
+    assert b"interrupted_sigint" in stderr
+    assert not (human_world.parent_path.parent / "interrupted").exists()
+
+    machine_world = repo_scenario("plain@main")
+    code, _, stderr = interrupt(machine_world, ["--json"])
+    assert code == 130, stderr.decode()
+    assert b"Traceback" not in stderr
+    lines = [line for line in stderr.decode().splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == {
+        "error": {
+            "code": "interrupted_sigint",
+            "message": "interrupted after rollback",
+        }
+    }

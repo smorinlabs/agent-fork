@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from agent_fork.errors import AgentForkError
+from agent_fork.include import (
+    DEFAULT_SETUP_HOOK_POLICY,
+    DEFAULT_SETUP_HOOK_TIMEOUT,
+    SETUP_HOOK_POLICIES,
+)
 from agent_fork.models import ConfigValues, ResolvedConfig
 from agent_fork.xdg import xdg_path
 
@@ -27,8 +32,15 @@ _FORK_KEYS = {
     "agent_mode",
     "verify",
     "copy",
+    "setup_hook_policy",
+    "setup_hook_timeout",
 }
 _BOOL_KEYS = {"with_state", "with_ignored", "verify", "copy"}
+_ENUM_KEYS = {
+    "agent_mode": ("auto", "strict", "git-only"),
+    "setup_hook_policy": SETUP_HOOK_POLICIES,
+}
+_INT_KEYS = {"setup_hook_timeout"}
 
 
 class ConfigError(AgentForkError, ValueError):
@@ -81,6 +93,8 @@ def resolve_config(
     agent_mode = DEFAULT_AGENT_MODE
     verify = True
     copy = False
+    setup_hook_policy = DEFAULT_SETUP_HOOK_POLICY
+    setup_hook_timeout = DEFAULT_SETUP_HOOK_TIMEOUT
     output = "text"
     config_path: Path | None = None
     claude_extra_args: tuple[str, ...] = ()
@@ -107,6 +121,10 @@ def resolve_config(
             verify = source.verify
         if source.copy is not None:
             copy = source.copy
+        if source.setup_hook_policy is not None:
+            setup_hook_policy = source.setup_hook_policy
+        if source.setup_hook_timeout is not None:
+            setup_hook_timeout = source.setup_hook_timeout
         if source.output is not None:
             output = source.output
         if source.config_path is not None:
@@ -122,6 +140,15 @@ def resolve_config(
         raise ConfigError("agent_mode must be auto, strict, or git-only")
     if output not in {"text", "json"}:
         raise ConfigError("output must be text or json")
+    if setup_hook_policy not in SETUP_HOOK_POLICIES:
+        raise ConfigError("setup_hook_policy must be tracked, any, or off")
+    # `isinstance(True, int)` is true in Python, so booleans need their own
+    # rejection. There is deliberately no "no timeout" sentinel: an unbounded
+    # hook is the fault A12 exists to close.
+    if isinstance(setup_hook_timeout, bool) or not isinstance(setup_hook_timeout, int):
+        raise ConfigError("setup_hook_timeout must be a whole number of seconds")
+    if setup_hook_timeout <= 0:
+        raise ConfigError("setup_hook_timeout must be greater than zero seconds")
 
     return ResolvedConfig(
         with_state=with_state,
@@ -137,6 +164,8 @@ def resolve_config(
         claude_extra_args=claude_extra_args,
         codex_extra_args=codex_extra_args,
         codex_session_name_resolution=codex_session_name_resolution,
+        setup_hook_policy=setup_hook_policy,
+        setup_hook_timeout=setup_hook_timeout,
     )
 
 
@@ -162,17 +191,34 @@ def load_config(path: Path) -> ConfigValues:
     for key in _BOOL_KEYS:
         if key in fork and not isinstance(fork[key], bool):
             raise ConfigError(f"invalid config {path}: fork.{key} must be boolean")
-    for key in {"branch_prefix", "worktree_location", "agent_mode"}:
+    for key in {
+        "branch_prefix",
+        "worktree_location",
+        "agent_mode",
+        "setup_hook_policy",
+    }:
         if key in fork and not isinstance(fork[key], str):
             raise ConfigError(f"invalid config {path}: fork.{key} must be a string")
-    if "agent_mode" in fork and fork["agent_mode"] not in {
-        "auto",
-        "strict",
-        "git-only",
-    }:
-        raise ConfigError(
-            f"invalid config {path}: fork.agent_mode must be auto, strict, or git-only"
-        )
+    # A11's lesson: a key that passes `config validate` and later crashes `fork`
+    # is the exact defect that item found, so every new key is rejected here.
+    for key, allowed in _ENUM_KEYS.items():
+        if key in fork and fork[key] not in allowed:
+            raise ConfigError(
+                f"invalid config {path}: fork.{key} must be "
+                f"{', '.join(allowed[:-1])}, or {allowed[-1]}"
+            )
+    for key in _INT_KEYS:
+        if key not in fork:
+            continue
+        value = fork[key]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ConfigError(
+                f"invalid config {path}: fork.{key} must be a whole number of seconds"
+            )
+        if value <= 0:
+            raise ConfigError(
+                f"invalid config {path}: fork.{key} must be greater than zero seconds"
+            )
     agents = document.get("agents", {})
     if not isinstance(agents, dict):
         raise ConfigError(f"invalid config {path}: [agents] must be a table")
@@ -290,8 +336,16 @@ def set_user_value(path: Path, key: str, value: str) -> None:
         lowered = value.lower()
         if lowered not in {"true", "false"}:
             raise ConfigError(f"{key} expects true or false")
-    if key == "agent_mode" and value not in {"auto", "strict", "git-only"}:
-        raise ConfigError("agent_mode expects auto, strict, or git-only")
+    if key in _ENUM_KEYS and value not in _ENUM_KEYS[key]:
+        allowed = _ENUM_KEYS[key]
+        raise ConfigError(f"{key} expects {', '.join(allowed[:-1])}, or {allowed[-1]}")
+    if key in _INT_KEYS:
+        try:
+            number = int(value)
+        except ValueError:
+            raise ConfigError(f"{key} expects a whole number of seconds") from None
+        if number <= 0:
+            raise ConfigError(f"{key} expects a value greater than zero seconds")
     existing = load_config(path) if path.exists() else ConfigValues()
     values = {
         field: getattr(existing, field)
@@ -307,13 +361,19 @@ def set_user_value(path: Path, key: str, value: str) -> None:
             },
             codex_session_name_resolution=value.lower() == "true",
         )
+    elif key in _BOOL_KEYS:
+        values[key] = value.lower() == "true"
+    elif key in _INT_KEYS:
+        values[key] = int(value)
     else:
-        values[key] = value.lower() == "true" if key in _BOOL_KEYS else value
+        values[key] = value
     lines = ["[fork]"]
     for name in sorted(values):
         item = values[name]
         if isinstance(item, bool):
             text = "true" if item else "false"
+        elif isinstance(item, int):
+            text = str(item)
         else:
             text = '"' + str(item).replace("\\", "\\\\").replace('"', '\\"') + '"'
         lines.append(f"{name} = {text}")

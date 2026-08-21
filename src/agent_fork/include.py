@@ -187,18 +187,27 @@ def _reap(process: subprocess.Popen[bytes]) -> tuple[str, ...]:
     return ()
 
 
-def _hook_eligibility(
-    child: Path, hook: Path, anchor: str, env: Mapping[str, str] | None
+def setup_hook_eligibility(
+    worktree: Path,
+    reference: str,
+    *,
+    reference_label: str = "the fork anchor",
+    env: Mapping[str, str] | None = None,
 ) -> tuple[str, str | None]:
-    """Compare the bytes that would execute against the bytes committed at the anchor.
+    """Compare the bytes that would execute against those committed at ``reference``.
 
-    Evaluated in the child, because ``materialize()`` carries the parent's
-    uncommitted state across: a parent-side check would clear a committed copy
-    while the child executes a modified one.
+    Evaluated in the worktree that would run the hook, because ``materialize()``
+    carries the parent's uncommitted state across: a parent-side check would
+    clear a committed copy while the child executes a modified one.
 
     Raw blob bytes are compared rather than ``git hash-object`` output, which
     applies the path's clean filter and could make differing bytes hash equal.
+
+    ``reference_label`` names ``reference`` in the returned reason. ``fork``
+    resolves its own anchor while ``doctor`` reads ``HEAD``, and on a detached
+    HEAD those differ, so neither surface may borrow the other's wording.
     """
+    hook = worktree / SETUP_HOOK_RELATIVE_PATH
     try:
         info = hook.lstat()
     except OSError:
@@ -207,31 +216,33 @@ def _hook_eligibility(
         return "not_a_regular_blob", "present but not a regular file on disk"
     try:
         listed = run_git(
-            child,
-            ["ls-tree", "-z", anchor, "--", SETUP_HOOK_RELATIVE_PATH],
+            worktree,
+            ["ls-tree", "-z", reference, "--", SETUP_HOOK_RELATIVE_PATH],
             env=env,
         ).stdout
     except (GitCommandError, OSError):
-        return "unchecked", "the fork anchor could not be read"
+        return "unchecked", f"{reference_label} could not be read"
     entry = listed.split(b"\0")[0]
     if not entry:
-        return "untracked", "present but not committed at the fork anchor"
+        return "untracked", f"present but not committed at {reference_label}"
     header = entry.partition(b"\t")[0].split(b" ")
     if len(header) != 3:
-        return "unchecked", "the fork anchor entry could not be parsed"
+        return "unchecked", f"the {reference_label} entry could not be parsed"
     mode, _, oid = header
     if mode not in (b"100644", b"100755"):
         return (
             "not_a_regular_blob",
-            "recorded at the fork anchor as a symlink or submodule, not a file",
+            f"recorded at {reference_label} as a symlink or submodule, not a file",
         )
     try:
-        committed = run_git(child, ["cat-file", "blob", oid.decode()], env=env).stdout
+        committed = run_git(
+            worktree, ["cat-file", "blob", oid.decode()], env=env
+        ).stdout
         on_disk = hook.read_bytes()
     except (GitCommandError, OSError):
         return "unchecked", "the committed hook bytes could not be read"
     if hashlib.sha256(committed).digest() != hashlib.sha256(on_disk).digest():
-        return "modified", "present but modified since the fork anchor"
+        return "modified", f"present but modified since {reference_label}"
     return "eligible", None
 
 
@@ -283,7 +294,7 @@ def run_setup_hook(
         return base
     if not present:
         return replace(base, eligibility="absent", status="absent")
-    eligibility, reason = _hook_eligibility(child, hook, anchor, env)
+    eligibility, reason = setup_hook_eligibility(child, anchor, env=env)
     if policy.mode == "tracked" and eligibility != "eligible":
         notice = f"setup hook skipped: {reason} ({OVERRIDE_HINT})"
         announce(f"setup hook: skipped — {reason} ({OVERRIDE_HINT})")
