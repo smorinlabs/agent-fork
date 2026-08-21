@@ -563,122 +563,136 @@ defects per pass ran 1, 3, 2, 2, 1, 0.
 
 ## Gate 4 — implementation plan
 
-Written 2026-08-20. Test-first throughout: each step lands its RED rows before
-its implementation. Row IDs are taken from the next free numbers in each group
-and are never renumbered once written.
+Rewritten 2026-08-20 after its first review, which found the original order
+not executable. Each slice is RED-first at the level it can actually fail;
+scenario rows come only after the plumbing they exercise exists.
 
 ### Row numbering
 
-Reassigned 2026-08-20 after merging `main`. A6a, pull request #58, registered
-`T-VER-35..39` and `T-MAT-26` while this plan was being written, and matrix
-convention forbids renumbering an existing row, so this plan's rows moved to
-`T-MAT-30..36` and `T-VER-40..44`.
+`T-MAT-30..36`, `T-VER-40..43`, `T-INC-08..09`, `T-OUT-24..25`, `T-CLI-51`.
+`T-VER-44` was withdrawn: it duplicated existing `T-VER-26`, the deletion
+positive guard, which this item **reuses as its regression anchor** rather
+than restating. Re-check every group's next free number immediately before
+writing tests; `main` moved twice during this item and collided twice.
 
-Re-validated 2026-08-20 after a second merge, which brought in A10, pull
-request #63. `T-MAT`, `T-VER`, `T-INC`, and `T-OUT` were untouched, so those
-rows still stand. `T-CLI` advanced to 50, so this plan's CLI row is
-**`T-CLI-51`**. A10 also had to resolve a `T-CLI` collision of its own, so
-re-check every group's next free number immediately before writing tests
-rather than trusting this note.
+### Step 0 — contract amendments and catalog, before any behaviour
 
-### Step 0 — prerequisites, before any code
+1. **Check issue #45**, which edits the same transport path in
+   `materialize.py`. Open and unassigned as of 2026-08-19.
+2. **The higher-precedence amendments** to `DESIGN-DECISIONS.md` D3 and D8 and
+   to `REQUIREMENTS.md` REQ-11, REQ-17, REQ-21, REQ-23. Repository precedence
+   ranks those above plans, so without them an implementer must reject this
+   plan. **Landed 2026-08-20.**
+3. **`CONFORMANCE.md`** entry recording the R6.3 judgment: a fork that skipped
+   entries exits `0`, because `fork` creates one named resource and its
+   carried paths are internal transport state. Confirmed correct by review.
+4. **Catalog last, with its consumers.** Adding `entry_unreadable` and
+   `strict_skip_refused` to `ERROR_CATALOG` *before* anything raises them
+   breaks the existing exact-catalog row `T-OUT-14`. Add the codes, the
+   README catalog entries, and the classes that raise them in one commit.
 
-1. **Check issue #45** (bound staged-binary materialization memory). It edits
-   the same transport path in `materialize.py`. Open and unassigned as of
-   2026-08-19. If it has been picked up, sequence around it.
-2. **Add both codes to `ERROR_CATALOG`** in `errors.py` and to the published
-   catalog in `README.md`. The exact-catalog test polices the former only.
-3. **Add a `CONFORMANCE.md` entry** recording the R6.3 judgment: a fork that
-   skipped entries exits `0`, because `fork` creates one named resource and the
-   carried files are internal rather than user-specified items. R6.3's
-   partial-failure exit `1` is read as not applying. This is a recorded
-   judgment, not a waiver.
+### Step 1 — detection, unit level (`content.py`)
 
-### Step 1 — skip detection and the skipped set (`content.py`)
-
-Narrow `absent` to `ENOENT` and `ENOTDIR`. Every other `lstat` error becomes
-`entry_unreadable`. A successful `lstat` followed by a failed digest `open` on
-an untracked or ignored path produces a skip record carrying the sentinel
-`(st_dev, st_ino, st_mode, st_size, st_mtime_ns, st_ctime_ns)`.
+RED at unit level, not through a fork. Narrow `absent` to `ENOENT` and
+`ENOTDIR`; every other `lstat` error raises `entry_unreadable`. A successful
+`lstat` plus a failed digest `open` on an untracked or ignored path yields a
+skip record carrying the sentinel.
 
 | Row | Asserts |
 |---|---|
-| `T-MAT-30` | Unreadable untracked file is skipped and named; fork exits `0` |
-| `T-MAT-31` | Two unreadable untracked files are both named, byte-wise ordered, `count` is 2 |
-| `T-MAT-33` | Unreadable **tracked** modified file is `entry_unreadable`, exit `1`, no worktree survives |
-| `T-MAT-34` | A failing `lstat` is `entry_unreadable`, never a skip, because no sentinel can be recorded |
-| `T-VER-44` | **Positive guard.** An ordinary unstaged deletion still forks and verifies, protecting the behaviour `T-VER-26` covers |
+| `T-MAT-33` | Unreadable **tracked** modified file raises `entry_unreadable` |
+| `T-MAT-34` | A failing `lstat` raises `entry_unreadable`, never a skip, because no sentinel can be recorded |
+| `T-VER-26` | **Reused as guard.** An ordinary unstaged deletion still transports and verifies |
 
-### Step 2 — the deletion facet (`content.py`)
+### Step 2 — the deletion facet, unit level (`content.py`)
 
 Collect deletions explicitly from cached and working-tree diffs with
-`--diff-filter=D`, frozen alongside the inventory. A skip is refused when the
-fork carries any deletion.
+`--diff-filter=D`, frozen alongside the inventory.
 
 | Row | Asserts |
 |---|---|
-| `T-MAT-35` | An unstaged deletion blocks an otherwise valid skip; `entry_unreadable` names the blocker |
-| `T-MAT-36` | A staged `git rm --cached old` whose working file is unreadable is detected, though nothing is absent |
+| `T-MAT-35` | An unstaged deletion blocks an otherwise valid skip; the error names the blocker |
+| `T-MAT-36` | A staged `git rm --cached old` with an unreadable working `old` is detected, though nothing is absent |
 
 ### Step 3 — transport honours the skip (`materialize.py`)
 
-Skipped untracked and ignored paths are not copied. The non-regular branch in
-`_copy_entry` becomes a skip with a notice rather than a `MaterializeError`.
-No pathspec exclusion is needed, because tracked paths never skip.
+Skipped paths are not copied; `_copy_entry`'s non-regular branch becomes a
+skip with a notice. A pre-existing non-regular entry cannot reach the loop
+naturally, so `T-MAT-32` drives it through an explicit unit seam with an
+injected inventory rather than a constructed repository.
 
 | Row | Asserts |
 |---|---|
-| `T-MAT-32` | A non-regular entry reaching the copy loop is skipped with a notice rather than raising |
+| `T-MAT-32` | A non-regular entry reaching the copy loop is skipped with a notice rather than raising, via injected inventory |
 
 ### Step 4 — verification honours the skip (`verify.py`)
 
-**Independent corroboration from A6a.** Pull request #58 solved a structurally
-identical problem days ago: it filtered submodule working-tree state out of
-`exact-copy-status` with `--ignore-submodules=dirty` while deliberately leaving
-the `parent-untouched` bracket unfiltered, on the reasoning that the bracket
-compares the parent against itself and filtering it would hide a real
-transition. That is exactly the split this step specifies for skipped paths,
-arrived at independently through the gate 1 reviews. Follow A6a's implementation
-shape at that rung.
-
-
-Thread the skipped set into the verify-phase re-capture and filter it from
-both porcelains in `exact-copy-status`. Leave `parent-untouched` alone.
-Re-check each sentinel before reporting success.
+**Reuse A6a's shape at the query boundary.** A6a filters submodule state by
+building one shared `status_args` list used for both the parent and child
+`exact-copy-status` reads, leaving `parent-untouched` as a separate raw query.
+Do the same here: extend that shared command with literal path exclusions for
+known-skipped paths, rather than post-processing porcelain output — the
+existing parser returns a dictionary and loses raw record ordering. Thread the
+skipped set into the verify-phase re-capture so it cannot re-open a skipped
+file.
 
 | Row | Asserts |
 |---|---|
-| `T-VER-40` | A skipped path is filtered from `exact-copy-status`; the fork verifies |
-| `T-VER-41` | The verify-phase re-capture does not re-open a skipped path, so it cannot raise there |
-| `T-VER-42` | A skipped file changing mode `000` to `0644` mid-fork fails the fork on the sentinel |
-| `T-VER-43` | An unchanged sentinel verifies successfully |
+| `T-VER-40` | A skipped path is excluded from `exact-copy-status` **and a non-skipped sibling in the same directory remains visible**, so the filter is not overbroad |
+| `T-VER-41` | The verify-phase re-capture does not re-open a skipped path |
+| `T-VER-43` | A filename containing pathspec-looking characters is excluded literally, never as a pattern |
 
-### Step 5 — `.worktreeinclude` readability guard (`include.py`)
+### Step 5 — the sentinel, checked at finalization (`pipeline.py`)
 
-Add the readability guard beside the existing file-type guard.
+**Not in verification.** The pipeline runs include copying and the setup hook
+after verification and before the registry write, and the hook receives
+`REPO_ROOT` and can mutate the parent. A sentinel checked during verification
+therefore leaves a window in which a skipped file changes and the fork is
+still registered as successful. The recheck belongs at finalization, after the
+hook, before `add_entry`.
+
+| Row | Asserts |
+|---|---|
+| `T-VER-42` | A skipped file mutated **after verification, by the setup hook** fails the fork at finalization |
+| `T-MAT-30` | A same-size rewrite with restored mtime is caught by `st_ctime_ns` alone, which is why that field is in the tuple |
+
+### Step 6 — strict, aggregation, and the error contracts (`cli.py`, `errors.py`)
+
+`--strict` is **CLI-only** (owner decision, 2026-08-20): a false-default
+boolean with no config key, no environment variable, and therefore no
+precedence chain to assert. A persistent default for a safety flag is a
+footgun, and keeping it off the config surface keeps `models.py`, `config.py`,
+the config view, and the README schema unchanged. Completion parity is already
+covered generically by `T-CLI-33` and is not restated.
+
+Skips aggregate across capture, materialize, and include phases into one
+error.
+
+| Row | Asserts |
+|---|---|
+| `T-CLI-51` | `--strict` parses and appears in help; no precedence claim |
+| `T-MAT-31` | Two unreadable untracked files are both named, byte-wise ordered, in one error |
+| `T-INC-09` | Under `--strict`, an unreadable `.worktreeinclude` match raises `strict_skip_refused` and rolls back, proving cross-phase aggregation reaches include |
+| `T-OUT-24` | `strict_skip_refused` JSON `details` matches its schema exactly |
+| `T-OUT-25` | `entry_unreadable` JSON `details` matches its schema, with ordered `deletion_blockers` |
+
+### Step 7 — end-to-end behaviour, once the plumbing exists
+
+These are the rows the original plan scheduled first, when nothing they
+exercise had been built.
 
 | Row | Asserts |
 |---|---|
 | `T-INC-08` | An unreadable `.worktreeinclude` match is skipped with a notice; the fork succeeds |
-| `T-INC-09` | Under `--strict`, the same case raises `strict_skip_refused` and rolls back, since include precedes the registry write |
+| new `T-OUT` row | A successful fork with skips: notices absent from stdout, on stderr **exactly once**, and retained in JSON `notices[]`, per A13's contract |
+| new `T-MAT` row | `--strict --with-ignored`: ignored capture, ignored transport, and `.worktreeinclude`'s independent re-enumeration are distinct gated paths and each must reach the aggregate |
+| new `T-MAT` row | `--no-verify` with a materialize-time skip, where initial capture is bypassed entirely |
 
-### Step 6 — the strict flag and error contracts (`cli.py`, `errors.py`, `pipeline.py`)
+### Step 8 — documentation
 
-`--strict` is a boolean defaulting to false, so no `--no-strict` is required.
-Skips are aggregated across capture, materialize, and include phases and
-raised once.
-
-| Row | Asserts |
-|---|---|
-| `T-OUT-24` | `strict_skip_refused` JSON `details` matches the schema exactly, with escaped, byte-wise ordered paths |
-| `T-OUT-25` | `entry_unreadable` JSON `details` matches its schema, including ordered `deletion_blockers` |
-| next free `T-CLI` | `--strict` parses, appears in help and completions, and resolves through the documented precedence |
-
-### Step 7 — documentation
-
-`TEST-MATRIX.md` rows registered and the total recounted, or `just check-matrix`
-fails. `README.md` catalog updated. Both accepted known limits documented where
-users will meet them.
+`TEST-MATRIX.md` rows registered and the total recounted, or
+`just check-matrix` fails. `README.md` catalog and the `skipped[]` result
+field. Both accepted known limits documented where users meet them.
 
 ### Not in this plan
 
