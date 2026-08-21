@@ -122,20 +122,73 @@ agent identity is ambiguous. Absent and Codex-only input retain
 session ID.
 
 Analysis uses a bounded manifest, superficial streaming UUID screens, exact
-candidate parsing, and bounded graph comparison. Cache shards live under
-`$XDG_CACHE_HOME/agent-fork/claude-lineage-index-v2/`; unchanged unrelated
-transcripts are not reread on warm lookup. Inferred records live separately at
+candidate parsing, and bounded graph comparison. Screen-cache shards live under
+`$XDG_CACHE_HOME/agent-fork/claude-lineage-index-v3/`, one flat, self-superseding
+`<transcript-uuid>.json` shard per transcript — a re-screened transcript
+overwrites its own shard rather than accumulating a new one. A bounded,
+interval-gated sweep (at most once every 24 hours per corpus construction)
+removes orphaned, aged, or over-budget shards and, once, the legacy
+`claude-lineage-index-v2/` tree from an earlier shard-naming scheme; it never
+touches an in-flight write from another `agent-fork` process. Inferred records
+live separately at
 `$XDG_STATE_HOME/agent-fork/session-lineage-inferences.json`. Neither cache nor
 state stores prompt/response content, although session IDs and UUID correlation
 remain sensitive local metadata.
 
 `inferred` and `strongly_inferred` are evidence labels, not proof of immediate
 parentage. Same-boundary siblings remain ambiguous regardless of timestamps.
-Recorded freshness means `current_at_last_analysis`: the analyzed source files,
-algorithm version, index generation, and target-specific candidate-universe
-digest are retained, but ordinary `session`, `list`, and `show` never rescan the
-Claude corpus and therefore do not claim global currentness. A later explicit
-inference refresh can detect relevant candidate-universe changes. Stale records
-remain manageable with `list`/`show` but are not used as parent evidence. This
-heuristic relies on observed Claude transcript structure, not a documented
-Anthropic lineage API.
+
+**Freshness** is a separate axis from the inference itself: whether a
+*recorded* inference is still trustworthy right now. `assess_inference`
+resolves one of five statuses, each mapped to an evidence tier:
+
+| Freshness status | Evidence tier | Meaning |
+|---|---|---|
+| `current_at_last_analysis` | `current` | the analyzed source files, algorithm version, and target-specific candidate-universe digest all still match |
+| `stale_sources` | `last_known_good` | an analyzed transcript changed after the analysis; newer messages were not examined |
+| `stale_candidate_universe` | `last_known_good` | the set of transcripts relevant to this session changed after the analysis |
+| `freshness_unknown` | `unknown` | the corroborating freshness-index entry is missing or unreadable, so the record cannot be confirmed or rejected |
+| `stale_algorithm` | `superseded` | the record predates the current inference algorithm and its fields are not interpretable |
+
+Only the `current` tier satisfies strict parent evidence
+(`session validate --has-parent`, `parent_session` in `session` output).
+Every other tier is still *disclosed*, never silently discarded and never
+silently treated as current: `session` reports the retained record through an
+additive top-level `parent_inference` object with its own `status`
+(`not_consulted`, `absent`, `current`, `last_known_good`,
+`freshness_unknown`, `superseded`, or `unreadable`), the underlying
+`freshness` value, and — for every status except `not_consulted`, `absent`,
+`unreadable`, and `superseded` — the previously inferred `parent_session_id`,
+`analyzed_at` timestamp, and `changed_sources` (`target`, `parent`, `other`,
+or a combination, naming which analyzed transcript changed). A `superseded`
+record shows only its status, since its other fields are not interpretable. A
+human `parent inference: <status> <parent-id> (…)` line appears immediately
+after `lineage:`, followed by a notice naming the exact rerun command
+(`agent-fork session claude-parent infer --session-id <ID> --record`) for
+every non-`current` status. `session` never rescans the Claude corpus to
+compute this — it only reads what a prior `infer --record` already wrote;
+re-establishing freshness always requires an explicit `infer --record` run.
+
+The freshness index that corroborates `stale_candidate_universe` lives at
+`$XDG_STATE_HOME/agent-fork/claude-lineage-freshness.json`, alongside the
+inference records it corroborates (co-locating it with `session-lineage.json`
+and `session-lineage-inferences.json` means an ordinary cache-clearing tool
+can no longer silently downgrade every recorded inference). A legacy copy from
+before this relocation may still exist at
+`$XDG_CACHE_HOME/agent-fork/claude-lineage-freshness.json`; entries there are
+read as an ordinary fallback per child session ID and are migrated to the new
+location automatically, one entry at a time, the next time that specific
+session is re-inferred. Deleting a record with
+`session claude-parent delete` removes its freshness entry from both
+locations, before removing the record itself, so no orphaned corroboration or
+prematurely downgraded sibling record can result from a delete that fails
+partway through.
+
+This heuristic relies on observed Claude transcript structure, not a
+documented Anthropic lineage API. Analysis that hits a bounded corpus limit
+(transcript count, entry count, total byte size, per-target candidate count,
+or per-target time) refuses with the typed `claude_parent_incomplete_analysis`
+error (exit 3) rather than silently truncating; a whole-corpus limit refuses
+the entire invocation before any work begins, while a per-target limit (under
+`--all`) fails only that target and leaves every other target's analysis and
+recording intact.
