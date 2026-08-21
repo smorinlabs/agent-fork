@@ -294,6 +294,15 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-27 | A6a gate-6 — a submodule sitting at its recorded commit produces no loss notice; the notice reports only paths whose state the filter suppresses | baseline | F | live | A6 gate-6 finding 4 |
 | T-MAT-28 | A6a gate-6 pass 2 — a submodule both staged at a new commit and dirty inside reports its loss; the comparison is per status code (`MM` vs `M `), not per path membership | baseline | F | live | A6 gate-6 pass-2 M1 |
 | T-MAT-29 | A6a gate-6 pass 2 — a porcelain rename source record cannot fabricate a path that masks a genuinely dirty submodule | baseline | F | live | A6 gate-6 pass-2 M2 |
+| T-MAT-30 | A6b step 4 — no gitlinks snapshots to an empty tuple | baseline | F | live | A6 design doc §Recursive snapshot |
+| T-MAT-31 | A6b step 4 — a clean submodule's snapshot records its own HEAD and resolved remote URL | baseline | F | live | A6 design doc §Recursive snapshot |
+| T-MAT-32 | A6b step 4 — cell `g`, an uninitialized submodule snapshots as cold with no HEAD, URL, or nested plan | baseline | F | live | A6 design doc §Recursive snapshot |
+| T-MAT-33 | A6b step 4 — cell `j`, a renamed submodule's snapshot keeps both config name and path | baseline | F | live | A6 design doc §Recipe step 0 |
+| T-MAT-34 | A6b step 4 — cell `h`, a nested submodule produces one nested plan entry | baseline | F | live | A6 design doc §Recursive snapshot |
+| T-MAT-35 | A6b step 4 — the snapshot captures a dirty submodule's own inventory and content state, not just its HEAD | baseline | F | live | A6 design doc §Recursive snapshot |
+| T-MAT-36 | A6b step 4 — `with_state=False` snapshots to an empty tuple; nothing to carry, nothing to snapshot | baseline | F | live | A6 design doc §Recursive snapshot |
+| T-MAT-37 | A6b step 4 — a relative `.gitmodules` URL resolves to an absolute value in the snapshot, matching what recipe step 3 needs "before the fork" | baseline | F | live | A6 design doc, gate-4 pass 4 finding 4 |
+| T-MAT-38 | A6b step 4 — an unreachable remote URL is recorded from local config without any network access | baseline | F | live | A6 design doc §Recursive snapshot |
 
 ---
 
