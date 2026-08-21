@@ -173,6 +173,8 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-24 | A6a gate-6 — a removed submodule directory is an ordinary `deleted file mode 160000` deletion that transports, so the guard must not refuse it; `--diff-filter=M` is what distinguishes it from an unrepresentable modified gitlink | baseline | F | live | A6 gate-6 finding 1 |
 | T-GRD-25 | A6a gate-6 — a conflicted gitlink reports as unmerged, not modified, so it is excluded by `--diff-filter=M`, and the mid-operation refusal that names the user's real state wins | baseline | F | live | A6 gate-6 finding 3 |
 | T-GRD-26 | A6a gate-6 pass 2 — a deleted submodule checkout forks end to end through the console script, not merely past the guard | baseline | F | live | A6 gate-6 pass-2 L2 |
+| T-GRD-27 | A6b step 6 — cell `c` (unstaged gitlink advance) no longer refuses under the default `with_submodules=True`; carrying makes it representable, so the guard must not fire | baseline | F | live | A6 design doc §Split; gate-4 pass 4 |
+| T-GRD-28 | A6b step 6 — the same cell `c` still refuses under `--no-with-submodules`; the guard's opt-out path is preserved, not deleted | baseline | F | live | A6 design doc §Split; gate-4 pass 4 |
 
 ---
 
@@ -315,6 +317,9 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-48 | A6b step 5 — cell `h`, a nested submodule is carried recursively rather than left cold | baseline | F | live | A6 design doc §Recipe step 6 |
 | T-MAT-49 | A6b step 5 — cell `i`, a change staged in the submodule's own index (HEAD unmoved) transports via the reused `materialize` seam | baseline | F | live | A6 design doc §Recipe step 5 |
 | T-MAT-50 | A6b step 5 — the carry notice states the configuration-fidelity limit: only `remote.origin.url` is restored | baseline | F | live | A6 design doc §Recipe step 3 |
+| T-MAT-51 | A6b coverage gap — cell `b` (submodule dirtied only by untracked content) carries correctly through the recipe, not merely through top-level verification | baseline | F | live | A6 design doc §Matrix 1 cell `b`; coverage audit |
+| T-MAT-52 | A6b coverage gap — cell `f` (a dirty submodule alongside an ordinary dirty file) carries through the recipe; the two transport mechanisms genuinely coexist | baseline | F | live | A6 design doc §Matrix 1 cell `f`; coverage audit |
+| T-MAT-53 | A6b coverage gap — the offline URL override engages for a relative `.gitmodules` URL at the carry-recipe level, not only at the snapshot level | baseline | F | live | coverage audit |
 
 ---
 
@@ -366,6 +371,11 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 | T-VER-37 | A6a — the exemption is scoped to submodules: an ordinary modified file alongside a dirty submodule is still transported and still verified | baseline | F | live | A6 design doc §Matrix 1 cell `f` |
 | T-VER-38 | A6a positive guard — a submodule advance staged in the parent keeps being compared, which is why the filter is `--ignore-submodules=dirty` and not `=all` | baseline | F | live | A6 design doc §Matrix 1 cell `d` |
 | T-VER-39 | A6a positive guard — a clean submodule gitlink is unaffected by the filter | baseline | F | live | A6 design doc §Matrix 1 cell `e` |
+| T-VER-40 | A6b step 6 headline case — default settings, no flags, a dirty submodule: the fork succeeds and both statuses match exactly, top level and inside the submodule | baseline | F | live | A6 design doc; gate-4 pass 4 |
+| T-VER-41 | A6b step 6 — `--no-with-submodules` still forks successfully, reproducing A6a's original opt-out behaviour, gated rather than deleted | baseline | F | live | A6 design doc §Split |
+| T-VER-42 | A6b step 6 — recursive verification (HEAD-identity rung) catches a carried submodule detached at the wrong commit, even when every top-level signal agrees | baseline | F | live | gate-4 pass 3 finding 2 |
+| T-VER-43 | A6b coverage gap — a mixed-time race between snapshot and carry is caught by verification: carry transports live bytes, verification compares against the frozen snapshot, so the race surfaces as a divergence rather than passing silently | baseline | F | live | coverage audit |
+| T-VER-44 | A6b coverage gap — gate-4 pass 1 finding 4: the semantic pin (`diff.ignoreSubmodules=none`) actually changes the output of the recursive `collect_inventory` calls it is threaded into, not merely present as an unused parameter | baseline | F | live | gate-4 pass 1 finding 4; coverage audit |
 
 ---
 
@@ -528,6 +538,7 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-21 | `fork --dry-run -o json` and `fork --dry-run --json` emit the same parseable preview object with every planned mutation and perform no mutation | baseline | C | live | REQ-17; REQ-18; issue #14; R4.2; R8.6 |
 | T-OUT-22 | `agent_signal_incomplete` is cataloged at exit 3 and emits exact non-secret `status`, `present`, and `missing` machine details | agent-signal=incomplete-marker | C | live | P02 A9; REQ-17; R7.8; R7.12 |
 | T-OUT-23 | bidirectional formatting characters are escaped by the renderer and rejected by the command-safety predicate, which share one control set | baseline | U | live | REQ-17 |
+| T-OUT-24 | A6b step 6 — `-o json` reports the resolved `with_submodules` flag under `fork.mode` and the carry outcome in `notices[]` | baseline | F | live | A6 design doc |
 
 ---
 

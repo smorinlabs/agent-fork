@@ -232,3 +232,167 @@ def test_carry_notices_name_the_configuration_fidelity_limit(repo_scenario):
     child = world.parent_path.parent / "a6b-notice"
     result = _carry(world, child)
     assert any("remote.origin.url" in notice for notice in result.notices)
+
+
+@pytest.mark.matrix("T-MAT-51")
+def test_carry_transports_untracked_content_inside_the_submodule(repo_scenario):
+    """Cell `b` — untracked-only dirt inside a submodule is carried too."""
+    world = repo_scenario("plain@main", states=(submodule(dirty="untracked"),))
+    child = world.parent_path.parent / "a6b-untracked"
+    result = _carry(world, child)
+    assert "vendor/submodule" in result.carried
+    inner = _git(world, child / "vendor/submodule", "status", "--porcelain=v1").stdout
+    assert inner == b"?? loose.txt\n"
+    assert (child / "vendor/submodule/loose.txt").read_text() == (
+        "untracked inside the submodule\n"
+    )
+
+
+@pytest.mark.matrix("T-MAT-52")
+def test_carry_transports_a_dirty_submodule_alongside_an_ordinary_dirty_file(
+    repo_scenario,
+):
+    """Cell `f` — submodule dirt and ordinary file dirt both carry; neither
+    masks the other. The plain file transports through the ordinary
+    materialize() path, the submodule through carry_submodules() — proving
+    the two mechanisms genuinely coexist rather than one starving the other.
+    """
+    from conftest import unstaged
+
+    world = repo_scenario(
+        "plain@main",
+        states=(submodule(dirty="modified"), unstaged("carried.txt")),
+    )
+    child = world.parent_path.parent / "a6b-mixed"
+    from agent_fork.content import collect_inventory
+    from agent_fork.materialize import materialize
+    from agent_fork.repository import create_worktree_at_anchor
+
+    inventory = collect_inventory(
+        world.parent_path, with_state=True, with_ignored=False, env=world.env
+    )
+    creation = create_worktree_at_anchor(
+        world.parent_path, "fork/a6b-mixed", child, env=world.env
+    )
+    materialize(
+        world.parent_path,
+        creation.path,
+        with_state=True,
+        inventory=inventory,
+        env=world.env,
+    )
+    from agent_fork.submodules import carry_submodules, snapshot_submodules
+
+    plans = snapshot_submodules(world.parent_path, with_state=True, env=world.env)
+    result = carry_submodules(
+        world.parent_path, creation.path, plans, with_state=True, env=world.env
+    )
+    assert "vendor/submodule" in result.carried
+    assert (child / "carried.txt").read_text() == "unstaged\n"
+    inner = _git(world, child / "vendor/submodule", "status", "--porcelain=v1").stdout
+    assert inner == b" M tracked.txt\n"
+
+
+@pytest.mark.matrix("T-MAT-53")
+def test_carry_offline_override_engages_for_a_relative_gitmodules_url(repo_scenario):
+    """The offline URL override must engage at the carry layer too, not just
+    the snapshot layer (T-MAT-37) — a relative URL resolved to an absolute
+    value is what the recipe's init step actually consumes.
+    """
+    world = repo_scenario("plain@main", states=(submodule(url_kind="relative"),))
+    child = world.parent_path.parent / "a6b-relative-carry"
+    result = _carry(world, child)
+    assert "vendor/submodule" in result.carried
+    assert (child / "vendor/submodule/.git").exists()
+
+
+@pytest.mark.matrix("T-VER-43")
+def test_a_mixed_time_race_is_caught_by_verification_not_silently_carried(
+    repo_scenario,
+):
+    """Gate-4 pass 1 finding 3 — the whole reason the snapshot is frozen
+    before the worktree exists. Mutate the submodule's dirty content AFTER
+    the snapshot is taken but BEFORE carry runs: the snapshot's stale bytes
+    predict one thing, the live filesystem contains another, and this must
+    surface as a verification failure — not a silent pass with mismatched
+    content, and not a silent overwrite of what the snapshot recorded.
+    """
+    from agent_fork.content import capture_state, collect_inventory, compare_states
+    from agent_fork.repository import create_worktree_at_anchor
+    from agent_fork.submodules import carry_submodules, snapshot_submodules
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="modified"),))
+    plans = snapshot_submodules(world.parent_path, with_state=True, env=world.env)
+    frozen_content = plans[0].content
+    assert frozen_content is not None
+
+    # The race: content changes after the snapshot, before carry.
+    (world.parent_path / "vendor/submodule/tracked.txt").write_text(
+        "submodule modified AGAIN after the snapshot\n"
+    )
+
+    child = world.parent_path.parent / "a6b-race"
+    create_worktree_at_anchor(world.parent_path, "fork/a6b-race", child, env=world.env)
+    carry_submodules(world.parent_path, child, plans, with_state=True, env=world.env)
+
+    # Carry transported the LIVE (post-race) bytes, since materialize's diff
+    # runs live against the parent's current working tree at carry time.
+    live = (child / "vendor/submodule/tracked.txt").read_text()
+    assert live == "submodule modified AGAIN after the snapshot\n"
+
+    # Verification compares against the FROZEN snapshot, so it must catch the
+    # divergence rather than silently accept whatever carry actually moved.
+    child_inventory = collect_inventory(
+        child / "vendor/submodule", with_state=True, with_ignored=False, env=world.env
+    )
+    child_content = capture_state(
+        child / "vendor/submodule", child_inventory, env=world.env
+    )
+    diff = compare_states(frozen_content, child_content)
+    assert diff, "a mixed-time race must be visible to compare_states, not silent"
+
+
+@pytest.mark.matrix("T-VER-44")
+def test_semantic_pin_reaches_a_recursive_collect_inventory_call(repo_scenario):
+    """Gate-4 pass 1 finding 4 — the semantic pin actually changes the output
+    of the recursive calls it is threaded into, not just present as an unused
+    parameter. Reproduced directly against `collect_inventory` on a submodule
+    checkout, the same call `verify_submodules` and `_carry_one` make: ambient
+    `diff.ignoreSubmodules=all`, set inside *that checkout's own* local
+    config (not global, not passed by agent-fork — whatever a user of that
+    submodule happened to configure for themselves), hides a nested gitlink's
+    working-tree state from the unstaged listing. The pin, command-scoped,
+    must override it — and must do so with `with_submodules=True`, since a
+    bare pin loses to the hardcoded `--ignore-submodules=dirty` flag the
+    unstaged listing falls back to otherwise (a command-line flag always
+    outranks a `-c` pin on the same axis, confirmed empirically for T-FIX-33;
+    this is the same fact one level down, and it is why every internal
+    `collect_inventory` call in `submodules.py` needed that flag added).
+    """
+    from agent_fork.content import collect_inventory
+
+    world = repo_scenario(
+        "plain@main", states=(submodule(nested=True, committed=True),)
+    )
+    outer = world.parent_path / "vendor/submodule"
+    _git(world, outer, "config", "diff.ignoreSubmodules", "all")
+    (outer / "inner" / "tracked.txt").write_text("advanced\n")
+    _git(world, outer / "inner", "commit", "-qam", "advance the inner submodule")
+
+    unpinned = collect_inventory(
+        outer, with_state=True, with_ignored=False, with_submodules=True, env=world.env
+    )
+    assert "inner" not in unpinned.unstaged, (
+        "fixture check: ambient config must hide the advanced nested gitlink "
+        "from an unpinned call, or this test proves nothing"
+    )
+
+    pinned = collect_inventory(
+        outer,
+        with_state=True,
+        with_ignored=False,
+        with_submodules=True,
+        config_pins=(("diff.ignoreSubmodules", "none"),),
+        env=world.env,
+    )
+    assert "inner" in pinned.unstaged

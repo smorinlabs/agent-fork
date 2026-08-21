@@ -29,6 +29,7 @@ from agent_fork.repository import (
     validate_fork_guards,
 )
 from agent_fork.rollback import run_with_rollback
+from agent_fork.submodules import carry_submodules, snapshot_submodules
 from agent_fork.verify import verify_fork
 
 
@@ -98,6 +99,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         request.branch,
         request.destination,
         with_state=request.with_state,
+        with_submodules=request.with_submodules,
         env=env,
     )
     planned_child_id = (
@@ -124,12 +126,26 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         request.parent,
         with_state=request.with_state,
         with_ignored=request.with_ignored,
+        with_submodules=request.with_submodules,
         env=env,
     )
     parent_state = (
         capture_state(request.parent, inventory, env=env)
         if request.verify and request.with_state
         else None
+    )
+    # Resolved before the worktree exists — this is what makes it a snapshot
+    # rather than a live read (A6b step 4). Empty whenever submodules are not
+    # being carried, so carry and verification both stay no-ops below.
+    submodule_plans = (
+        snapshot_submodules(
+            request.parent,
+            with_state=request.with_state,
+            with_ignored=request.with_ignored,
+            env=env,
+        )
+        if request.with_state and request.with_submodules
+        else ()
     )
     creation = create_worktree_at_anchor(
         request.parent, request.branch, request.destination, env=env
@@ -145,13 +161,28 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             env=env,
         )
         notices.extend(materialized.notices)
+        submodule_skipped: tuple[str, ...] = ()
+        if request.with_state and request.with_submodules:
+            carried = carry_submodules(
+                request.parent,
+                creation.path,
+                submodule_plans,
+                with_state=request.with_state,
+                with_ignored=request.with_ignored,
+                env=env,
+            )
+            notices.extend(carried.notices)
+            submodule_skipped = carried.skipped
         if request.verify:
             verify_fork(
                 creation,
                 with_state=request.with_state,
                 with_ignored=request.with_ignored,
+                with_submodules=request.with_submodules,
                 parent_status_before=parent_status,
                 parent_state_before=parent_state,
+                submodule_plans=submodule_plans,
+                submodule_skipped=submodule_skipped,
                 env=env,
             )
         included = copy_worktree_includes(request.parent, creation.path, env=env)

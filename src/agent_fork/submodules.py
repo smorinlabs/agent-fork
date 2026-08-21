@@ -23,13 +23,25 @@ from pathlib import Path
 
 from agent_fork.content import (
     CarriedState,
+    Difference,
     Inventory,
     capture_state,
     collect_inventory,
+    compare_states,
     gitlink_paths,
 )
 from agent_fork.git import run_git
 from agent_fork.materialize import materialize
+
+# Local configuration inside a parent's submodule is not cloned into the
+# child's copy, so identical nested working trees can be *reported*
+# differently on the two sides (gate-4 pass 1 finding 4, reproduced at depth
+# 2 with `diff.ignoreSubmodules=all` set inside the parent's outer
+# submodule). Every recursive status, inventory, and diff call below pins
+# this, command-scoped, on top of whatever a caller's own `config_pins`
+# supplies — a caller should not have to know this internal detail to get a
+# correct comparison.
+_SEMANTIC_PINS: tuple[tuple[str, str], ...] = (("diff.ignoreSubmodules", "none"),)
 
 
 @dataclass(frozen=True)
@@ -125,8 +137,19 @@ def _snapshot_one(
         )
     head = run_git(checkout, ["rev-parse", "HEAD"], env=env).stdout.decode().strip()
     remote_url = _resolve_remote_url(checkout, env=env)
+    # with_submodules=True unconditionally: a submodule's own nested gitlinks
+    # are represented via `nested` below regardless of the top-level flag —
+    # the opt-out only governs whether *this* submodule is carried at all, not
+    # whether collect_inventory hides one of its own children behind the
+    # hardcoded `--ignore-submodules=dirty` filter (which would otherwise beat
+    # the semantic pin on the same axis, since a command-line flag always
+    # outranks a `-c` pin — confirmed empirically).
     inventory = collect_inventory(
-        checkout, with_state=with_state, with_ignored=with_ignored, env=env
+        checkout,
+        with_state=with_state,
+        with_ignored=with_ignored,
+        with_submodules=True,
+        env=env,
     )
     content = capture_state(checkout, inventory, env=env) if with_state else None
     nested = _snapshot_recursive(
@@ -317,8 +340,11 @@ def carry_submodules(
 
     ``plans`` is the frozen snapshot from `snapshot_submodules`, resolved
     before the worktree existed. ``child`` must already exist as a worktree of
-    ``parent`` — this function does not create it.
+    ``parent`` — this function does not create it. The semantic pins (module
+    docstring above `_SEMANTIC_PINS`) apply automatically on top of whatever
+    ``config_pins`` the caller supplies.
     """
+    config_pins = (*_SEMANTIC_PINS, *config_pins)
     carried: list[str] = []
     skipped: list[str] = []
     notices: list[str] = []
@@ -336,3 +362,152 @@ def carry_submodules(
         skipped.extend(plan_skipped)
         notices.extend(plan_notices)
     return CarryResult(tuple(carried), tuple(skipped), tuple(notices))
+
+
+def verify_submodules(
+    parent: Path,
+    child: Path,
+    plans: tuple[SubmoduleSnapshot, ...],
+    *,
+    skipped: tuple[str, ...] = (),
+    config_pins: Sequence[tuple[str, str]] = (),
+    env: Mapping[str, str] | None = None,
+) -> list[Difference]:
+    """The seven recursive verification rungs, per carried submodule.
+
+    Two forks can agree on every top-level signal — status, inventory,
+    manifest — while a submodule inside them is verifiably wrong (gate-4 pass
+    3 finding 2). These rungs are what a top-level check cannot see: each is
+    independently triggerable by an injected defect, per "Recursive
+    verification" in the design doc. Recurses through ``plans[*].nested``. The
+    semantic pins (module docstring above ``_SEMANTIC_PINS``) apply
+    automatically on top of whatever ``config_pins`` the caller supplies.
+    """
+    config_pins = (*_SEMANTIC_PINS, *config_pins)
+    differences: list[Difference] = []
+    for plan in plans:
+        child_checkout = child / plan.path
+
+        # Rung 6 — nested-plan completeness: the frozen plan expected this
+        # submodule to be carried, but the carry step's own report says it
+        # was skipped. Distinct from the ordinary "parent left it cold" case
+        # (plan.initialized is False), which is not a failure.
+        if plan.initialized and plan.path in skipped:
+            differences.append(
+                Difference(
+                    plan.path,
+                    "submodule-skipped",
+                    "carried plan entry was silently skipped",
+                )
+            )
+            continue
+
+        # Rung 1 — initialized/cold parity.
+        child_initialized = (child_checkout / ".git").exists()
+        if child_initialized != plan.initialized:
+            differences.append(
+                Difference(
+                    plan.path,
+                    "submodule-init-parity",
+                    f"expected initialized={plan.initialized}, got {child_initialized}",
+                )
+            )
+            continue
+        if not plan.initialized:
+            continue
+
+        # Rung 2 — HEAD identity. This is the rung that catches a submodule
+        # detached at the wrong commit while every top-level signal agrees.
+        child_head = (
+            run_git(
+                child_checkout, ["rev-parse", "HEAD"], env=env, config_pins=config_pins
+            )
+            .stdout.decode()
+            .strip()
+        )
+        if child_head != plan.head:
+            differences.append(
+                Difference(
+                    plan.path,
+                    "submodule-head",
+                    f"expected HEAD {plan.head}, got {child_head}",
+                )
+            )
+
+        # Rung 3 — detached state, not attached to a branch that could
+        # diverge from the pinned commit later.
+        symbolic = run_git(
+            child_checkout,
+            ["symbolic-ref", "--quiet", "--short", "HEAD"],
+            env=env,
+            config_pins=config_pins,
+            check=False,
+        )
+        if symbolic.returncode == 0:
+            branch_name = symbolic.stdout.decode().strip()
+            differences.append(
+                Difference(
+                    plan.path,
+                    "submodule-detached",
+                    f"HEAD is attached to branch {branch_name!r}, expected detached",
+                )
+            )
+
+        # Rungs 4+5 — status and content parity, via the same comparison the
+        # top-level content-match rung already uses, one level down.
+        if plan.content is not None:
+            child_inventory = collect_inventory(
+                child_checkout,
+                with_state=True,
+                with_ignored=False,
+                with_submodules=True,
+                env=env,
+                config_pins=config_pins,
+            )
+            child_content = capture_state(
+                child_checkout, child_inventory, env=env, config_pins=config_pins
+            )
+            for difference in compare_states(plan.content, child_content):
+                differences.append(
+                    Difference(
+                        f"{plan.path}/{difference.path}",
+                        difference.check,
+                        difference.detail,
+                    )
+                )
+
+            # Rung 7 — recursive parent-untouched, extending the top-level
+            # bracket one level down: carry must not be what dirties the
+            # parent's own submodule checkout.
+            parent_checkout = parent / plan.path
+            parent_inventory = collect_inventory(
+                parent_checkout,
+                with_state=True,
+                with_ignored=False,
+                with_submodules=True,
+                env=env,
+                config_pins=config_pins,
+            )
+            parent_after = capture_state(
+                parent_checkout, parent_inventory, env=env, config_pins=config_pins
+            )
+            for difference in compare_states(plan.content, parent_after):
+                differences.append(
+                    Difference(
+                        f"{plan.path}/{difference.path}",
+                        "submodule-parent-untouched",
+                        difference.detail,
+                    )
+                )
+
+        differences.extend(
+            verify_submodules(
+                parent / plan.path,
+                child_checkout,
+                plan.nested,
+                skipped=skipped,
+                config_pins=config_pins,
+                env=env,
+            )
+        )
+    return differences

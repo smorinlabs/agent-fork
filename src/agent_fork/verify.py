@@ -14,6 +14,7 @@ from agent_fork.content import (
 from agent_fork.errors import VerificationError
 from agent_fork.git import run_git
 from agent_fork.repository import WorktreeCreation
+from agent_fork.submodules import SubmoduleSnapshot, verify_submodules
 from agent_fork.text import escape_terminal_text
 from agent_fork.worktree_list import list_worktrees
 
@@ -71,8 +72,11 @@ def verify_fork(
     *,
     with_state: bool = True,
     with_ignored: bool = False,
+    with_submodules: bool = False,
     parent_status_before: bytes,
     parent_state_before: CarriedState | None = None,
+    submodule_plans: tuple[SubmoduleSnapshot, ...] = (),
+    submodule_skipped: tuple[str, ...] = (),
     env: Mapping[str, str] | None = None,
 ) -> None:
     """Run the complete base ladder and topology-dependent assertions.
@@ -101,18 +105,23 @@ def verify_fork(
         failures.append("worktree-list")
 
     # `--ignore-submodules=dirty` suppresses submodule *working-tree* state,
-    # which a fork does not carry — `git worktree add` never initializes
-    # submodules, so the child cannot reproduce the parent's ` M <path>`. It
-    # still reports commit-level gitlink differences, so a submodule advance
-    # staged in the parent, which does travel in the staged patch, keeps being
-    # compared. `=all` would hide that too (A6a).
+    # which an opted-out fork does not carry — `git worktree add` never
+    # initializes submodules, so the child cannot reproduce the parent's
+    # ` M <path>`. It still reports commit-level gitlink differences, so a
+    # submodule advance staged in the parent, which does travel in the staged
+    # patch, keeps being compared. `=all` would hide that too (A6a). Dropped
+    # entirely when `with_submodules` is true (A6b step 6): a fork that
+    # carries submodules identically should match the parent exactly, with no
+    # exemption — the recursive rungs below carry the real weight of proving
+    # that, but the top-level status comparison stays strict too.
     status_args = [
         "status",
         "--porcelain=v1",
         "-z",
         "--untracked-files=all",
-        "--ignore-submodules=dirty",
     ]
+    if not with_submodules:
+        status_args.append("--ignore-submodules=dirty")
     if with_ignored:
         status_args.append("--ignored")
     child_status = run_git(creation.path, status_args, env=env).stdout
@@ -130,6 +139,7 @@ def verify_fork(
                 creation.parent_path,
                 with_state=with_state,
                 with_ignored=with_ignored,
+                with_submodules=with_submodules,
                 env=env,
             ),
             env=env,
@@ -141,6 +151,7 @@ def verify_fork(
                 creation.path,
                 with_state=with_state,
                 with_ignored=with_ignored,
+                with_submodules=with_submodules,
                 env=env,
             ),
             env=env,
@@ -153,6 +164,24 @@ def verify_fork(
             failures.append(_labelled("content-match", content))
             failed_checks.append(
                 _failed_check("content-match", content, primary=not drift)
+            )
+
+    if with_state and with_submodules and submodule_plans:
+        submodule_differences = verify_submodules(
+            creation.parent_path,
+            creation.path,
+            submodule_plans,
+            skipped=submodule_skipped,
+            env=env,
+        )
+        if submodule_differences:
+            failures.append(_labelled("submodule-content-match", submodule_differences))
+            failed_checks.append(
+                _failed_check(
+                    "submodule-content-match",
+                    submodule_differences,
+                    primary=not failures,
+                )
             )
 
     parent_status_after = run_git(

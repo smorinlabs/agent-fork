@@ -375,18 +375,41 @@ def test_cli_forwards_the_no_state_mode_to_the_submodule_guard(repo_scenario):
     T-GRD-23 calls `validate_fork_guards(with_state=False)` directly, so it stays
     green even if neither the CLI nor the pipeline forwards the mode. This row
     runs the real console script, so removing either forwarding turns it red.
+
+    `--no-with-submodules` is required on the refusal leg since A6b (owner
+    decision 2026-08-17): under the *default* flags this case now carries
+    successfully instead of refusing — T-GRD-27 pins that. This row's own
+    job is narrower and unchanged by A6b: prove the CLI forwards both modes
+    to the guard, which needs the guard to actually fire at least once.
     """
     from conftest import run_cli
 
     world = repo_scenario("plain@main", states=(submodule(dirty="advanced"),))
     refused = run_cli(
-        ["fork", "guarded", "--no-agent", "-o", "json"], world.env, world.parent_path
+        [
+            "fork",
+            "guarded",
+            "--no-agent",
+            "--no-with-submodules",
+            "-o",
+            "json",
+        ],
+        world.env,
+        world.parent_path,
     )
     assert refused.returncode == 5
     assert b"submodule_unrepresentable" in refused.stderr
 
     allowed = run_cli(
-        ["fork", "nostate", "--no-agent", "--no-with-state", "-o", "json"],
+        [
+            "fork",
+            "nostate",
+            "--no-agent",
+            "--no-with-state",
+            "--no-with-submodules",
+            "-o",
+            "json",
+        ],
         world.env,
         world.parent_path,
     )

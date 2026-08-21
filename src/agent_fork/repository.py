@@ -279,14 +279,21 @@ def validate_fork_guards(
     destination: Path,
     *,
     with_state: bool = True,
+    with_submodules: bool = False,
     env: Mapping[str, str] | None = None,
 ) -> RepositoryInfo:
     """Run every refusal before filesystem or ref mutation.
 
-    ``with_state`` gates the submodule refusal only. A fork that carries no
-    state reproduces nothing about the parent's submodules, so there is no
-    divergence to refuse — and refusing anyway would block the remedy the error
-    itself recommends.
+    The submodule refusal fires on ``with_state and not with_submodules``
+    (A6b step 6). A fork that carries no state reproduces nothing about the
+    parent's submodules, so there is no divergence to refuse — and refusing
+    anyway would block the remedy the error itself recommends. A fork that
+    carries submodules identically can represent an unstaged gitlink advance,
+    because the child gets a real submodule checkout to detach at the
+    parent's submodule HEAD — so the refusal must not fire there either.
+    ``with_submodules`` defaults false so a caller that predates A6b, or that
+    never resolved the flag, keeps A6a's original unconditional-on-with_state
+    behaviour.
     """
     info = inspect_repository(parent, env=env)
     attached = _worktree_branches(info.parent_path, env=env)
@@ -344,7 +351,9 @@ def validate_fork_guards(
     # conflicted submodule would otherwise be refused here first, with a remedy
     # -- stage it, or --no-with-state -- that cannot clear a conflicted index.
     unrepresentable = (
-        _unrepresentable_submodules(info.parent_path, env=env) if with_state else []
+        _unrepresentable_submodules(info.parent_path, env=env)
+        if with_state and not with_submodules
+        else []
     )
     if unrepresentable:
         listed = ", ".join(escape_terminal_text(path) for path in unrepresentable)

@@ -222,6 +222,7 @@ def collect_inventory(
     *,
     with_state: bool,
     with_ignored: bool,
+    with_submodules: bool = False,
     env: Mapping[str, str] | None = None,
     config_pins: Sequence[tuple[str, str]] = (),
 ) -> Inventory:
@@ -257,17 +258,18 @@ def collect_inventory(
         ignored = listing(
             ["ls-files", "--others", "-z", "--ignored", "--exclude-standard"]
         )
+    unstaged_args = ["diff", "--name-only", "-z", "--no-renames"]
+    if not with_submodules:
+        # A6a's exemption: a fork that does not carry submodules must not
+        # treat their working-tree dirt as ordinary unstaged content (A6b
+        # step 6). When submodules ARE carried, this filter is dropped: the
+        # path belongs in the inventory so verification's membership checks
+        # see it, even though gitlink paths are excluded from the manifest
+        # either way (`_manifest_entry` below).
+        unstaged_args.append("--ignore-submodules=dirty")
     return Inventory(
         staged=listing(["diff", "--cached", "--name-only", "-z", "--no-renames"]),
-        unstaged=listing(
-            [
-                "diff",
-                "--name-only",
-                "-z",
-                "--no-renames",
-                "--ignore-submodules=dirty",
-            ]
-        ),
+        unstaged=listing(unstaged_args),
         intent_to_add=tuple(
             intent_to_add_paths(root, env=env, config_pins=config_pins)
         ),
