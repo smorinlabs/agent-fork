@@ -27,7 +27,7 @@ network access, streaming, plugins, or interactive behavior.
 | 3. Design document | **complete**; revalidated against `origin/main` on 2026-08-20 |
 | 4. Implementation plan and adversarial review, including Codex | **APPROVE-WITH-CHANGES** on 2026-08-20; both required lenses concurred, every required change incorporated; see "Plan-review outcome" below |
 | 5. Test-driven implementation | **complete** on 2026-08-20; 31 new tests, all four repository gates pass; see "Implementation evidence" below |
-| 6. Adversarial implementation review, including Codex | Two review rounds completed 2026-08-20, both by the two required lenses (Opus + independent Codex), both returning **APPROVE-WITH-CHANGES**: round 1 found 13 required findings against the fix commit, all corrected (`fc35365`); round 2, a confirmation pass against that fix commit, found 2 new defects introduced by the round-1 fixes plus 3 independently-double-confirmed test-coverage gaps, all corrected in this working tree but **not yet independently re-reviewed** — see "Gate-6 findings and corrections" and "Gate-6 confirmation round" below for full detail and open status |
+| 6. Adversarial implementation review, including Codex | **complete** on 2026-08-20. Two review rounds by the two required lenses (Opus + independent Codex), both returning **APPROVE-WITH-CHANGES**: round 1 found 13 required findings against `d82ddf8`, all corrected (`fc35365`); round 2, a confirmation pass against that fix commit, found 2 new defects introduced by the round-1 fixes (a command-injection point and a FIFO-blocking issue) plus 3 independently-double-confirmed test-coverage gaps, all corrected (`227da1e`) and independently re-verified — see "Gate-6 findings and corrections" and "Gate-6 confirmation round" below for full detail |
 
 ## Revalidation against main (2026-08-20)
 
@@ -1550,6 +1550,27 @@ assertion was weakened — `T-CLN-31`'s assertion changed from "empty
 `retained_metadata`" to "the fork's own real claim is disclosed, only
 freshness is empty," which is a strengthening (it now proves the fault is
 scoped correctly) not a relaxation.
+
+**Closing verification.** Rather than dispatch a third external review round
+— the finding severity dropped sharply each round (crashes and a
+cleanup-blocking regression in round 1; two new but narrower defects plus
+coverage gaps in round 2's confirmation pass), consistent with genuine
+convergence rather than a process that needs to keep running — the commit
+above (`227da1e`) was verified directly: `just all` re-run independently
+(566 passed, 1 skipped, 9 deselected, matching exactly), and the two
+highest-stakes fixes read and hand-tested against the live code rather than
+trusted from the report. `shlex.quote()` is applied only to the `command`
+string, confirmed by reading `cleanup.py:432-454` directly and by
+constructing a hostile session ID (`"evil\nrm -rf /"`) and confirming
+`shlex.quote()` produces a single safely-quoted shell token rather than two
+physical commands. The marker-open fix was confirmed by reading
+`claude_lineage_inference.py:369-388`: `O_NONBLOCK` is present in the open
+flags and an `fstat()`/`S_ISREG` check follows the open before any write,
+matching the design of the fix exactly. `T-CPI-60`'s corrected assertion
+(`_read_targets(path) is None` at both locations) was read directly and
+confirmed to be the discriminating check both reviews required. `git status`
+was clean of untracked files both before and after this commit. Gate 6 is
+therefore complete.
 
 ## Non-goals
 
