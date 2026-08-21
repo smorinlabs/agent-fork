@@ -306,6 +306,32 @@ def test_carry_offline_override_engages_for_a_relative_gitmodules_url(repo_scena
     assert (child / "vendor/submodule/.git").exists()
 
 
+@pytest.mark.matrix("T-MAT-54")
+def test_carry_recurses_a_dirty_change_at_depth_two(repo_scenario):
+    """Coverage audit — step 1's sixteen-cell commitment names "depth-2 dirt"
+    as its own axis, distinct from cell `h` (a clean nested submodule, left
+    cold at depth 1). Here the INNER submodule itself has a dirty tracked
+    file, so the recursion in `_carry_one` must reach two levels deep, not
+    just carry the outer submodule and stop.
+    """
+    world = repo_scenario(
+        "plain@main", states=(submodule(nested=True, committed=True),)
+    )
+    outer = world.parent_path / "vendor/submodule"
+    (outer / "inner" / "tracked.txt").write_text("dirty at depth two\n")
+
+    child = world.parent_path.parent / "a6b-depth2"
+    result = _carry(world, child)
+    assert "vendor/submodule" in result.carried
+
+    child_inner = child / "vendor/submodule" / "inner"
+    assert child_inner.exists()
+    inner_status = _git(world, child_inner, "status", "--porcelain=v1").stdout
+    assert inner_status == b" M tracked.txt\n"
+    assert (child_inner / "tracked.txt").read_text() == "dirty at depth two\n"
+    assert _status(world, child) == _status(world, world.parent_path)
+
+
 @pytest.mark.matrix("T-VER-43")
 def test_a_mixed_time_race_is_caught_by_verification_not_silently_carried(
     repo_scenario,

@@ -369,6 +369,7 @@ def verify_submodules(
     child: Path,
     plans: tuple[SubmoduleSnapshot, ...],
     *,
+    with_ignored: bool = False,
     skipped: tuple[str, ...] = (),
     config_pins: Sequence[tuple[str, str]] = (),
     env: Mapping[str, str] | None = None,
@@ -459,7 +460,7 @@ def verify_submodules(
             child_inventory = collect_inventory(
                 child_checkout,
                 with_state=True,
-                with_ignored=False,
+                with_ignored=with_ignored,
                 with_submodules=True,
                 env=env,
                 config_pins=config_pins,
@@ -483,7 +484,7 @@ def verify_submodules(
             parent_inventory = collect_inventory(
                 parent_checkout,
                 with_state=True,
-                with_ignored=False,
+                with_ignored=with_ignored,
                 with_submodules=True,
                 env=env,
                 config_pins=config_pins,
@@ -505,6 +506,7 @@ def verify_submodules(
                 parent / plan.path,
                 child_checkout,
                 plan.nested,
+                with_ignored=with_ignored,
                 skipped=skipped,
                 config_pins=config_pins,
                 env=env,

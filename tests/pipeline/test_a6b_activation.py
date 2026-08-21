@@ -32,7 +32,7 @@ def _status(world, repo):
     return _git(world, repo, "status", "--porcelain=v1", "-z").stdout
 
 
-def _fork(world, name, *, with_submodules=True, with_state=True):
+def _fork(world, name, *, with_submodules=True, with_state=True, with_ignored=False):
     from agent_fork.pipeline import ForkRequest, fork
 
     request = ForkRequest(
@@ -43,6 +43,7 @@ def _fork(world, name, *, with_submodules=True, with_state=True):
         agent=None,
         with_state=with_state,
         with_submodules=with_submodules,
+        with_ignored=with_ignored,
     )
     return fork(request, env=world.env)
 
@@ -179,3 +180,29 @@ def test_json_output_carries_with_submodules_and_the_carry_notice(repo_scenario)
     document = json.loads(completed.stdout)
     assert document["fork"]["mode"]["with_submodules"] is True
     assert any("vendor/submodule" in notice for notice in document["notices"])
+
+
+@pytest.mark.matrix("T-VER-45")
+def test_with_ignored_carries_and_verifies_an_ignored_file_inside_a_submodule(
+    repo_scenario,
+):
+    """Coverage audit — step 1's sixteen-cell commitment names the
+    `--with-ignored` interaction inside a submodule as its own axis. An
+    ignored file inside the submodule must both carry (via `--with-ignored`)
+    and pass verification -- not merely transport while
+    `verify_submodules`'s recursive content rung, if it silently used
+    `with_ignored=False` internally, disagreed with what the frozen snapshot
+    (taken with the real flag) actually recorded.
+    """
+    world = repo_scenario("plain@main", states=(submodule(committed=True),))
+    outer = world.parent_path / "vendor/submodule"
+    (outer / ".gitignore").write_text("secret.txt\n")
+    (outer / "secret.txt").write_text("ignored-but-carried\n")
+    _git(world, outer, "add", ".gitignore")
+    _git(world, outer, "commit", "-qm", "ignore secret.txt")
+
+    result = _fork(world, "with-ignored-submodule", with_ignored=True)
+
+    child_secret = result.creation.path / "vendor/submodule" / "secret.txt"
+    assert child_secret.exists()
+    assert child_secret.read_text() == "ignored-but-carried\n"

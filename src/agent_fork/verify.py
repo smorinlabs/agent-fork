@@ -171,6 +171,7 @@ def verify_fork(
             creation.parent_path,
             creation.path,
             submodule_plans,
+            with_ignored=with_ignored,
             skipped=submodule_skipped,
             env=env,
         )

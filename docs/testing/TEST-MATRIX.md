@@ -320,6 +320,7 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-51 | A6b coverage gap — cell `b` (submodule dirtied only by untracked content) carries correctly through the recipe, not merely through top-level verification | baseline | F | live | A6 design doc §Matrix 1 cell `b`; coverage audit |
 | T-MAT-52 | A6b coverage gap — cell `f` (a dirty submodule alongside an ordinary dirty file) carries through the recipe; the two transport mechanisms genuinely coexist | baseline | F | live | A6 design doc §Matrix 1 cell `f`; coverage audit |
 | T-MAT-53 | A6b coverage gap — the offline URL override engages for a relative `.gitmodules` URL at the carry-recipe level, not only at the snapshot level | baseline | F | live | coverage audit |
+| T-MAT-54 | A6b coverage gap — depth-2 dirt: a dirty tracked file inside a submodule nested two levels deep carries, distinct from cell `h`'s clean-nested case | baseline | F | live | A6 design doc §Implementation plan step 1; coverage audit |
 
 ---
 
@@ -376,6 +377,7 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 | T-VER-42 | A6b step 6 — recursive verification (HEAD-identity rung) catches a carried submodule detached at the wrong commit, even when every top-level signal agrees | baseline | F | live | gate-4 pass 3 finding 2 |
 | T-VER-43 | A6b coverage gap — a mixed-time race between snapshot and carry is caught by verification: carry transports live bytes, verification compares against the frozen snapshot, so the race surfaces as a divergence rather than passing silently | baseline | F | live | coverage audit |
 | T-VER-44 | A6b coverage gap — gate-4 pass 1 finding 4: the semantic pin (`diff.ignoreSubmodules=none`) actually changes the output of the recursive `collect_inventory` calls it is threaded into, not merely present as an unused parameter | baseline | F | live | gate-4 pass 1 finding 4; coverage audit |
+| T-VER-45 | A6b coverage gap — `--with-ignored` inside a submodule: an ignored file carries and recursive verification's content rung must thread `with_ignored` rather than hardcoding `False`, which otherwise reports a correctly-carried ignored file as "no longer carried" | baseline | F | live | A6 design doc §Implementation plan step 1; coverage audit; found by this test (real bug, fixed) |
 
 ---
 
