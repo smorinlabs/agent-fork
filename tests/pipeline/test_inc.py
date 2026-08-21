@@ -516,3 +516,65 @@ def test_hook_that_detaches_a_process_finishes_promptly_and_reports_honestly(
                 os.kill(int(recorded.read_text()), signal.SIGKILL)
             except (ProcessLookupError, ValueError):
                 pass
+
+
+class _FakeHookProcess:
+    """A stand-in for a spawned hook, so signalling can be observed exactly."""
+
+    pid = 424242
+    returncode = 0
+    stdout = None
+    stderr = None
+
+    def poll(self):
+        return self.returncode
+
+
+def _killpg_recorder(signalled, alive):
+    """A `killpg` double: probes answer `alive`, real signals empty the group."""
+
+    def killpg(pid, signum):
+        if signum == 0:
+            if alive["value"]:
+                return
+            raise ProcessLookupError(pid)
+        signalled.append((pid, int(signum)))
+        alive["value"] = False
+
+    return killpg
+
+
+@pytest.mark.matrix("T-INC-18")
+def test_an_emptied_hook_group_is_never_signalled_again(monkeypatch):
+    """T-INC-18 — a PID is only reserved as a group id while the group is live.
+
+    Once the last member is gone the kernel may hand that PID to a brand-new,
+    unrelated process, so a later `killpg` would signal a stranger. Emptiness
+    therefore has to be a sticky, terminal fact: observing it once retires the
+    PID for every signalling path — the reap ladder's SIGKILL escalation and
+    `terminate_active_setup_hook()` alike.
+
+    Given:  a hook group observed empty after the reap ladder's SIGTERM, and a
+            kernel that afterwards reuses the PID (probes answer "alive" again)
+    Expect: not one further signal to that PID, from any path
+    Source: P02 A12 gate-6 round-3 review (Codex); REQ-22
+    """
+    from agent_fork import include
+
+    signalled = []
+    alive = {"value": True}
+    monkeypatch.setattr(include.os, "killpg", _killpg_recorder(signalled, alive))
+    group = include._HookGroup(_FakeHookProcess())
+
+    assert include._reap(group) == ()
+    assert signalled == [(424242, int(signal.SIGTERM))]
+    assert include._group_is_empty(group) is True
+
+    # The kernel hands the PID to an unrelated process group.
+    alive["value"] = True
+    monkeypatch.setattr(include._ACTIVE, "group", group, raising=False)
+    include._group_is_empty(group)
+    include._signal_hook_group(group, signal.SIGKILL)
+    include.terminate_active_setup_hook()
+    assert include._reap(group) == ()
+    assert signalled == [(424242, int(signal.SIGTERM))]
