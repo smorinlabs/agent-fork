@@ -47,10 +47,18 @@ def without_config_injection(env: Mapping[str, str] | None) -> dict[str, str]:
     }
 
 
-def _signal_process_group(
+def signal_process_group(
     process: subprocess.Popen[bytes], signum: signal.Signals
 ) -> None:
-    """Signal one owned process group without masking an active exception."""
+    """Signal one owned process group without masking an active exception.
+
+    Made public for the repository setup hook (A12) and kept public for that
+    history; ``T-RBK-07`` pins the macOS ``EPERM`` handling below. A12's gate-6
+    review then found the early return on an already-exited leader wrong for a
+    hook, whose backgrounded children are the whole point of signalling, so
+    ``include`` now carries a deliberately divergent ``_signal_hook_group()``.
+    Git spawns nothing that outlives it, so this gate stays correct here.
+    """
     if process.poll() is not None:
         return
     try:
@@ -75,7 +83,7 @@ def terminate_active_git() -> None:
     process = getattr(_ACTIVE, "process", None)
     if process is None:
         return
-    _signal_process_group(process, signal.SIGKILL)
+    signal_process_group(process, signal.SIGKILL)
 
 
 @dataclass(frozen=True)
@@ -115,11 +123,11 @@ def run_git(
     try:
         stdout, stderr = process.communicate(input=input_bytes)
     except BaseException:
-        _signal_process_group(process, signal.SIGTERM)
+        signal_process_group(process, signal.SIGTERM)
         try:
             process.wait(timeout=1)
         except subprocess.TimeoutExpired:
-            _signal_process_group(process, signal.SIGKILL)
+            signal_process_group(process, signal.SIGKILL)
             try:
                 process.wait(timeout=1)
             except subprocess.TimeoutExpired:

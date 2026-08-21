@@ -4,6 +4,8 @@ import ast
 import json
 import os
 import shutil
+import signal
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -269,6 +271,9 @@ def test_dry_run_honors_json_output_aliases_without_mutation(repo_scenario):
                     "untracked": 1,
                     "ignored": 0,
                 },
+                # A12 added this key to the dry-run plan; T-CLI-61 owns its
+                # per-state assertions, so this row only pins its presence.
+                "setup_hook": document["plan"]["setup_hook"],
             },
             "command": document["command"],
             "notices": [],
@@ -614,3 +619,238 @@ def test_invalid_output_env_never_leaks_human_formatted_stdout(repo_scenario):
         completed = run_cli(arguments, environment, world.parent_path)
         assert completed.returncode == 2, arguments
         assert completed.stdout == b"", arguments
+
+
+def _commit_setup_hook(world, body):
+    hook = world.parent_path / ".agent-fork/worktree-setup.sh"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(body)
+    hook.chmod(0o755)
+    for arguments in (["add", "."], ["commit", "-m", "add setup hook"]):
+        subprocess.run(
+            ["git", "-C", str(world.parent_path), *arguments],
+            env=world.env,
+            capture_output=True,
+            check=True,
+        )
+    return hook
+
+
+@pytest.mark.matrix("T-OUT-25")
+def test_setup_hook_is_structured_on_stdout_and_narrated_only_on_stderr(repo_scenario):
+    """T-OUT-25 — A12 outcome 7 and 8: visible to a human, parseable by a machine.
+
+    Given:  a fork whose setup hook runs, in `--json` mode and in `text` mode
+    Expect: `--json` stdout is exactly one parseable line carrying the whole
+            `setup_hook` object and no progress text; `text` mode narrates the
+            hook on stderr and leaves stdout byte-identical to a hookless fork
+    Source: P02 A12; R7.1, R7.6, R7.8
+    """
+    from conftest import run_cli
+
+    machine_world = repo_scenario("plain@main")
+    machine_env = _agent_env(machine_world)
+    _commit_setup_hook(machine_world, "#!/bin/sh\nprintf 'installed 42 packages\\n'\n")
+    machine = run_cli(
+        ["fork", "hooked", "--json"], machine_env, machine_world.parent_path
+    )
+    assert machine.returncode == 0, machine.stderr.decode()
+    assert machine.stdout.count(b"\n") == 1
+    document = json.loads(machine.stdout)
+    assert document["setup_hook"] == {
+        "path": ".agent-fork/worktree-setup.sh",
+        "present": True,
+        "policy": "tracked",
+        "eligibility": "eligible",
+        "status": "ran",
+        "reason": None,
+        "exit_code": 0,
+        "timed_out": False,
+        "descendants_cleared": True,
+        "duration_seconds": document["setup_hook"]["duration_seconds"],
+        "timeout_seconds": 300,
+        "output": {
+            "stdout": "installed 42 packages\\n",
+            "stderr": "",
+            "stdout_bytes": 22,
+            "stderr_bytes": 0,
+            "truncated": False,
+        },
+    }
+    assert isinstance(document["setup_hook"]["duration_seconds"], float)
+    assert b"setup hook:" not in machine.stdout
+    assert b"setup hook:" not in machine.stderr
+
+    absent_world = repo_scenario("plain@main")
+    absent = run_cli(
+        ["fork", "bare", "--json"], _agent_env(absent_world), absent_world.parent_path
+    )
+    assert absent.returncode == 0
+    assert json.loads(absent.stdout)["setup_hook"]["status"] == "absent"
+
+    # A skipped hook under `--json`: stdout stays one parseable line carrying
+    # the reason, and the skip *notice* still reaches stderr as plain text.
+    # That plain text is the pre-existing duplicate-notice defect A13(a),
+    # tracked as P02-T13ABF and explicitly out of A12's scope — the design keeps
+    # notices flowing for backward compatibility. Asserted here so the exception
+    # to "machine-mode stderr is exactly one JSON error object" is a pinned,
+    # named behavior rather than an unnoticed leak.
+    skipped_world = repo_scenario("plain@main")
+    hook = skipped_world.parent_path / ".agent-fork/worktree-setup.sh"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/bin/sh\nprintf 'never\\n'\n")
+    hook.chmod(0o755)
+    skipped = run_cli(
+        ["fork", "skipped", "--json"],
+        _agent_env(skipped_world),
+        skipped_world.parent_path,
+    )
+    assert skipped.returncode == 0, skipped.stderr.decode()
+    assert skipped.stdout.count(b"\n") == 1
+    document = json.loads(skipped.stdout)
+    assert document["setup_hook"]["status"] == "skipped"
+    assert document["setup_hook"]["eligibility"] == "untracked"
+    assert document["setup_hook"]["reason"] == (
+        "present but not committed at the fork anchor"
+    )
+    assert b"setup hook: " not in skipped.stderr  # progress stays suppressed
+    assert b"setup hook skipped: " in skipped.stderr  # the P02-T13ABF notice
+
+    hooked_world = repo_scenario("plain@main")
+    hooked_env = _agent_env(hooked_world)
+    _commit_setup_hook(hooked_world, "#!/bin/sh\nexit 0\n")
+    hooked = run_cli(["fork", "narrated"], hooked_env, hooked_world.parent_path)
+    assert hooked.returncode == 0, hooked.stderr.decode()
+    assert b"setup hook: running .agent-fork/worktree-setup.sh (timeout 300s)" in (
+        hooked.stderr
+    )
+    assert b"setup hook: ok in " in hooked.stderr
+    assert b"setup hook" not in hooked.stdout
+
+    # The hook adds nothing to stdout: a hookless fork of the same shape
+    # produces the same line structure, with only the paths differing.
+    plain_world = repo_scenario("plain@main")
+    plain = run_cli(
+        ["fork", "narrated"], _agent_env(plain_world), plain_world.parent_path
+    )
+    assert plain.returncode == 0
+
+    hooked_lines = hooked.stdout.splitlines()
+    plain_lines = plain.stdout.splitlines()
+    assert len(hooked_lines) == len(plain_lines) == 5
+    for lines in (hooked_lines, plain_lines):
+        assert [line.split(b":")[0] for line in lines[:3]] == [
+            b"fork",
+            b"branch",
+            b"worktree",
+        ]
+        assert lines[3] == b""
+        assert lines[4].startswith(b"cd ")
+
+
+@pytest.mark.matrix("T-OUT-27")
+def test_human_output_echoes_the_hook_tails_on_failure_and_under_debug(repo_scenario):
+    """T-OUT-27 — Axis C1's human echo: the tails are shown, not just stored.
+
+    Axis C1 promises human mode echoes the bounded `stdout_tail`/`stderr_tail`
+    to stderr when the hook failed, timed out, or `--debug` is set. The failure
+    path only ever showed the tail by accident, folded into the failure notice
+    inside `include.py`, and `--debug` did nothing at all for the hook.
+
+    Given:  a failing hook, then a succeeding hook run with `--debug`
+    Expect: both echo the already-escaped, already-bounded tails to stderr, and
+            a succeeding hook without `--debug` echoes nothing
+    Source: P02 A12 Axis C1; R7.1, R7.6
+    """
+    from conftest import run_cli
+
+    failing = repo_scenario("plain@main")
+    _commit_setup_hook(
+        failing,
+        "#!/bin/sh\nprintf 'step one done\\n'\nprintf 'boom\\n' >&2\nexit 17\n",
+    )
+    failed = run_cli(["fork", "failed"], _agent_env(failing), failing.parent_path)
+    assert failed.returncode == 0, failed.stderr.decode()
+    assert b"setup hook stdout: step one done\\n" in failed.stderr
+    assert b"setup hook stderr: boom\\n" in failed.stderr
+
+    debugged_world = repo_scenario("plain@main")
+    _commit_setup_hook(debugged_world, "#!/bin/sh\nprintf 'installed\\n'\n")
+    debugged = run_cli(
+        # `--debug` is a top-level flag, so it precedes the subcommand.
+        ["--debug", "fork", "debugged"],
+        _agent_env(debugged_world),
+        debugged_world.parent_path,
+    )
+    assert debugged.returncode == 0, debugged.stderr.decode()
+    assert b"setup hook stdout: installed\\n" in debugged.stderr
+    assert b"setup hook" not in debugged.stdout
+
+    quiet_world = repo_scenario("plain@main")
+    _commit_setup_hook(quiet_world, "#!/bin/sh\nprintf 'installed\\n'\n")
+    quiet = run_cli(["fork", "quiet"], _agent_env(quiet_world), quiet_world.parent_path)
+    assert quiet.returncode == 0
+    assert b"setup hook: ok in " in quiet.stderr
+    assert b"setup hook stdout:" not in quiet.stderr
+
+
+@pytest.mark.requires_process_group_signals
+@pytest.mark.matrix("T-OUT-28")
+def test_human_output_echoes_the_hook_tails_on_timeout(repo_scenario):
+    """T-OUT-28 — the timeout branch of the same Axis C1 echo.
+
+    Given:  a hook that prints, then blocks past a one-second timeout
+    Expect: the timeout line and the bounded tail of what it printed first,
+            both on stderr, with the fork still succeeding
+    Source: P02 A12 Axis C1; R7.1, R7.6
+    """
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    _commit_setup_hook(world, "#!/bin/sh\nprintf 'started\\n'\nsleep 30\n")
+    timed = run_cli(
+        ["fork", "slow", "--setup-hook-timeout", "1"],
+        _agent_env(world),
+        world.parent_path,
+    )
+    assert timed.returncode == 0, timed.stderr.decode()
+    assert b"setup hook: timed out after 1s" in timed.stderr
+    assert b"setup hook stdout: started\\n" in timed.stderr
+
+
+@pytest.mark.matrix("T-OUT-26")
+def test_interrupt_error_codes_join_the_stable_catalog(repo_scenario):
+    """T-OUT-26 — the two interrupt codes are published, not ad hoc.
+
+    Given:  `interrupted_sigint` and `interrupted_sigterm`
+    Expect: both are in `ERROR_CATALOG` and `STABLE_ERROR_CODES` at exit codes
+            130 and 143, both have exactly one class carrying that code (which
+            is what keeps T-OUT-14 green), and both round-trip through
+            `render_error(machine=True)`
+    Source: P02 A12; R7.12
+    """
+    from agent_fork.errors import (
+        ERROR_CATALOG,
+        INTERRUPT_ERRORS,
+        InterruptedBySigintError,
+        InterruptedBySigtermError,
+    )
+    from agent_fork.output import STABLE_ERROR_CODES, render_error
+
+    repo_scenario()
+    expected = {
+        "interrupted_sigint": (130, InterruptedBySigintError),
+        "interrupted_sigterm": (143, InterruptedBySigtermError),
+    }
+    for code, (exit_code, error_type) in expected.items():
+        assert ERROR_CATALOG[code].exit_code == exit_code
+        assert code in STABLE_ERROR_CODES
+        assert error_type.code == code and error_type.exit_code == exit_code
+        error = error_type("interrupted after rollback")
+        assert json.loads(render_error(error, machine=True)) == {
+            "error": {"code": code, "message": "interrupted after rollback"}
+        }
+    assert INTERRUPT_ERRORS == {
+        signal.SIGINT: InterruptedBySigintError,
+        signal.SIGTERM: InterruptedBySigtermError,
+    }

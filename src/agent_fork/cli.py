@@ -188,6 +188,26 @@ def _parser() -> argparse.ArgumentParser:
         help="Verify the completed fork (default: enabled)",
     )
     fork.add_argument(
+        "--setup-hook-policy",
+        choices=("tracked", "any", "off"),
+        default=None,
+        help=(
+            "Repository setup-hook policy: tracked runs it only when it is "
+            "committed at the fork anchor and unchanged on disk, any runs it "
+            "regardless, off never runs it (default: tracked)"
+        ),
+    )
+    fork.add_argument(
+        "--setup-hook-timeout",
+        type=int,
+        metavar="SECONDS",
+        default=None,
+        help=(
+            "Seconds the repository setup hook may run before its process "
+            "group is terminated (default: 300)"
+        ),
+    )
+    fork.add_argument(
         "--force", action="store_true", help="Override only the Git-version floor"
     )
     fork.add_argument(
@@ -397,6 +417,42 @@ def _path_for_name(info, config, name, branch, environment, args=None, cwd=None)
     )
 
 
+def _setup_hook_plan(parent_path, anchor, config, environment) -> dict[str, object]:
+    """Predict the setup-hook step for `--dry-run`, without mutating anything.
+
+    Evaluated parent-side against the resolved anchor, because `materialize()`
+    has not run yet. `prediction: true` says so in the document rather than
+    implying certainty about the child that does not exist yet.
+    """
+    from agent_fork.include import SETUP_HOOK_RELATIVE_PATH, setup_hook_eligibility
+
+    hook = parent_path / SETUP_HOOK_RELATIVE_PATH
+    try:
+        hook.lstat()
+        present = True
+    except OSError:
+        present = False
+    if config.setup_hook_policy == "off":
+        eligibility, reason, would_run = "unchecked", None, False
+    elif not present:
+        eligibility, reason, would_run = "absent", None, False
+    else:
+        eligibility, reason = setup_hook_eligibility(
+            parent_path, anchor, env=environment
+        )
+        would_run = config.setup_hook_policy == "any" or eligibility == "eligible"
+    return {
+        "path": SETUP_HOOK_RELATIVE_PATH,
+        "present": present,
+        "policy": config.setup_hook_policy,
+        "eligibility": eligibility,
+        "would_run": would_run,
+        "reason": reason,
+        "timeout_seconds": config.setup_hook_timeout,
+        "prediction": True,
+    }
+
+
 def _fork_cli(args, environment: dict[str, str]) -> int:
     from agent_fork.agents import (
         LaunchCommand,
@@ -443,18 +499,41 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
                 else None
             ),
             "codex_session_name_resolution": args.codex_session_name_resolution,
+            "setup_hook_policy": args.setup_hook_policy,
+            "setup_hook_timeout": args.setup_hook_timeout,
         }.items()
         if value is not None
     }
-    config = resolve_discovered_config(
-        cwd, environment, explicit_path=args.config, flags=flags
+    # Resolving the output mode and publishing it are one critical section, held
+    # under a blocked mask. `main()`'s exception boundary otherwise sees only the
+    # raw flags and renders a human error for a fork put into JSON mode by
+    # `AGENT_FORK_OUTPUT`, breaking R7.8's one-JSON-object-on-stderr contract
+    # exactly when it matters, on the interrupt path. Position alone cannot close
+    # that: these are three statements and CPython runs signal handlers between
+    # bytecodes, so an interrupt landing between the resolution and the
+    # assignment unwinds with nothing published. Blocking exactly the pair
+    # `rollback.run_with_rollback()` handles defers such a signal — it is not
+    # dropped — to the `SIG_SETMASK` below, which restores whatever mask the
+    # caller had rather than assuming it was empty. The section covers reading
+    # local configuration files and two assignments; nothing in it waits.
+    restore_mask = signal.pthread_sigmask(
+        signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM}
     )
-    # Mutate args.output immediately, not just at the point output_kind is
-    # used below: a PreconditionError raised later (an invalid branch name,
-    # a naming collision) before output_kind's own computation must still
-    # render per this decision, and the exception handler in main() reads
-    # args.output/args.json, not a local variable of this function.
-    args.output = "json" if args.json else (args.output or config.output)
+    try:
+        config = resolve_discovered_config(
+            cwd, environment, explicit_path=args.config, flags=flags
+        )
+        # Two publications, both inside the critical section. `args.output` is
+        # A11's mechanism, read by every downstream `output_kind = args.output`
+        # and by `_machine_error_output()`; `_resolved_machine` is A12's, read
+        # by `main()`'s `_machine()` closure, which prefers it outright.
+        args.output = "json" if args.json else (args.output or config.output)
+        args._resolved_machine = args.output == "json"
+    finally:
+        # A `ConfigError` raised inside leaves `_resolved_machine` unpublished,
+        # which is correct: no resolved mode exists yet, so the boundary's raw-
+        # flag/environment fallback is all there is to go on.
+        signal.pthread_sigmask(signal.SIG_SETMASK, restore_mask)
     context = resolve_agent_mode(
         config.agent_mode,
         environment,
@@ -615,9 +694,13 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
                     else ()
                 )
             ),
+            _setup_hook_plan(parent_path, anchor, config, environment),
         )
         print(dry.render(output_kind))
         return 0
+
+    def announce(line: str) -> None:
+        print(line, file=sys.stderr)
 
     result = fork(
         ForkRequest(
@@ -632,9 +715,28 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             force=args.force,
             extra_args=extra_args,
             codex_session_name_resolution=config.codex_session_name_resolution,
+            setup_hook_policy=config.setup_hook_policy,
+            setup_hook_timeout=config.setup_hook_timeout,
+            # Suppressed in machine mode: stderr is reserved there for exactly
+            # one JSON error object, which plain progress text would break.
+            progress=None if output_kind == "json" else announce,
         ),
         env=environment,
     )
+    hook = result.setup_hook
+    if output_kind != "json" and hook.status == "ran":
+        # Axis C1: human mode always gets the one-line status through
+        # `announce`, and the bounded tails as well when the hook failed, timed
+        # out, or `--debug` asked for diagnostics. The tails arrive already
+        # escaped and already bounded by `include.py`; re-cutting or re-escaping
+        # them here would either lose content or double-escape it.
+        if hook.timed_out or hook.exit_code != 0 or args.debug:
+            for stream, tail in (
+                ("stdout", hook.stdout_tail),
+                ("stderr", hook.stderr_tail),
+            ):
+                if tail:
+                    print(f"setup hook {stream}: {tail}", file=sys.stderr)
     notices = list(result.notices)
     if config.copy:
         notices.extend(copy_to_clipboard(result.launch.command))
@@ -654,6 +756,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         verification={"enabled": config.verify, "passed": config.verify},
         command=result.launch.command,
         notices=tuple(notices),
+        setup_hook=result.setup_hook.document(),
     )
     print(presented.render(output_kind))
     for notice in notices:
@@ -700,6 +803,17 @@ def main(argv: list[str] | None = None) -> int:
         if not args.all and args.record_all:
             parser.error("--record-all requires --all")
     environment = dict(os.environ)
+    from agent_fork.rollback import OperationInterrupted
+
+    def _machine() -> bool:
+        # `_fork_cli()` publishes the fully resolved mode once it has one.
+        # Everything that fails before resolution falls back to A11's
+        # flag-then-environment rule, which is all there is to go on there.
+        resolved = getattr(args, "_resolved_machine", None)
+        if resolved is not None:
+            return resolved
+        return _machine_error_output(args, environment)
+
     try:
         if args.verbose and not args.quiet:
             print(f"agent-fork: command={args.command or 'help'}", file=sys.stderr)
@@ -1518,6 +1632,8 @@ def main(argv: list[str] | None = None) -> int:
                     "verify": resolved.verify,
                     "copy": resolved.copy,
                     "output": resolved.output,
+                    "setup_hook_policy": resolved.setup_hook_policy,
+                    "setup_hook_timeout": resolved.setup_hook_timeout,
                     "agents": {
                         "claude": {"extra_args": list(resolved.claude_extra_args)},
                         "codex": {
@@ -1542,8 +1658,28 @@ def main(argv: list[str] | None = None) -> int:
 
                 print(config_get(resolved, args.key))
                 return 0
+    except OperationInterrupted as error:
+        # `OperationInterrupted` derives from BaseException so pipeline-internal
+        # `except Exception` handlers cannot swallow it; that is also why it
+        # escaped `main()` uncaught before A12, producing a traceback and exit 1
+        # instead of the 130/143 REQ-22 and README already promise.
+        from agent_fork.errors import INTERRUPT_ERRORS
+        from agent_fork.output import render_error
+
+        translated = INTERRUPT_ERRORS[error.signum]("interrupted after rollback")
+        print(render_error(translated, machine=_machine()), file=sys.stderr)
+        return translated.exit_code
+    except KeyboardInterrupt:
+        # Outside the `run_with_rollback()` window — preflight, naming, dry-run —
+        # nothing exists to roll back and Python's default handler applies.
+        from agent_fork.errors import InterruptedBySigintError
+        from agent_fork.output import render_error
+
+        interrupted = InterruptedBySigintError("interrupted before any mutation")
+        print(render_error(interrupted, machine=_machine()), file=sys.stderr)
+        return interrupted.exit_code
     except ConfigError as error:
-        machine = _machine_error_output(args, environment)
+        machine = _machine()
         if machine:
             from agent_fork.output import render_error
 
@@ -1557,7 +1693,7 @@ def main(argv: list[str] | None = None) -> int:
         from agent_fork.errors import AgentForkError
         from agent_fork.output import render_error
 
-        machine = _machine_error_output(args, environment)
+        machine = _machine()
         if args.debug and not machine:
             traceback.print_exc()
         print(render_error(error, machine=machine), file=sys.stderr)
