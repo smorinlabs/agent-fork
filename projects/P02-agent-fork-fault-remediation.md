@@ -291,8 +291,8 @@ repository-controlled text raw).
     agent-fork fork sockcase --no-agent        # succeeds
     ```
 
-    `Inventory.untracked` is exactly that listing (`content.py:160`), so the
-    `unsupported untracked file type` raise (`materialize.py:56-59`) is
+    `Inventory.untracked` is exactly that listing (`collect_inventory`'s untracked listing), so the
+    `unsupported untracked file type` raise (`_copy_entry`'s non-regular branch) is
     unreachable from an entry that existed when the fork started. It is
     reachable only if a listed regular file is *replaced* by a non-regular
     one inside the fork window — which is case (c), not a file-type fault.
@@ -300,12 +300,12 @@ repository-controlled text raw).
 
   - **(b) Unreadable file — confirmed, but it fails earlier than recorded and
     outside `materialize.py`.** With verification on (the default) the fork
-    dies *before any worktree exists*: `capture_state` (`pipeline.py:122-126`)
-    runs ahead of `create_worktree_at_anchor` (`pipeline.py:127-129`), and
-    `_digest` (`content.py:165-170`) opens every carried path with no guard.
+    dies *before any worktree exists*: `capture_state` (`fork`'s `capture_state` call)
+    runs ahead of `create_worktree_at_anchor` (`create_worktree_at_anchor`), and
+    `_digest` (`content.py:_digest`) opens every carried path with no guard.
     There is therefore nothing to roll back on the default path; the original
     "rolls back the whole worktree" holds only under `--no-verify`, which
-    skips the snapshot and reaches `_copy_entry` (`materialize.py:41-59`).
+    skips the snapshot and reaches `_copy_entry` (`_copy_entry`).
 
     ```bash
     echo secret > locked.txt && chmod 000 locked.txt
@@ -318,10 +318,10 @@ repository-controlled text raw).
     no step attribution, no statement that skipping the entry was possible.
     "Mid-copy deleted file" is **not** part of this case: it is case (c)
     reaching a different tripwire (`_copy_entry`'s `lstat`,
-    `materialize.py:44`).
+    `_copy_entry`'s `lstat`).
 
     **Corrected 2026-08-20 by the gate 1 matrix, on two points.** First, the
-    earlier claim that `include.py:80-85` "already implements the intended
+    earlier claim that `copy_worktree_includes`'s unsupported-type branch "already implements the intended
     policy" is only half true: it skips an unsupported file *type* but has no
     guard for *readability*, so an unreadable file matched by
     `.worktreeinclude` still kills the fork, after verification has already
@@ -333,12 +333,12 @@ repository-controlled text raw).
 
   - **(c) Parent edited mid-fork — confirmed, deterministically reproduced;
     the rollback is correct and must stay.** The window runs from the status
-    snapshot (`pipeline.py:113-115`) through the content snapshot
-    (`pipeline.py:122-126`), worktree creation, and materialization
-    (`pipeline.py:132-139`) to the final parent re-read (`verify.py:146-150`)
+    snapshot (`fork`'s parent status snapshot) through the content snapshot
+    (`fork`'s `capture_state` call), worktree creation, and materialization
+    (`fork`'s `materialize` call) to the final parent re-read (the `parent-untouched` bracket)
     — measured at roughly 0.5 s to 0.7 s of a 1.1 s command, and it widens
     with repository size because untracked entries are copied one at a time
-    (`materialize.py:177-178`). Sweeping the delay of a single background
+    (`materialize`'s untracked copy loop). Sweeping the delay of a single background
     write pins the edges:
 
     ```bash
@@ -352,10 +352,10 @@ repository-controlled text raw).
     ```
 
     A write that changes a path's *status class* trips `parent-untouched`
-    (`verify.py:146-150`); a write that only changes bytes in an
-    already-modified path trips `parent-content` (`verify.py:137-139`), the
+    (the `parent-untouched` bracket); a write that only changes bytes in an
+    already-modified path trips `parent-content` (the `parent-content` rung), the
     rung A1 added. When the write lands *before* transport reads the path,
-    `content-match` (`verify.py:140-144`) fires alongside it — re-validated
+    `content-match` (the `content-match` rung) fires alongside it — re-validated
     2026-08-17 against `722e1fd`:
     `parent-content (f1.txt: content differs), content-match (f1.txt: content
     differs)`. That second rung is the torn copy made visible: the child holds
@@ -386,7 +386,7 @@ repository-controlled text raw).
 
   One re-evaluation finding for the fix design: PR #53 consolidated three
   duplicated primitive families but left `_copy_entry` and the
-  `.worktreeinclude` copy loop (`include.py:74-86`) unmerged — a near-duplicate
+  `.worktreeinclude` copy loop (`copy_worktree_includes`'s copy loop) unmerged — a near-duplicate
   pair whose *only* substantive divergence is the policy A5(b) is about, raise
   versus notice-and-skip. The (b) remedy should therefore land as one shared
   copy primitive taking the policy as a parameter, matching #53's pattern,
@@ -419,7 +419,7 @@ repository-controlled text raw).
   **Unverified surface — the gate must probe before any fix.** macOS/APFS
   only, one Git version, `--no-agent` only. Untested: Linux and
   case-sensitive filesystems; whether any Git version lists non-regular
-  entries; the `--with-ignored` listing (`content.py:154`), which shares the
+  entries; the `--with-ignored` listing (`collect_inventory`'s ignored listing), which shares the
   same `ls-files` mechanism but was not probed; unreadable *directories* as
   opposed to files; a regular file swapped for a FIFO inside the window; and
   the interaction with A6's dirty-submodule case. The window figures come

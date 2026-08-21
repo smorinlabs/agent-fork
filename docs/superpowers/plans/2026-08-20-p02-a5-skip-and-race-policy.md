@@ -563,6 +563,15 @@ Written 2026-08-20. Test-first throughout: each step lands its RED rows before
 its implementation. Row IDs are taken from the next free numbers in each group
 and are never renumbered once written.
 
+### Row numbering
+
+Reassigned 2026-08-20 after merging `main`. A6a, pull request #58, registered
+`T-VER-35..39` and `T-MAT-26` while this plan was being written, and matrix
+convention forbids renumbering an existing row, so this plan's rows moved to
+`T-MAT-30..36` and `T-VER-40..44`. Re-check the next free numbers again
+immediately before writing tests: `main` moved twice during this item, and
+both times it landed in these two groups.
+
 ### Step 0 — prerequisites, before any code
 
 1. **Check issue #45** (bound staged-binary materialization memory). It edits
@@ -585,11 +594,11 @@ an untracked or ignored path produces a skip record carrying the sentinel
 
 | Row | Asserts |
 |---|---|
-| `T-MAT-26` | Unreadable untracked file is skipped and named; fork exits `0` |
-| `T-MAT-27` | Two unreadable untracked files are both named, byte-wise ordered, `count` is 2 |
-| `T-MAT-29` | Unreadable **tracked** modified file is `entry_unreadable`, exit `1`, no worktree survives |
-| `T-MAT-30` | A failing `lstat` is `entry_unreadable`, never a skip, because no sentinel can be recorded |
-| `T-VER-39` | **Positive guard.** An ordinary unstaged deletion still forks and verifies, protecting the behaviour `T-VER-26` covers |
+| `T-MAT-30` | Unreadable untracked file is skipped and named; fork exits `0` |
+| `T-MAT-31` | Two unreadable untracked files are both named, byte-wise ordered, `count` is 2 |
+| `T-MAT-33` | Unreadable **tracked** modified file is `entry_unreadable`, exit `1`, no worktree survives |
+| `T-MAT-34` | A failing `lstat` is `entry_unreadable`, never a skip, because no sentinel can be recorded |
+| `T-VER-44` | **Positive guard.** An ordinary unstaged deletion still forks and verifies, protecting the behaviour `T-VER-26` covers |
 
 ### Step 2 — the deletion facet (`content.py`)
 
@@ -599,8 +608,8 @@ fork carries any deletion.
 
 | Row | Asserts |
 |---|---|
-| `T-MAT-31` | An unstaged deletion blocks an otherwise valid skip; `entry_unreadable` names the blocker |
-| `T-MAT-32` | A staged `git rm --cached old` whose working file is unreadable is detected, though nothing is absent |
+| `T-MAT-35` | An unstaged deletion blocks an otherwise valid skip; `entry_unreadable` names the blocker |
+| `T-MAT-36` | A staged `git rm --cached old` whose working file is unreadable is detected, though nothing is absent |
 
 ### Step 3 — transport honours the skip (`materialize.py`)
 
@@ -610,9 +619,19 @@ No pathspec exclusion is needed, because tracked paths never skip.
 
 | Row | Asserts |
 |---|---|
-| `T-MAT-28` | A non-regular entry reaching the copy loop is skipped with a notice rather than raising |
+| `T-MAT-32` | A non-regular entry reaching the copy loop is skipped with a notice rather than raising |
 
 ### Step 4 — verification honours the skip (`verify.py`)
+
+**Independent corroboration from A6a.** Pull request #58 solved a structurally
+identical problem days ago: it filtered submodule working-tree state out of
+`exact-copy-status` with `--ignore-submodules=dirty` while deliberately leaving
+the `parent-untouched` bracket unfiltered, on the reasoning that the bracket
+compares the parent against itself and filtering it would hide a real
+transition. That is exactly the split this step specifies for skipped paths,
+arrived at independently through the gate 1 reviews. Follow A6a's implementation
+shape at that rung.
+
 
 Thread the skipped set into the verify-phase re-capture and filter it from
 both porcelains in `exact-copy-status`. Leave `parent-untouched` alone.
@@ -620,10 +639,10 @@ Re-check each sentinel before reporting success.
 
 | Row | Asserts |
 |---|---|
-| `T-VER-35` | A skipped path is filtered from `exact-copy-status`; the fork verifies |
-| `T-VER-36` | The verify-phase re-capture does not re-open a skipped path, so it cannot raise there |
-| `T-VER-37` | A skipped file changing mode `000` to `0644` mid-fork fails the fork on the sentinel |
-| `T-VER-38` | An unchanged sentinel verifies successfully |
+| `T-VER-40` | A skipped path is filtered from `exact-copy-status`; the fork verifies |
+| `T-VER-41` | The verify-phase re-capture does not re-open a skipped path, so it cannot raise there |
+| `T-VER-42` | A skipped file changing mode `000` to `0644` mid-fork fails the fork on the sentinel |
+| `T-VER-43` | An unchanged sentinel verifies successfully |
 
 ### Step 5 — `.worktreeinclude` readability guard (`include.py`)
 
