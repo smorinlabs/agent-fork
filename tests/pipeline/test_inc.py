@@ -601,9 +601,11 @@ def test_a_signal_during_the_spawn_is_deferred_until_the_hook_is_registered(
             instant the "spawn" returns, and a handler shaped like
             `rollback.interrupt()`
     Expect: the handler runs *after* registration, sees the hook in `_ACTIVE`,
-            and SIGKILLs its group; the mask is blocked across the spawn and
-            restored on the way out
-    Source: P02 A12 gate-6 round 3 review; REQ-22
+            and reaches its group through the reap ladder — `SIGTERM` first,
+            per T-RBK-11's requirement that a live hook gets its grace period
+            rather than a direct `SIGKILL`; the mask is blocked across the
+            spawn and restored on the way out
+    Source: P02 A12 gate-6 round 3 review; REQ-22; round 5 (CodeRabbit, PR #65)
     """
     from agent_fork import include
     from agent_fork.rollback import OperationInterrupted
@@ -650,7 +652,10 @@ def test_a_signal_during_the_spawn_is_deferred_until_the_hook_is_registered(
     assert observed["registered_during_spawn"] is None
     assert observed["registered_at_delivery"] is not None
     assert observed["registered_at_delivery"].process is spawned
-    assert (spawned.pid, int(signal.SIGKILL)) in signalled
+    # The mock reports the group empty after any single real signal, so the
+    # reap ladder's escalation never has to fire — matching the graceful case
+    # the fix exists for: SIGTERM alone was enough, exactly like T-RBK-11.
+    assert signalled == [(spawned.pid, int(signal.SIGTERM))]
     assert getattr(include._ACTIVE, "group", None) is None
     assert signal.pthread_sigmask(signal.SIG_BLOCK, set()) == entry_mask
 

@@ -343,20 +343,97 @@ def test_terminating_the_hook_group_reaches_survivors_after_the_leader_exits(tmp
         finally:
             include._ACTIVE.group = None
 
+        confirmed_dead = False
         for _ in range(300):
             try:
                 os.kill(survivor, 0)
             except ProcessLookupError:
+                confirmed_dead = True
                 break
             time.sleep(0.01)
         else:
             pytest.fail(f"setup-hook group member {survivor} survived the interrupt")
     finally:
-        if recorded.exists():
+        # Once `ProcessLookupError` confirms the survivor's own pid is gone,
+        # a fallback `kill` on that same numeric pid risks the kernel having
+        # already recycled it for something unrelated — never signal past a
+        # confirmed exit (CodeRabbit, PR #65).
+        if not confirmed_dead and recorded.exists():
             try:
                 os.kill(int(recorded.read_text()), signal.SIGKILL)
             except (ProcessLookupError, ValueError):
                 pass
+        for pipe in (process.stdout, process.stderr):
+            if pipe is not None:
+                pipe.close()
+
+
+@pytest.mark.requires_process_group_signals
+@pytest.mark.matrix("T-RBK-11")
+def test_terminating_the_hook_group_gives_it_a_sigterm_grace_period(tmp_path):
+    """T-RBK-11 — the interrupt terminator gives a live hook its SIGTERM chance.
+
+    Given:  a hook still running (its own leader is alive) that traps SIGTERM
+            to write a "cleaned up" sentinel before exiting on its own. The
+            hook forks no child of its own (a builtin busy-wait, not `sleep`)
+            — a backgrounded `sleep` in the same group dies from the same
+            broadcast `killpg` signal that targets the shell, and racing that
+            child's death against the shell's own trap is a separate, real
+            shell-signal subtlety this row is not about; eliminating the
+            child isolates the one thing under test.
+    Expect: `terminate_active_setup_hook()` lets that trap actually run — the
+            sentinel appears — rather than sending SIGKILL directly and
+            denying a well-behaved hook the grace period the reap ladder
+            promises everywhere else. T-RBK-10 covers the complementary case
+            (a leader already gone, a SIGTERM-ignoring survivor): this row
+            exists because the fix for that case must not regress this one.
+    Source: P02 A12 gate-6 review (CodeRabbit, PR #65); REQ-22
+    """
+    from agent_fork import include
+
+    cleaned_up = tmp_path / "cleaned-up"
+    script = tmp_path / "hook.sh"
+    script.write_text(
+        f"#!/bin/sh\ntrap 'touch \"{cleaned_up}\"; exit 0' TERM\nwhile :; do :; done\n"
+    )
+    script.chmod(0o755)
+    process = subprocess.Popen(
+        [str(script)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        # `trap` runs before the busy-wait loop even starts, so any successful
+        # spawn has already installed it; the settle just avoids signalling
+        # mid-`exec`, before the shell has run any of its own script yet.
+        time.sleep(0.3)
+        if process.poll() is not None:
+            pytest.fail("the hook exited before it could be terminated")
+        include._ACTIVE.group = include._HookGroup(process)
+        try:
+            include.terminate_active_setup_hook()
+        finally:
+            include._ACTIVE.group = None
+
+        for _ in range(300):
+            if cleaned_up.exists():
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail(
+                "the hook's SIGTERM trap never ran — it was killed before "
+                "it had the chance to clean up"
+            )
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            # PermissionError: macOS can report this in the window between a
+            # group's last member exiting and its reaping — the same case
+            # `_signal_hook_group()` itself tolerates.
+            pass
         for pipe in (process.stdout, process.stderr):
             if pipe is not None:
                 pipe.close()

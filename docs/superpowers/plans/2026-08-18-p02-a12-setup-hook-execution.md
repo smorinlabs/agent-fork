@@ -1324,3 +1324,24 @@ at 543; only `T-INC-21`'s row text and matrix-row description changed, no new
 row was added.
 
 Matrix rows move from 541 to 543.
+
+### PR #65 review (2026-08-21)
+
+The branch merged onto `origin/main` (`ef9db83`, resolving a three-prefix test-
+ID collision against `A11`, landed concurrently — see the merge commit and the
+`P02-T12` register line) and opened as
+[PR #65](https://github.com/smorinlabs/agent-fork/pull/65). CodeRabbit's
+automated review found one real defect this design's own contracts had missed,
+plus four minor/quick-win findings — all five verified against the actual code
+before any fix, per this project's review discipline; none dismissed on the
+reviewer's word alone.
+
+| # | Defect | Correction | Rows |
+|---|---|---|---|
+| 1 | `terminate_active_setup_hook()` sent `SIGKILL` directly rather than running the reap ladder, so a live hook that traps `SIGTERM` to clean up gracefully never got the chance — every interrupt denied it, not an edge case. CodeRabbit's own suggested one-line fix (`SIGKILL` → `SIGTERM`) would have broken `T-RBK-10`: when the hook's own leader has already exited (`run_setup_hook()`'s `except BaseException: _reap(...)` never fires again), this call is a survivor's *only* signal, and a bare `SIGTERM` would never escalate to reach one that ignores it | `terminate_active_setup_hook()` now calls `_reap(group)` — the full `SIGTERM`-then-`SIGKILL` ladder — instead of signalling directly. Closes both cases with one mechanism: `_reap()`'s later no-op call when the ladder already ran, the survivor's only chance when it never runs again | `T-RBK-11` (new); `T-INC-19` corrected — the shared test double reports the group empty after any single signal, so the ladder's own escalation never has to fire, matching the graceful case exactly |
+| 2 | `doctor`'s `unchecked` eligibility (`setup_hook_eligibility()` returning a read/parse failure like `"HEAD could not be read"`) was composed straight after the path the same way every other reason is ("present but ..."), reading as a provenance verdict when the real cause was that the check never ran | A dedicated branch names the failure explicitly: `"present, but provenance could not be checked: {reason}"`, under both `tracked` (fails) and `any` (passes) | `T-CLI-67` (new) |
+| 3 | `tests/pipeline/test_rbk.py`'s `finally` cleanup could `kill` a numeric pid the loop had just confirmed exited via `ProcessLookupError` — the kernel can recycle a pid between confirmation and cleanup, so the fallback could hit an unrelated process | Track confirmation in the loop; skip the fallback kill once confirmed | — (existing `T-RBK-10`, behavior only) |
+| 4 | `CONFORMANCE.md`'s new A12 row cited `T-OUT-27/27` — a duplicate, not the intended `T-OUT-27/28` | Corrected | — |
+| 5 | Six fenced code blocks in the `TS12` reverification doc had no language tag (markdownlint MD040) | Tagged `console` (shell transcripts) or `text` (`ps` table, traceback, raw output) by content | — |
+
+Matrix rows move from 573 to 575: `T-RBK-11`, `T-CLI-67`.

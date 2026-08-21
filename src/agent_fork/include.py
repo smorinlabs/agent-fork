@@ -278,11 +278,24 @@ def _await_empty_group(group: _HookGroup, seconds: float) -> bool:
 
 
 def terminate_active_setup_hook() -> None:
-    """Terminate the current setup-hook process group during signal cleanup."""
+    """Terminate the current setup-hook process group during signal cleanup.
+
+    Runs the full SIGTERM-then-SIGKILL reap ladder, not a direct SIGKILL: this
+    is sometimes the *only* chance the group gets. When the interrupt lands
+    while `run_setup_hook()` is still waiting on the hook, its own
+    `except BaseException: _reap(group)` also fires and finds the group
+    already empty — a fast, harmless no-op. But when the hook's own leader
+    has already exited and left a survivor behind (T-RBK-10), that later
+    call never happens at all: `run_setup_hook()` has already returned, and
+    this is the survivor's only signal. A direct SIGKILL here denied every
+    live, well-behaved hook the SIGTERM grace period the ladder promises
+    everywhere else (T-RBK-11; CodeRabbit, PR #65) — running the same ladder
+    here gives both cases what they need with one mechanism.
+    """
     group = getattr(_ACTIVE, "group", None)
     if group is None:
         return
-    _signal_hook_group(group, signal.SIGKILL)
+    _reap(group)
 
 
 def _reap(group: _HookGroup) -> tuple[str, ...]:

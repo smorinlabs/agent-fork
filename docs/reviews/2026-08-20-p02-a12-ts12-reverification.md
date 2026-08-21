@@ -43,7 +43,7 @@ text and are new material for `P02-T12`:
 Parent repo: seed commit only. `.agent-fork/worktree-setup.sh` written to the
 working tree, `chmod 755`, never `git add`-ed.
 
-```
+```console
 $ git status --porcelain
 ?? .agent-fork/
 $ git ls-files -- .agent-fork
@@ -78,7 +78,7 @@ Two details worth carrying into the fix:
 Parent repo: hook v1 committed (writes `sentinel-committed`), then overwritten
 on disk with v2 (writes `sentinel-modified`) and left uncommitted.
 
-```
+```console
 $ git show HEAD:.agent-fork/worktree-setup.sh
 #!/bin/sh
 echo "COMMITTED version ran" > "…/s2/sentinel-committed"
@@ -112,7 +112,7 @@ the stricter test and is what the task prescribes.)
 
 Process tree while the hook was running, before the signal:
 
-```
+```text
    PID   PPID  PGID STAT ELAPSED ARGS
  72758  72519 72519 S     00:03  /bin/sh …/s3/child3/.agent-fork/worktree-setup.sh
  72806  72758 72519 S     00:02  sleep 25
@@ -136,7 +136,7 @@ SIGINT was delivered at t+6.63s after launch (~3.1s into the hook).
 
 The traceback's frames are the mechanism, verbatim from stderr:
 
-```
+```text
   File "…/src/agent_fork/pipeline.py", line 152, in finish
     hook_notices = run_setup_hook(request.parent, creation.path, env=env)
   File "…/src/agent_fork/include.py", line 107, in run_setup_hook
@@ -181,7 +181,7 @@ No cleanup debt: the orphan self-exited at its natural 25 s, and a post-run
 Hook committed with `echo "SENTINEL_STDOUT_MARKER_9f3a"`,
 `echo "SENTINEL_STDERR_MARKER_9f3a" >&2`, `exit 0`.
 
-```
+```console
 $ agent-fork fork --no-agent --worktree-dir …/s4/child4 chatty
 mode: git-only
 fork: chatty
@@ -202,7 +202,7 @@ a successful hook's output.
 **Contrast run (not in the original claim, worth recording):** the same hook
 changed to `exit 3` produced
 
-```
+```text
 EXIT=0
 --- stderr ---
 setup hook failed (exit 3): SENTINEL_STDERR_MARKER_9f3a

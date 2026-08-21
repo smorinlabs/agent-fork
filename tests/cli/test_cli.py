@@ -1609,6 +1609,46 @@ def test_doctor_reports_and_can_fail_on_the_repository_setup_hook(repo_scenario)
     assert checks[name]["ok"] is True and "none in " in checks[name]["detail"]
 
 
+@pytest.mark.matrix("T-CLI-67")
+def test_doctor_names_the_read_failure_for_an_unchecked_hook(
+    repo_scenario, monkeypatch
+):
+    """T-CLI-67 — an `unchecked` reason must read as a read failure, not a verdict.
+
+    `setup_hook_eligibility` can answer `unchecked` with reasons like "HEAD
+    could not be read" when the provenance check itself cannot run — an
+    unborn branch, an unparseable tree entry, an unreadable committed blob.
+    Composing that reason straight after the path the way every other reason
+    is composed ("present but ...") used to read as a provenance verdict when
+    the real cause was that the check never ran at all.
+
+    Given:  `setup_hook_eligibility` reporting `unchecked` under both `tracked`
+            and `any` policy
+    Expect: the detail names the failure as unread provenance, not a verdict,
+            in both wordings, and `ok` still follows owner decision 4 (fails
+            under `tracked`, passes under `any`)
+    Source: P02 A12 gate-6 review (CodeRabbit, PR #65); R9.10
+    """
+    from agent_fork import doctor
+
+    world = repo_scenario()
+    monkeypatch.setattr(
+        doctor,
+        "setup_hook_eligibility",
+        lambda *args, **kwargs: ("unchecked", "HEAD could not be read"),
+    )
+
+    tracked = doctor._setup_hook_check(world.parent_path, world.env, "tracked", 300)
+    assert tracked.ok is False
+    assert "provenance could not be checked: HEAD could not be read" in tracked.detail
+    assert "blocked under policy=tracked" in tracked.detail
+
+    allowed = doctor._setup_hook_check(world.parent_path, world.env, "any", 300)
+    assert allowed.ok is True
+    assert "provenance could not be checked: HEAD could not be read" in allowed.detail
+    assert "allowed to run under policy=any" in allowed.detail
+
+
 @pytest.mark.requires_process_group_signals
 @pytest.mark.matrix("T-CLI-63")
 def test_main_translates_a_signal_during_the_hook_into_exit_130(repo_scenario):

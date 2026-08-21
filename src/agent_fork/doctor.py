@@ -127,6 +127,26 @@ def _setup_hook_check(
             f"{SETUP_HOOK_RELATIVE_PATH} present, eligible at HEAD, "
             f"policy={policy}, timeout={timeout}s",
         )
+    if eligibility == "unchecked":
+        # `reason` here names a read failure ("HEAD could not be read"), not a
+        # provenance verdict — composing it straight after the path the way
+        # the other reasons do ("present but ...") reads as though the hook
+        # was checked and rejected, when the check itself could not run
+        # (CodeRabbit, PR #65).
+        detail = (
+            f"{SETUP_HOOK_RELATIVE_PATH} present, but provenance could not be "
+            f"checked: {reason}"
+        )
+        if policy == "any":
+            return DoctorCheck(
+                name, True, f"{detail} (allowed to run under policy=any)"
+            )
+        return DoctorCheck(
+            name,
+            False,
+            f"{detail} (blocked under policy=tracked; "
+            "override --setup-hook-policy any)",
+        )
     if policy == "any":
         return DoctorCheck(
             name,
