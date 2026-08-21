@@ -169,6 +169,36 @@ class SessionTranscript:
 
 
 @dataclass(frozen=True)
+class SessionParentInference:
+    """Retained Claude parent-inference evidence, always present and never strict.
+
+    Only `status == "current"` is strict parent evidence; `parent_session`
+    stays null for every other status, so `--has-parent` cannot be satisfied
+    by anything reported here.
+    """
+
+    status: str
+    freshness: str | None
+    parent_session_id: str | None
+    analyzed_at: str | None
+    changed_sources: tuple[str, ...] = ()
+
+    def document(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "freshness": self.freshness,
+            "parent_session_id": self.parent_session_id,
+            "analyzed_at": self.analyzed_at,
+            "changed_sources": list(self.changed_sources),
+        }
+
+
+_NOT_CONSULTED = SessionParentInference("not_consulted", None, None, None, ())
+_ABSENT_INFERENCE = SessionParentInference("absent", None, None, None, ())
+_UNREADABLE_INFERENCE = SessionParentInference("unreadable", None, None, None, ())
+
+
+@dataclass(frozen=True)
 class SessionInspection:
     agent: str | None
     current_session: SessionEvidence | None
@@ -183,6 +213,7 @@ class SessionInspection:
     agent_signal: AgentSignalAssessment = field(
         default_factory=lambda: assess_agent_signals({})
     )
+    parent_inference: SessionParentInference = _NOT_CONSULTED
 
     def document(self) -> dict[str, object]:
         return {
@@ -198,6 +229,7 @@ class SessionInspection:
                 "has_parent_evidence": self.parent_session is not None,
                 "status": self.lineage_status,
             },
+            "parent_inference": self.parent_inference.document(),
             "notices": list(self.notices),
             "directory": str(self.directory),
             "repository": (
@@ -317,6 +349,34 @@ def _session_repository(
     )
 
 
+def _parent_inference_notice(
+    parent_inference: SessionParentInference, claude_id: str
+) -> str:
+    rerun = f"agent-fork session claude-parent infer --session-id {claude_id} --record"
+    if parent_inference.status == "last_known_good":
+        if parent_inference.changed_sources == ("target",):
+            cause = (
+                "the session's own transcript grew and newer messages were not analyzed"
+            )
+        else:
+            cause = "analyzed evidence transcripts changed since the last analysis"
+        return (
+            f"recorded Claude parent inference is shown as last known good: {cause}; "
+            f"rerun `{rerun}` to re-establish currency; does not satisfy "
+            "`session validate --has-parent`"
+        )
+    if parent_inference.status == "freshness_unknown":
+        return (
+            "recorded Claude parent inference freshness is unknown: the corroborating "
+            f"freshness record is missing or unreadable; rerun `{rerun}` to confirm; "
+            "does not satisfy `session validate --has-parent`"
+        )
+    return (
+        "recorded Claude parent inference is superseded by a newer algorithm version "
+        f"and is not shown; rerun `{rerun}` to produce a current inference"
+    )
+
+
 def inspect_session(
     env: Mapping[str, str],
     *,
@@ -391,6 +451,7 @@ def inspect_session(
         current_session: SessionEvidence,
         parent_session: SessionEvidence | None,
         lineage_status: str,
+        parent_inference: SessionParentInference = _NOT_CONSULTED,
     ) -> SessionInspection:
         return SessionInspection(
             agent=agent,
@@ -404,6 +465,7 @@ def inspect_session(
             transcript=transcript,
             notices=tuple(notices),
             agent_signal=assessment,
+            parent_inference=parent_inference,
         )
 
     if agent == "claude":
@@ -415,28 +477,46 @@ def inspect_session(
             claim = None
             notices.append(str(error))
         inference = None
+        parent_inference = _NOT_CONSULTED
         if claim is None:
             try:
                 from agent_fork.lineage_inference_store import (
+                    assess_inference,
                     find_inference,
-                    inference_freshness,
                 )
 
-                inference = find_inference(claude_id, env=env)
-                freshness = (
-                    inference_freshness(inference, env=env)
-                    if inference is not None
-                    else None
-                )
-                if inference is not None and freshness != "current_at_last_analysis":
-                    notices.append("recorded Claude parent inference is stale")
-                    inference = None
-                elif inference is not None:
-                    notices.append(
-                        "recorded Claude parent inference is current only at its last "
-                        "explicit analysis"
-                    )
+                found = find_inference(claude_id, env=env)
+                if found is None:
+                    parent_inference = _ABSENT_INFERENCE
+                else:
+                    result = assess_inference(found, env=env)
+                    if result.satisfies_strict_parent:
+                        inference = found
+                        parent_inference = SessionParentInference(
+                            "current",
+                            result.status,
+                            found.parent_session_id,
+                            found.analyzed_at,
+                            result.changed_sources,
+                        )
+                    else:
+                        status = {
+                            "last_known_good": "last_known_good",
+                            "unknown": "freshness_unknown",
+                            "superseded": "superseded",
+                        }[result.evidence]
+                        parent_inference = SessionParentInference(
+                            status,
+                            result.status,
+                            found.parent_session_id if result.displayable else None,
+                            found.analyzed_at if result.displayable else None,
+                            result.changed_sources if result.displayable else (),
+                        )
+                        notices.append(
+                            _parent_inference_notice(parent_inference, claude_id)
+                        )
             except ValueError as error:
+                parent_inference = _UNREADABLE_INFERENCE
                 notices.append(str(error))
         if claim is not None and name is None and claim.name is not None:
             name = claim.name
@@ -476,6 +556,7 @@ def inspect_session(
             else inference.status
             if inference
             else "not_found",
+            parent_inference,
         )
 
     codex_id = current_id

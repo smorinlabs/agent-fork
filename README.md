@@ -330,6 +330,20 @@ remains observational in `session`: it reports no current session, retains
 `resume_command.status: not_detected`, and names the missing value in
 `notices`.
 
+JSON inspection also reports `parent_inference`, an additive object that
+surfaces a recorded Claude parent inference even when it is no longer fully
+current. Its `status` is one of `not_consulted`, `absent`, `current`,
+`last_known_good`, `freshness_unknown`, `superseded`, or `unreadable`. Only
+`current` is strict parent evidence — `parent_session` and
+`session validate --has-parent` never see anything less than `current`, no
+matter what `parent_inference` reports. `last_known_good` and
+`freshness_unknown` still show the previously inferred parent ID and analysis
+timestamp, with a notice naming the rerun command; `superseded` shows only its
+status. `session` never triggers a new inference to compute this field — it
+only reads what a prior `session claude-parent infer --record` already wrote.
+See [`docs/session-inspection.md`](docs/session-inspection.md) for the full
+status vocabulary and field shape.
+
 Inspection never executes the returned command, mutates agent or repository
 state, or makes a network call; in an ordinary terminal it succeeds with
 `not_detected`. Validation asserts expected identity and lineage: optional
@@ -394,6 +408,17 @@ omitted. Human diagnostics render backslashes, terminal control characters, and
 undecodable path bytes as visible C-style escapes such as `\\x1b`; structured
 JSON retains the underlying string values. Dry runs that find overridden risk
 still exit `0`; a dirty or unpushed guard refusal exits `5`.
+
+By default, cleanup never removes a target's planned Claude parent claim,
+inferred parent record, or freshness corroboration — the forked session
+remains resumable and this is `agent-fork`'s strongest local parent evidence.
+Both real and `--dry-run` cleanup runs disclose what is retained: an additive
+`retained_metadata` object (`lineage_claims`, `inferred_records`,
+`freshness_entries`, and one source-qualified `removal_commands` entry per
+retained record) in JSON output, and matching `notice:` lines in human output.
+Run the disclosed `agent-fork session claude-parent delete --session-id <ID>
+--source {planned,inferred} --yes` command yourself to remove a specific
+record; cleanup adds no flag that prunes this metadata automatically.
 
 ## `fork` options
 
@@ -581,7 +606,7 @@ cleanup guard refusals use the cleanup schema shown above.
 | 0 | Success | — |
 | 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy` |
 | 2 | Usage error or required prompt disabled | `config_error` |
-| 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown` |
+| 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown`, `claude_parent_incomplete_analysis` |
 | 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable` |
 | 130 / 143 | Interrupted by SIGINT / SIGTERM | — |
 

@@ -654,3 +654,138 @@ def test_codex_unavailable_lineage_refuses_only_parent_assertions(repo_scenario)
         document = json.loads(result.stdout)
         assert document["valid"] is True
         assert document["session"]["lineage"]["status"] == "unavailable"
+
+
+def _fingerprint(path: Path) -> str:
+    import hashlib
+
+    stat = path.stat()
+    raw = (
+        f"{path.absolute()}:{stat.st_dev}:{stat.st_ino}:"
+        f"{stat.st_size}:{stat.st_mtime_ns}"
+    )
+    return f"{path}:{hashlib.sha256(raw.encode()).hexdigest()}"
+
+
+@pytest.mark.matrix("T-CLI-39")
+def test_session_reports_last_known_good_and_freshness_unknown(repo_scenario):
+    from agent_fork.lineage_inference_store import (
+        InferenceRecord,
+        add_inference,
+        update_index_freshness,
+    )
+    from conftest import run_cli
+
+    world = repo_scenario()
+    transcript = world.parent_path / "stale-child.jsonl"
+    transcript.write_text("{}\n")
+    record = InferenceRecord(
+        "stale-child",
+        "parent-session",
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00Z",
+        (_fingerprint(transcript),),
+        "generation-1",
+        "universe-1",
+    )
+    add_inference(record, env=world.env)
+    update_index_freshness("stale-child", "universe-1", "generation-1", env=world.env)
+    transcript.write_text("{}\n\n")
+
+    env = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "stale-child"}
+
+    result = run_cli(["session"], env, world.parent_path)
+    assert result.returncode == 0 and result.stderr == b""
+    lines = result.stdout.decode().splitlines()
+    lineage_index = next(
+        i for i, line in enumerate(lines) if line.startswith("lineage:")
+    )
+    parent_inference_index = next(
+        i for i, line in enumerate(lines) if line.startswith("parent inference:")
+    )
+    notice_index = next(i for i, line in enumerate(lines) if line.startswith("notice:"))
+    assert lineage_index < parent_inference_index < notice_index
+    assert "last_known_good" in lines[parent_inference_index]
+    assert "does not satisfy" in lines[notice_index]
+    assert "rerun" in lines[notice_index]
+
+    json_result = run_cli(["session", "-o", "json"], env, world.parent_path)
+    document = json.loads(json_result.stdout)
+    assert document["parent_inference"]["status"] == "last_known_good"
+    assert document["parent_inference"]["changed_sources"] == ["target"]
+
+    # freshness_unknown: unrelated child, no freshness entry at all
+    transcript2 = world.parent_path / "transcript2.jsonl"
+    transcript2.write_text("{}\n")
+    record2 = InferenceRecord(
+        "unknown-child",
+        "parent-session",
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00Z",
+        (_fingerprint(transcript2),),
+        "generation-1",
+        "universe-1",
+    )
+    add_inference(record2, env=world.env)
+    env2 = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "unknown-child"}
+    result2 = run_cli(["session", "-o", "json"], env2, world.parent_path)
+    document2 = json.loads(result2.stdout)
+    assert document2["parent_inference"]["status"] == "freshness_unknown"
+
+
+@pytest.mark.matrix("T-CLI-49")
+def test_session_escapes_hostile_analyzed_at_on_human_line(repo_scenario):
+    """analyzed_at is store-derived, same trust level as status and
+    parent_session_id on the same `parent inference:` line -- a control
+    character embedded in a stored timestamp must not reach the terminal
+    raw."""
+    from agent_fork.lineage_inference_store import (
+        InferenceRecord,
+        add_inference,
+        update_index_freshness,
+    )
+    from conftest import run_cli
+
+    world = repo_scenario()
+    transcript = world.parent_path / "hostile-child.jsonl"
+    transcript.write_text("{}\n")
+    record = InferenceRecord(
+        "hostile-child",
+        "parent-session",
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00\x1b[31mHOSTILE\x1b[0mZ",
+        (_fingerprint(transcript),),
+        "generation-1",
+        "universe-1",
+    )
+    add_inference(record, env=world.env)
+    update_index_freshness("hostile-child", "universe-1", "generation-1", env=world.env)
+    transcript.write_text("{}\n\n")  # stale -> last_known_good, still displayed
+
+    env = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "hostile-child"}
+
+    result = run_cli(["session"], env, world.parent_path)
+    assert result.returncode == 0
+    assert b"\x1b[31mHOSTILE" not in result.stdout
+    lines = result.stdout.decode().splitlines()
+    parent_inference_line = next(
+        line for line in lines if line.startswith("parent inference:")
+    )
+    assert "HOSTILE" in parent_inference_line  # content preserved, control chars gone
+
+    json_result = run_cli(["session", "-o", "json"], env, world.parent_path)
+    document = json.loads(json_result.stdout)
+    # JSON keeps the raw value -- only the human line escapes it
+    assert document["parent_inference"]["analyzed_at"] == record.analyzed_at

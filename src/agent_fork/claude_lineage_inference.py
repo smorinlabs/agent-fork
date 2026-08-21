@@ -34,6 +34,41 @@ SCREEN_TOKEN_BYTES = 1024
 CACHE_SHARD_BYTES = 8 * 1024 * 1024
 
 
+class CorpusLimitError(ValueError):
+    """A bounded analysis limit was exceeded.
+
+    Subclasses ``ValueError`` deliberately: every existing ``except
+    ValueError`` handler in this module keeps working unchanged.
+    """
+
+    def __init__(
+        self, limit: str, allowed: int, observed: int, *, scope: str = "corpus"
+    ):
+        super().__init__(
+            f"Claude transcript corpus exceeds {limit} limit: "
+            f"{observed} > {allowed} ({scope})"
+        )
+        self.limit = limit
+        self.allowed = allowed
+        self.observed = observed
+        self.scope = scope
+
+
+def map_timeout_to_limit_error(error: TimeoutError, limits: Limits) -> CorpusLimitError:
+    """Map the shared corpus-wide `max_seconds` deadline guard to the typed shape.
+
+    `TimeoutError` is not itself a `CorpusLimitError` (it derives from
+    `OSError`, not `ValueError`), so the CLI boundary maps it explicitly
+    rather than catching it as one. `scope="corpus"`, not `"target"`: the
+    deadline is one shared clock set once for the whole corpus, so once it
+    expires every subsequent target in a `--all` run trips it immediately —
+    reporting `"target"` would misleadingly imply each one individually ran
+    out of time, unlike `max_candidates`, which genuinely is per-target.
+    """
+    allowed = int(limits.max_seconds)
+    return CorpusLimitError("max_seconds", allowed, allowed + 1, scope="corpus")
+
+
 @dataclass(frozen=True)
 class Limits:
     max_files: int = 10_000
@@ -75,6 +110,12 @@ class Work:
     history_malformed: int = 0
     history_oversized: int = 0
     history_unavailable: int = 0
+    freshness_write_failures: int = 0
+    cache_shards_pruned: int = 0
+    cache_bytes_reclaimed: int = 0
+    cache_prune_failures: int = 0
+    cache_sweep_incomplete: int = 0
+    legacy_cache_removed: int = 0
 
     def document(self) -> dict[str, int]:
         return dict(vars(self))
@@ -219,7 +260,9 @@ def discover(env: Mapping[str, str], limits: Limits, work: Work) -> list[Path]:
             for entry in iterator:
                 work.entries_seen += 1
                 if work.entries_seen > limits.max_entries:
-                    raise ValueError("Claude transcript corpus exceeds entry limit")
+                    raise CorpusLimitError(
+                        "max_entries", limits.max_entries, work.entries_seen
+                    )
                 projects.append(entry)
         projects.sort(key=lambda entry: entry.name)
     except OSError as error:
@@ -234,7 +277,9 @@ def discover(env: Mapping[str, str], limits: Limits, work: Work) -> list[Path]:
                 for entry in iterator:
                     work.entries_seen += 1
                     if work.entries_seen > limits.max_entries:
-                        raise ValueError("Claude transcript corpus exceeds entry limit")
+                        raise CorpusLimitError(
+                            "max_entries", limits.max_entries, work.entries_seen
+                        )
                     entries.append(entry)
             entries.sort(key=lambda entry: entry.name)
         except OSError:
@@ -260,18 +305,167 @@ def discover(env: Mapping[str, str], limits: Limits, work: Work) -> list[Path]:
                 continue
             total += metadata.st_size
             if total > limits.max_total_bytes:
-                raise ValueError("Claude transcript corpus exceeds byte limit")
+                raise CorpusLimitError("max_total_bytes", limits.max_total_bytes, total)
             result.append(path.absolute())
             if len(result) > limits.max_files:
-                raise ValueError("Claude transcript corpus exceeds file limit")
+                raise CorpusLimitError("max_files", limits.max_files, len(result))
     work.files_enumerated = len(result)
     return result
 
 
 def _cache_root(env: Mapping[str, str]) -> Path:
     return xdg_path(
+        env, "XDG_CACHE_HOME", ".cache", "agent-fork", "claude-lineage-index-v3"
+    )
+
+
+def _legacy_cache_root(env: Mapping[str, str]) -> Path:
+    return xdg_path(
         env, "XDG_CACHE_HOME", ".cache", "agent-fork", "claude-lineage-index-v2"
     )
+
+
+CACHE_SWEEP_INTERVAL = 86_400
+CACHE_TEMP_GRACE_SECONDS = 3_600
+CACHE_MAX_AGE_SECONDS = 30 * 86_400
+CACHE_MAX_BYTES = 64 * 1024 * 1024
+CACHE_SWEEP_MAX_ENTRIES = 20_000
+_SHARD_NAME = UUID
+
+
+def _root_safe(root: Path) -> bool:
+    try:
+        if not root.exists():
+            return False
+        root_stat = root.lstat()
+        return (
+            stat_module.S_ISDIR(root_stat.st_mode)
+            and not root.is_symlink()
+            and (not hasattr(os, "getuid") or root_stat.st_uid == os.getuid())
+        )
+    except OSError:
+        return False
+
+
+def sweep_cache(env: Mapping[str, str], stems: set[str], work: Work) -> None:
+    """Bounded, marker-gated maintenance of the v3 screen-cache directory.
+
+    Confined to the v3 root (plus, once, an independently safety-checked v2
+    root for one-time legacy removal). Never raises; every failure is
+    counted. Never touches the freshness index at either location.
+    """
+    root = _cache_root(env)
+    if not _root_safe(root):
+        return
+    marker = root / ".sweep"
+    try:
+        marker_lstat = marker.lstat()
+        if stat_module.S_ISREG(marker_lstat.st_mode) and (
+            time.time() - marker_lstat.st_mtime < CACHE_SWEEP_INTERVAL
+        ):
+            return
+    except OSError:
+        pass
+    try:
+        # O_NOFOLLOW: if `.sweep` was replaced with a symlink, this fails
+        # with ELOOP rather than creating or touching whatever it points to.
+        # O_NONBLOCK: if `.sweep` was replaced with a FIFO, this makes the
+        # open fail immediately with ENXIO instead of blocking forever
+        # waiting for a reader that will never arrive.
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        fd = os.open(marker, flags, 0o600)
+        try:
+            if not stat_module.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError("cache sweep marker is not a regular file")
+        finally:
+            os.close(fd)
+        os.utime(marker, None, follow_symlinks=False)
+    except OSError:
+        work.cache_prune_failures += 1
+        return
+
+    legacy_root = _legacy_cache_root(env)
+    if legacy_root != root and _root_safe(legacy_root):
+        try:
+            # Immediate children only, never recursing: an unexpected
+            # subdirectory is left alone and the final rmdir simply fails,
+            # counted below rather than destroying anything beneath it.
+            for child in legacy_root.iterdir():
+                if child.is_file() or child.is_symlink():
+                    try:
+                        child.unlink()
+                    except OSError:
+                        work.cache_prune_failures += 1
+            legacy_root.rmdir()
+            work.legacy_cache_removed = 1
+        except OSError:
+            work.cache_prune_failures += 1
+
+    now = time.time()
+    scanned = 0
+    candidates: list[tuple[Path, os.stat_result]] = []
+    try:
+        with os.scandir(root) as raw_entries:
+            for raw_entry in raw_entries:
+                scanned += 1
+                if scanned > CACHE_SWEEP_MAX_ENTRIES:
+                    work.cache_sweep_incomplete = 1
+                    break
+                entry = Path(raw_entry.path)
+                if entry.name == ".sweep":
+                    continue
+                try:
+                    entry_stat = entry.lstat()
+                except OSError:
+                    continue
+                if entry.is_symlink():
+                    continue
+                if _SHARD_NAME.fullmatch(entry.stem) is None or entry.suffix != ".json":
+                    if now - entry_stat.st_mtime > CACHE_TEMP_GRACE_SECONDS:
+                        try:
+                            entry.unlink()
+                            work.cache_shards_pruned += 1
+                            work.cache_bytes_reclaimed += entry_stat.st_size
+                        except OSError:
+                            work.cache_prune_failures += 1
+                    continue
+                if entry.stem not in stems:
+                    try:
+                        entry.unlink()
+                        work.cache_shards_pruned += 1
+                        work.cache_bytes_reclaimed += entry_stat.st_size
+                    except OSError:
+                        work.cache_prune_failures += 1
+                    continue
+                if now - entry_stat.st_mtime > CACHE_MAX_AGE_SECONDS:
+                    try:
+                        entry.unlink()
+                        work.cache_shards_pruned += 1
+                        work.cache_bytes_reclaimed += entry_stat.st_size
+                    except OSError:
+                        work.cache_prune_failures += 1
+                    continue
+                candidates.append((entry, entry_stat))
+    except OSError:
+        work.cache_prune_failures += 1
+
+    total_bytes = sum(entry_stat.st_size for _, entry_stat in candidates)
+    if total_bytes > CACHE_MAX_BYTES:
+        for entry, entry_stat in sorted(candidates, key=lambda item: item[1].st_mtime):
+            if total_bytes <= CACHE_MAX_BYTES:
+                break
+            try:
+                entry.unlink()
+                work.cache_shards_pruned += 1
+                work.cache_bytes_reclaimed += entry_stat.st_size
+                total_bytes -= entry_stat.st_size
+            except OSError:
+                work.cache_prune_failures += 1
 
 
 def _screen_record(raw: bytes) -> tuple[set[str], bool]:
@@ -365,7 +559,7 @@ def _screen(path: Path, env: Mapping[str, str], work: Work) -> Screen:
         raise OSError(f"not a regular Claude transcript: {path.name}")
     fp = _fingerprint(path, metadata)
     root = _cache_root(env)
-    shard = root / f"{path.stem}-{fp}.json"
+    shard = root / f"{path.stem}.json"
     cache_safe = True
     try:
         if root.exists():
@@ -733,6 +927,7 @@ class ClaudeLineageCorpus:
         self.started = time.monotonic()
         self.paths = discover(env, self.limits, self.work)
         self.by_id = {path.stem: path for path in self.paths}
+        sweep_cache(env, set(self.by_id), self.work)
         generation_rows = []
         for path in self.paths:
             metadata = path.lstat()
@@ -785,7 +980,12 @@ class ClaudeLineageCorpus:
                 continue
             candidate_universe.append(path.stem)
             if len(candidates) >= self.limits.max_candidates:
-                raise ValueError("Claude parent candidate limit exceeded")
+                raise CorpusLimitError(
+                    "max_candidates",
+                    self.limits.max_candidates,
+                    len(candidates) + 1,
+                    scope="target",
+                )
             try:
                 other = self.transcript(path)
             except OSError:
@@ -841,6 +1041,7 @@ class ClaudeLineageCorpus:
                 )
             except (OSError, ValueError):
                 self.work.cache_write_failures += 1
+                self.work.freshness_write_failures += 1
             return replace(
                 result,
                 analysis_index_generation=self.index_generation,
