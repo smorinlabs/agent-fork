@@ -5,12 +5,14 @@ from __future__ import annotations
 import os
 import subprocess
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from agent_fork.errors import AgentForkError
 from agent_fork.models import ConfigValues, ResolvedConfig
+from agent_fork.text import escape_terminal_text
 from agent_fork.xdg import xdg_path
 
 DEFAULT_BRANCH_PREFIX = "fork/"
@@ -27,8 +29,10 @@ _FORK_KEYS = {
     "agent_mode",
     "verify",
     "copy",
+    "output",
 }
 _BOOL_KEYS = {"with_state", "with_ignored", "verify", "copy"}
+_GIT_REF_ILLEGAL_SUBSTRINGS = ("~", "^", ":", "?", "*", "[", "\\", "..", "@{")
 
 
 class ConfigError(AgentForkError, ValueError):
@@ -36,6 +40,263 @@ class ConfigError(AgentForkError, ValueError):
 
     code = "config_error"
     exit_code = 2
+
+
+def branch_prefix_reason(prefix: str) -> str | None:
+    """None if `prefix` composes into a Git-legal branch; else why not.
+
+    ``naming.naming_plan()`` composes the fork branch by plain string
+    concatenation (``prefix + sanitized_name``), so a prefix's legality is a
+    property of the *composed* branch, not the prefix in isolation: a prefix
+    can be legal alone yet compose into an illegal branch (a lone trailing
+    dash), or illegal alone yet compose into a legal one (``"topic."`` is
+    legal once suffixed, even though a bare trailing ``.`` looks like it
+    should be rejected). This validates a representative composed sample
+    (``prefix + "x"``) against ``git-check-ref-format(1)``'s rules, mirrored
+    here rather than shelled out to Git so that `resolve_config()` stays pure
+    — proved equivalent to real Git by a parity test in the pipeline tier.
+    """
+    composed = f"{prefix}x"
+    if not composed:
+        return None
+    if composed[0] == "-":
+        return "must not begin with -"
+    if any(
+        ord(character) < 0x20 or ord(character) == 0x7F or character == " "
+        for character in composed
+    ):
+        return "must not contain control characters or spaces"
+    for substring in _GIT_REF_ILLEGAL_SUBSTRINGS:
+        if substring in composed:
+            return f"must not contain {substring!r}"
+    if composed.startswith("/") or "//" in composed:
+        return "must not start with '/' or contain '//'"
+    for component in composed.split("/"):
+        if component.startswith("."):
+            return "must not have a path component starting with '.'"
+        if component.endswith(".lock"):
+            return "must not have a path component ending in '.lock'"
+    if composed.endswith("."):
+        return "must not end with '.'"
+    return None
+
+
+@dataclass(frozen=True)
+class KeySpec:
+    """One configuration key's complete, declarative contract."""
+
+    dotted: str
+    field: str
+    table: str  # "fork" | "agents.claude" | "agents.codex"
+    kind: str  # "bool" | "enum" | "string" | "string-array"
+    allowed: tuple[str, ...] = ()
+    allowed_text: str | None = None
+    env: str | None = None
+    settable: bool = True
+    validator: Callable[[str], str | None] | None = None
+
+    def describe_allowed(self) -> str:
+        if self.allowed_text is not None:
+            return self.allowed_text
+        if self.allowed:
+            return ", ".join(self.allowed)
+        return self.kind
+
+
+@dataclass(frozen=True)
+class ConfigFinding:
+    """One semantic validation failure against the effective configuration."""
+
+    key: str
+    value: str
+    reason: str
+    allowed: str
+    source: str
+
+    def render(self) -> str:
+        # `reason` and `source` can carry repository-controlled text too —
+        # e.g. an unknown-placeholder name parsed out of a TOML template, or
+        # a `--config`/discovered file path — not just `value`. All three
+        # are escaped before reaching a diagnostic a human or a terminal
+        # renders.
+        escaped_value = escape_terminal_text(self.value)
+        escaped_reason = escape_terminal_text(self.reason)
+        escaped_source = escape_terminal_text(self.source)
+        return (
+            f"{self.key}: invalid value {escaped_value!r} ({escaped_reason}); "
+            f"allowed: {self.allowed} (from {escaped_source})"
+        )
+
+
+KEY_SPECS: tuple[KeySpec, ...] = (
+    KeySpec("fork.with_state", "with_state", "fork", "bool"),
+    KeySpec("fork.with_ignored", "with_ignored", "fork", "bool"),
+    KeySpec(
+        "fork.branch_prefix",
+        "branch_prefix",
+        "fork",
+        "string",
+        allowed_text="a prefix that composes into a valid Git branch name",
+        validator=branch_prefix_reason,
+    ),
+    KeySpec(
+        "fork.worktree_location",
+        "worktree_location",
+        "fork",
+        "string",
+        allowed_text=(
+            "sibling, central, subdirectory, or a bare-placeholder template "
+            "using {repo-name}, {repo-root}, {branch}, {branch-escaped}"
+        ),
+        validator=lambda value: (
+            None
+            if value in {"sibling", "central", "subdirectory"}
+            else _worktree_location_reason(value)
+        ),
+    ),
+    KeySpec(
+        "fork.agent_mode",
+        "agent_mode",
+        "fork",
+        "enum",
+        allowed=("auto", "strict", "git-only"),
+        env="AGENT_FORK_AGENT_MODE",
+    ),
+    KeySpec("fork.verify", "verify", "fork", "bool"),
+    KeySpec("fork.copy", "copy", "fork", "bool"),
+    KeySpec(
+        "fork.output",
+        "output",
+        "fork",
+        "enum",
+        allowed=("text", "json"),
+        env="AGENT_FORK_OUTPUT",
+    ),
+    KeySpec(
+        "agents.claude.extra_args",
+        "claude_extra_args",
+        "agents.claude",
+        "string-array",
+        settable=False,
+    ),
+    KeySpec(
+        "agents.codex.extra_args",
+        "codex_extra_args",
+        "agents.codex",
+        "string-array",
+        settable=False,
+    ),
+    KeySpec(
+        "agents.codex.session_name_resolution",
+        "codex_session_name_resolution",
+        "agents.codex",
+        "bool",
+    ),
+)
+
+_GET_KEYS_BY_DOTTED: dict[str, KeySpec] = {spec.dotted: spec for spec in KEY_SPECS}
+_GET_KEYS_BY_BARE: dict[str, KeySpec] = {
+    spec.field: spec for spec in KEY_SPECS if spec.table == "fork"
+}
+_ENV_BY_FIELD: dict[str, str] = {
+    spec.field: spec.env for spec in KEY_SPECS if spec.env is not None
+}
+
+
+_TOML_SHORT_ESCAPES = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\f": "\\f",
+    "\r": "\\r",
+}
+
+
+def _toml_string_literal(value: str) -> str:
+    """A TOML basic string literal — a raw control character or DEL is not
+    legal unescaped inside one, so both must be escaped for the emitted
+    value to round-trip through a real TOML parser, not just match a
+    fixed-string assertion."""
+    characters = []
+    for character in value:
+        if character in _TOML_SHORT_ESCAPES:
+            characters.append(_TOML_SHORT_ESCAPES[character])
+        elif ord(character) < 0x20 or ord(character) == 0x7F:
+            characters.append(f"\\u{ord(character):04x}")
+        else:
+            characters.append(character)
+    return '"' + "".join(characters) + '"'
+
+
+def config_get(resolved: ResolvedConfig, key: str) -> str:
+    """Render one effective configuration value by its canonical key.
+
+    Accepts both bare `[fork]` names (e.g. ``branch_prefix``) and fully
+    dotted forms (e.g. ``fork.branch_prefix``, ``agents.claude.extra_args``).
+    Rejects every other attribute — including internal-only ones an earlier
+    `hasattr` fallback used to leak: `config_path`, `mode`,
+    `worktree_location_explicit`, `claude_extra_args`, `codex_extra_args`,
+    and the bare `codex_session_name_resolution` (only its dotted
+    `agents.codex.session_name_resolution` form is a documented key).
+
+    An array renders as a TOML array literal (``["--model", "opus"]``, or
+    ``[]`` when empty) so it pastes directly into the file `config set`'s
+    refusal for that same key names.
+    """
+    spec = _GET_KEYS_BY_DOTTED.get(key) or _GET_KEYS_BY_BARE.get(key)
+    if spec is None:
+        raise ConfigError(f"unknown config key: {key}")
+    value = getattr(resolved, spec.field)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, tuple):
+        return "[" + ", ".join(_toml_string_literal(item) for item in value) + "]"
+    return str(value)
+
+
+def _worktree_location_reason(value: str) -> str | None:
+    from agent_fork.location import worktree_location_reason
+
+    return worktree_location_reason(value)
+
+
+def validate_values(
+    values: ResolvedConfig,
+    *,
+    provenance: Mapping[str, str] | None = None,
+) -> tuple[ConfigFinding, ...]:
+    """Every semantic defect in the merged, effective configuration.
+
+    Pure: no filesystem, subprocess, or network access. Checks every key the
+    registry declares a rule for and returns *every* finding, not just the
+    first, so one `config validate` run reports every bad key at once.
+    """
+    provenance = provenance or {}
+    findings: list[ConfigFinding] = []
+    for spec in KEY_SPECS:
+        if spec.validator is None and spec.kind != "enum":
+            continue
+        value = getattr(values, spec.field)
+        if value is None:
+            continue
+        reason: str | None = None
+        if spec.kind == "enum" and value not in spec.allowed:
+            reason = "not one of the allowed values"
+        elif spec.validator is not None:
+            reason = spec.validator(value)
+        if reason is not None:
+            findings.append(
+                ConfigFinding(
+                    key=spec.dotted,
+                    value=str(value),
+                    reason=reason,
+                    allowed=spec.describe_allowed(),
+                    source=provenance.get(spec.field, "default"),
+                )
+            )
+    return tuple(findings)
 
 
 def _coerce_source(source: ConfigValues | Mapping[str, Any] | None) -> ConfigValues:
@@ -60,6 +321,10 @@ def resolve_config(
     """Resolve low-to-high sources, environment, then explicit flags."""
     environment = env or {}
     ordered = [_coerce_source(source) for source in sources]
+    labels = [
+        str(source.config_path) if source.config_path is not None else "config"
+        for source in ordered
+    ]
     ordered.append(
         ConfigValues(
             output=environment.get("AGENT_FORK_OUTPUT"),
@@ -71,7 +336,10 @@ def resolve_config(
             ),
         )
     )
+    labels.append("env")
     ordered.append(_coerce_source(flags))
+    labels.append("flag")
+    provenance: dict[str, str] = {}
 
     with_state = True
     with_ignored = False
@@ -87,7 +355,7 @@ def resolve_config(
     codex_extra_args: tuple[str, ...] = ()
     codex_session_name_resolution = True
 
-    for source in ordered:
+    for source, label in zip(ordered, labels, strict=True):
         if source.with_state is not None:
             with_state = source.with_state
             if not source.with_state:
@@ -98,17 +366,25 @@ def resolve_config(
                 with_state = True
         if source.branch_prefix is not None:
             branch_prefix = source.branch_prefix.strip() or DEFAULT_BRANCH_PREFIX
+            provenance["branch_prefix"] = label
         if source.worktree_location is not None:
             worktree_location = source.worktree_location
             worktree_location_explicit = True
+            provenance["worktree_location"] = label
         if source.agent_mode is not None:
             agent_mode = source.agent_mode
+            provenance["agent_mode"] = (
+                _ENV_BY_FIELD.get("agent_mode", label) if label == "env" else label
+            )
         if source.verify is not None:
             verify = source.verify
         if source.copy is not None:
             copy = source.copy
         if source.output is not None:
             output = source.output
+            provenance["output"] = (
+                _ENV_BY_FIELD.get("output", label) if label == "env" else label
+            )
         if source.config_path is not None:
             config_path = source.config_path.resolve()
         if source.claude_extra_args is not None:
@@ -118,12 +394,7 @@ def resolve_config(
         if source.codex_session_name_resolution is not None:
             codex_session_name_resolution = source.codex_session_name_resolution
 
-    if agent_mode not in {"auto", "strict", "git-only"}:
-        raise ConfigError("agent_mode must be auto, strict, or git-only")
-    if output not in {"text", "json"}:
-        raise ConfigError("output must be text or json")
-
-    return ResolvedConfig(
+    resolved = ResolvedConfig(
         with_state=with_state,
         with_ignored=with_ignored,
         branch_prefix=branch_prefix,
@@ -138,6 +409,10 @@ def resolve_config(
         codex_extra_args=codex_extra_args,
         codex_session_name_resolution=codex_session_name_resolution,
     )
+    findings = validate_values(resolved, provenance=provenance)
+    if findings:
+        raise ConfigError("; ".join(finding.render() for finding in findings))
+    return resolved
 
 
 def load_config(path: Path) -> ConfigValues:
@@ -162,7 +437,7 @@ def load_config(path: Path) -> ConfigValues:
     for key in _BOOL_KEYS:
         if key in fork and not isinstance(fork[key], bool):
             raise ConfigError(f"invalid config {path}: fork.{key} must be boolean")
-    for key in {"branch_prefix", "worktree_location", "agent_mode"}:
+    for key in {"branch_prefix", "worktree_location", "agent_mode", "output"}:
         if key in fork and not isinstance(fork[key], str):
             raise ConfigError(f"invalid config {path}: fork.{key} must be a string")
     if "agent_mode" in fork and fork["agent_mode"] not in {
@@ -237,8 +512,16 @@ def find_project_config(cwd: Path, env: Mapping[str, str] | None = None) -> Path
         current = current.parent
 
 
-def discover_config_paths(cwd: Path, env: Mapping[str, str]) -> list[Path]:
-    """Return existing config paths in low-to-high precedence order."""
+def discover_config_paths(
+    cwd: Path, env: Mapping[str, str], *, require_repo: bool = True
+) -> list[Path]:
+    """Return existing config paths in low-to-high precedence order.
+
+    ``require_repo=False`` skips project-config discovery gracefully when
+    `cwd` is not inside a Git worktree, instead of raising — for commands
+    that are usable outside a repository (`list`, `session`, `cleanup`) but
+    still need `AGENT_FORK_OUTPUT`/`[fork].output` to resolve.
+    """
     explicit = env.get("AGENT_FORK_CONFIG")
     if explicit:
         return [Path(explicit).expanduser().resolve()]
@@ -255,7 +538,13 @@ def discover_config_paths(cwd: Path, env: Mapping[str, str]) -> list[Path]:
     user_candidate = user / XDG_RELATIVE_PATH
     if user_candidate.is_file():
         paths.append(user_candidate.resolve())
-    project = find_project_config(cwd, env)
+    if require_repo:
+        project = find_project_config(cwd, env)
+    else:
+        try:
+            project = find_project_config(cwd, env)
+        except ConfigError:
+            project = None
     if project is not None:
         paths.append(project.resolve())
     return paths
@@ -267,12 +556,13 @@ def resolve_discovered_config(
     *,
     explicit_path: Path | None = None,
     flags: ConfigValues | Mapping[str, Any] | None = None,
+    require_repo: bool = True,
 ) -> ResolvedConfig:
     """Load discovery or one explicit path, then apply env and flags."""
     paths = (
         [explicit_path.resolve()]
         if explicit_path is not None
-        else discover_config_paths(cwd, env)
+        else discover_config_paths(cwd, env, require_repo=require_repo)
     )
     sources = [load_config(path) for path in paths]
     effective_env = dict(env)
@@ -282,23 +572,74 @@ def resolve_discovered_config(
 
 
 def set_user_value(path: Path, key: str, value: str) -> None:
-    """Write one supported `[fork]` value for the config CLI."""
-    codex_resolution_key = "agents.codex.session_name_resolution"
-    if key != codex_resolution_key and key not in _FORK_KEYS:
+    """Write one supported configuration value for the config CLI.
+
+    Driven by the same `KEY_SPECS` registry as `config_get()` and
+    `validate_values()` — a key added to the registry gets `get`, semantic
+    validation, and (if `settable`) `set` support all at once, rather than
+    needing a fourth hand-maintained list to remember.
+    """
+    resolved_path = path.resolve()
+    spec = _GET_KEYS_BY_BARE.get(key) or _GET_KEYS_BY_DOTTED.get(key)
+    if spec is None:
         raise ConfigError(f"unknown config key: {key}")
-    if key in _BOOL_KEYS or key == codex_resolution_key:
-        lowered = value.lower()
-        if lowered not in {"true", "false"}:
-            raise ConfigError(f"{key} expects true or false")
-    if key == "agent_mode" and value not in {"auto", "strict", "git-only"}:
-        raise ConfigError("agent_mode expects auto, strict, or git-only")
+    if not spec.settable:
+        raise ConfigError(
+            f"{spec.dotted} is an array and cannot be set from the CLI; edit "
+            f"[{spec.table}] extra_args in {resolved_path}"
+        )
+    if spec.kind == "bool":
+        if value.lower() not in {"true", "false"}:
+            raise ConfigError(
+                ConfigFinding(
+                    key=spec.dotted,
+                    value=value,
+                    reason="not a boolean",
+                    allowed="true, false",
+                    source=str(resolved_path),
+                ).render()
+            )
+    elif spec.kind == "enum" and value not in spec.allowed:
+        raise ConfigError(
+            ConfigFinding(
+                key=spec.dotted,
+                value=value,
+                reason="not one of the allowed values",
+                allowed=spec.describe_allowed(),
+                source=str(resolved_path),
+            ).render()
+        )
+    elif spec.validator is not None:
+        # Normalize identically to resolve_config() before validating, so a
+        # whitespace-only branch_prefix (which resolves to the default) is
+        # not spuriously refused; the raw value is still what gets written.
+        normalized = (
+            value.strip() or DEFAULT_BRANCH_PREFIX
+            if spec.field == "branch_prefix"
+            else value
+        )
+        reason = spec.validator(normalized)
+        if reason is not None:
+            raise ConfigError(
+                ConfigFinding(
+                    key=spec.dotted,
+                    value=value,
+                    reason=reason,
+                    allowed=spec.describe_allowed(),
+                    source=str(resolved_path),
+                ).render()
+            )
+    # Everything above must run, and raise, before any filesystem mutation
+    # below — including path.parent.mkdir() at the end of this function, not
+    # merely before the write. An invalid value must leave the target file
+    # (and its parent directories) untouched.
     existing = load_config(path) if path.exists() else ConfigValues()
     values = {
         field: getattr(existing, field)
         for field in _FORK_KEYS
         if getattr(existing, field) is not None
     }
-    if key == codex_resolution_key:
+    if spec.field == "codex_session_name_resolution":
         existing = ConfigValues(
             **{
                 field: getattr(existing, field)
@@ -308,14 +649,14 @@ def set_user_value(path: Path, key: str, value: str) -> None:
             codex_session_name_resolution=value.lower() == "true",
         )
     else:
-        values[key] = value.lower() == "true" if key in _BOOL_KEYS else value
+        values[spec.field] = value.lower() == "true" if spec.kind == "bool" else value
     lines = ["[fork]"]
     for name in sorted(values):
         item = values[name]
         if isinstance(item, bool):
             text = "true" if item else "false"
         else:
-            text = '"' + str(item).replace("\\", "\\\\").replace('"', '\\"') + '"'
+            text = _toml_string_literal(str(item))
         lines.append(f"{name} = {text}")
     for agent, extra_args in (
         ("claude", existing.claude_extra_args),
@@ -325,10 +666,7 @@ def set_user_value(path: Path, key: str, value: str) -> None:
             agent == "codex" and existing.codex_session_name_resolution is not None
         ):
             continue
-        quoted = ", ".join(
-            '"' + item.replace("\\", "\\\\").replace('"', '\\"') + '"'
-            for item in (extra_args or ())
-        )
+        quoted = ", ".join(_toml_string_literal(item) for item in (extra_args or ()))
         lines.extend(("", f"[agents.{agent}]", f"extra_args = [{quoted}]"))
         if agent == "codex" and existing.codex_session_name_resolution is not None:
             lines.append(

@@ -591,3 +591,26 @@ def test_incomplete_agent_signal_error_has_stable_catalog_and_machine_details(
     rendered = render_error(error, machine=True)
     assert "claude-parent" not in rendered
     assert PARENT not in rendered
+
+
+@pytest.mark.matrix("T-OUT-24")
+def test_invalid_output_env_never_leaks_human_formatted_stdout(repo_scenario):
+    """T-OUT-24 — an invalid `AGENT_FORK_OUTPUT` produces empty stdout across
+    every command that resolves configuration, not a partial or
+    human-formatted success rendering ahead of the refusal."""
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    environment = {
+        **world.env,
+        "AGENT_FORK_OUTPUT": "table",
+    }
+    for arguments in (
+        ["fork", "probe", "--dry-run", "--no-agent", "--no-with-state"],
+        ["config", "view"],
+        ["session"],
+        ["list"],
+    ):
+        completed = run_cli(arguments, environment, world.parent_path)
+        assert completed.returncode == 2, arguments
+        assert completed.stdout == b"", arguments
