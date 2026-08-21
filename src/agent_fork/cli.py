@@ -19,6 +19,7 @@ from agent_fork.config import (
     resolve_discovered_config,
     set_user_value,
 )
+from agent_fork.interrupts import OperationInterrupted
 from agent_fork.xdg import xdg_path
 
 
@@ -1666,7 +1667,7 @@ def main(argv: list[str] | None = None) -> int:
         from agent_fork.errors import INTERRUPT_ERRORS
         from agent_fork.output import render_error
 
-        translated = INTERRUPT_ERRORS[error.signum]("interrupted after rollback")
+        translated = INTERRUPT_ERRORS[error.signum](str(error))
         print(render_error(translated, machine=_machine()), file=sys.stderr)
         return translated.exit_code
     except KeyboardInterrupt:
