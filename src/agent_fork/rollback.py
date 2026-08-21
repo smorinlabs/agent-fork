@@ -31,10 +31,12 @@ def run_with_rollback(creation, operation, *, env=None):
         from agent_fork.include import terminate_active_setup_hook
 
         terminate_active_git()
-        # The setup hook is the second owned process group. Reaping it here,
-        # before rollback removes the worktree, is what stops its descendants
-        # from being reparented to PID 1 and left writing into a deleted
-        # directory (A12 Gate-1 fact 6).
+        # The setup hook is the second owned process group, and it is killed in
+        # the handler for the same reason Git's is: unwinding first would leave
+        # it writing into a directory rollback is about to remove. What actually
+        # reaches its descendants is `start_new_session=True` plus
+        # `run_setup_hook()`'s own reap ladder (A12 Gate-1 fact 6); this call is
+        # the earlier, synchronous half of the same guarantee.
         terminate_active_setup_hook()
         raise OperationInterrupted(signum)
 

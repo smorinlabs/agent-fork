@@ -44,8 +44,8 @@ class ResolvedConfig:
     claude_extra_args: tuple[str, ...]
     codex_extra_args: tuple[str, ...]
     codex_session_name_resolution: bool
-    setup_hook_policy: str = "tracked"
-    setup_hook_timeout: int = 300
+    setup_hook_policy: str
+    setup_hook_timeout: int
 
     @property
     def mode(self) -> str:
