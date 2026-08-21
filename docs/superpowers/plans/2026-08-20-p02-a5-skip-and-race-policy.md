@@ -23,148 +23,111 @@ recorded in the register entry and are not restated here.
 
 ## The governing rule
 
-One rule decides every case, and it is a question about *time*, not about file
-type:
+**Narrowed to Option A by owner decision, 2026-08-20.** A5 fixes exactly one
+thing: *`agent-fork` must not refuse to work because of one entry it cannot
+copy.* Everything else in the original bullet either already behaves correctly
+or is routed elsewhere.
 
-> A condition that was already present when the path was **observed** is
-> **skipped**. A condition that appears after that observation is a **parent
-> change**, and a parent change fails the fork.
+The rule, stated as behaviour rather than as timing:
 
-**Observation is per path, not global** (revised 2026-08-20 after the Codex
-review). There is no single instant at which the whole tree is snapshotted:
-`collect_inventory` enumerates paths, then `_manifest_entry` captures each one
-with an `lstat` followed by a later digest `open`. A path's recorded
-observation is whatever its own `_manifest_entry` saw. A permission change
-landing between enumeration and that capture therefore counts as
-**pre-existing**, and is skipped. This is accepted rather than fought: closing
-that gap would require locking a tree Git itself does not lock, and the
-consequence of the accepted case is a named skip, not a silent one.
+> **The copy loop never fails the fork.** An entry it cannot carry is skipped
+> and named. **Verification remains the sole arbiter** of whether the result
+> is acceptable.
 
-`_copy_entry` compares against the recorded observation rather than guessing
-from the failure site:
+This is what dissolves the earlier collision between "skip bad entries" and
+"fail on parent changes". The copy loop is not asked to classify *why* an
+entry is uncopyable; it records and continues. If the entry became uncopyable
+because the parent changed mid-fork, the manifest recorded a regular file with
+a digest, the parent now presents a different kind or different bytes, and
+`parent-content` and `content-match` fire and revert the fork exactly as they
+do today. If it was uncopyable from the start, verification sees consistent
+state and the fork succeeds carrying a warning.
 
-- recorded unreadable, already dropped, never reaches transport;
-- recorded regular but now absent, non-regular, or unreadable, **parent
-  change, fail**.
+### The policy, in full
 
-The snapshot is `capture_state` in `pipeline.py`, taken before the worktree
-exists. The rule follows from what the inventory means: it lists only paths
-Git had just reported, so anything inconsistent with that at copy time proves
-the working tree moved underneath the fork.
-
-Applying the rule:
-
-| Condition | Discovered at | Outcome |
+| Condition met while copying | Default | `--strict` |
 |---|---|---|
-| Unreadable file | snapshot (`_digest` open fails) | **skip**, drop from inventory, name it |
-| Unreadable file | copy (`_copy_entry`) | **fail** — parent changed |
-| Manifest kind `absent` | snapshot | **fail** — deleted inside the window |
-| Manifest kind `other` (socket, FIFO, device) | snapshot | **fail** — swapped inside the window |
-| Non-regular entry | copy (`_copy_entry` else branch) | **fail** — swapped inside the window |
-| Any content or status drift in the parent | verification | **fail**, after one retry |
+| File cannot be read | skip, warn, name every skipped path | fail, with the same warning |
+| Entry is a socket, FIFO, or other non-regular type | skip, warn, name every skipped path | fail, with the same warning |
+| Parent changed during the fork | **fail and revert** — today's behaviour, unchanged | same |
+
+Exit status is 0 when only skips occurred, non-zero under `--strict`.
+
+**The non-regular case is defensive, and expected never to fire.** Git does
+not list sockets or FIFOs, so such an entry cannot enter the inventory; the
+probe matrix reached that branch only by swapping a regular file mid-fork,
+which verification then fails. The change is still worth making because it
+costs one branch and removes a crash path, and because a guard that never
+fires is preferable to a `MaterializeError` that destroys a fork.
 
 ## Design
 
-### (b) Skip unreadable entries, by default
+### Skipping, and the four sites it must reach
 
-**Marking, not silence.** A path that cannot be read at observation time is
-marked skipped and reported at the end of the run.
-
-**Shrinking the inventory is necessary but nowhere near sufficient** (revised
-2026-08-20 after the Codex review, which rated the original design a high
-finding). The verification contract resolves paths in three places that never
-consult the initial inventory, so the skip must be threaded through every one:
+A path that fails to read at capture time is marked skipped and reported at
+the end of the run. Shrinking `Inventory` alone is not enough: the
+verification contract resolves paths in places that never consult it, so the
+skipped set must be threaded through all four.
 
 | Site | Why the skip must reach it |
 |---|---|
-| Initial `capture_state` | Where the unreadable path is discovered and dropped. |
-| Transport in `materialize` | Staged and unstaged patches are repository-wide `diff-index` and `diff-files` calls that never consume `Inventory.staged` or `.unstaged`. A tracked path could otherwise be reported skipped while still being transported. |
-| Verify-phase re-capture | `verify_fork` re-resolves a fresh inventory and re-runs `capture_state` on the parent, which would **re-open the still-unreadable file and raise the same error at verification time**. |
-| `exact-copy-status` | It compares complete live porcelain from parent and child, not the inventory. A skipped untracked path still appears in the parent's status and is absent from the child, producing a mismatch and a rollback. Known-skipped paths must be filtered from both porcelains before comparison, minding the NUL-delimited format and the collapsed `?? d/` directory form. |
+| Initial `capture_state` | Where an unreadable path is discovered and marked. |
+| Transport in `materialize` | Untracked paths are simply not copied. A tracked path is excluded from the `diff-index` and `diff-files` patches with `:(exclude,literal)`, the pattern A13's T13E established, so the child keeps the last-committed content. |
+| Verify-phase re-capture | `verify_fork` re-resolves a fresh inventory and re-runs `capture_state` on the parent, which would otherwise re-open the unreadable file and raise at verification time. |
+| `exact-copy-status` | It compares live porcelain, not the inventory, so a skipped untracked path appears in the parent and not the child. Known-skipped paths are filtered from both sides before comparison. This rung requests `--untracked-files=all`, so its paths are already expanded and the collapsed `?? d/` form does not arise. The raw `parent-untouched` bracket is **not** normalized. |
 
-The design is therefore an **original inventory plus an explicit skipped set**,
-carried through all four sites, rather than a quietly shrunk inventory.
+**No skip is ever triggered by absence.** Only a failed read or an
+unsupported entry type marks a path skipped. This is deliberate:
+`collect_inventory` keeps deletion and rename endpoints on purpose and
+`_manifest_entry` renders them as kind `absent`, so treating absence as a skip
+condition, or as a failure, would break ordinary deletions. `T-VER-26` guards
+that behaviour and an unstaged deletion forks cleanly today.
 
-**Reporting.** Every skipped path is named — in `notices` for humans, and in a
-`skipped` array in the JSON output for machines. A count alone is not
-sufficient.
+### `.worktreeinclude`
 
-**Typed error.** The raw `runtime_error` carrying a bare errno string is
-replaced by a typed error naming the step and the path.
+The same readability guard is added beside the file-type guard `include.py`
+already has, so an unreadable ignored file no longer kills the fork.
 
-**`.worktreeinclude` is scoped to a plain readability guard.** Its copies run
-after verification, so they have no snapshot to compare against and cannot
-carry race semantics. The minimal remediation is the readability guard
-`include.py` never had, matching the file-type guard beside it: skip with a
-notice. The pipeline ordering is left alone.
+**Known limit, accepted by the owner.** Include copying runs after all
+verification and resolves its own paths, so a file that becomes unreadable
+after selection is skipped as though it had always been unreadable, and a file
+mutated during `copy2` can land torn with nothing detecting it. This race
+exists today; the guard neither creates nor closes it. Closing it would need a
+per-copy stability bracket, which is out of A5's narrowed scope.
 
-**Shared primitive.** Pull request #53 consolidated duplicated primitives but
-left `_copy_entry` and the `.worktreeinclude` copy loop in `include.py`
-unmerged, although their only substantive divergence is the raise-versus-skip
-policy this item is about. The remedy lands as one shared copy primitive that
-takes the policy as a parameter, matching that pull request's pattern.
+### Dropped from A5 by the narrowing
 
-### (c) Retry the race once, then fail with a cause
-
-**The rollback is correct and stays.** A write inside the window can tear the
-copy, leaving the child matching no single moment of the parent.
-
-**Retry is a full re-attempt.** Attempt two takes fresh `parent_status`, a
-fresh inventory, and a fresh `capture_state`. Re-running verification against
-the stale snapshot would be wrong, because the parent legitimately changed and
-the second attempt must adopt the new state.
-
-**Retry is a classifier, and fires on any content or drift failure** (revised
-2026-08-20 after the Codex review). The earlier design retried only on
-observed parent drift, reasoning that a lone `content-match` failure must be
-an A1-class transport defect. A reverting writer refutes that: snapshot an
-already-modified file holding bytes A, let a writer change it to B before
-materialization so the child receives B, then let it restore A before
-verification. Porcelain never changes and the parent matches its snapshot, so
-no drift is observed, yet the child differs. The runtime cannot distinguish
-that genuine race from a transport defect, so the old trigger suppressed the
-retry for exactly the case retrying was meant to fix.
-
-Retrying does not mask a transport defect, because a deterministic defect
-**reproduces identically on the second attempt**. The retry is the diagnostic:
-
-| Second attempt | Classification | Reported as |
+| Dropped | Why | Where it goes |
 |---|---|---|
-| Succeeds | transient parent drift | success, with a notice that a retry occurred |
-| Fails, drift observed | continuous writer | named cause plus the continuous-writer message |
-| Fails, same content-only mismatch | probable transport defect | failure identifying it as reproducible, not a race |
-
-**Messages.** The failure names the cause — the parent changed during the fork
-and nothing was lost — rather than only the check that fired. A retry that
-fails the same way emits a distinct message identifying a continuous writer,
-such as a development-server log or a watch build.
-
-### The strict flag
-
-One flag, not two. Default behavior skips and exits 0. Strict mode converts
-every skip into a refusal with a non-zero exit. The flag's name and the
-strict-mode exit code are both subject to the CLI Design Standard, checked
-through the `cli-standards` skill before implementation, because the
-repository is currently release-blocked on rules R4.1 and R9.3.
+| Retry after a parent change | Parent changes already fail and revert correctly. The retry needed an attempt boundary with guaranteed rollback, and its classifier is defeated by stateful transport filters. | Future item, if wanted |
+| Timing classification in the copy loop | Verification already arbitrates. | Not needed |
+| Enumeration blind spot | A directory that loses readability during `ls-files` hides its descendants entirely. | Already routed as N2 |
+| Per-copy stability brackets | Architectural, not a fault fix. | Recorded as the known limit above |
 
 ## Owner decisions
 
 | ID | Decision | Owner, date |
 |---|---|---|
 | D1 | Skip is implemented by marking paths and shrinking the carried inventory; skipped paths are listed at the end. Skipping covers pre-existing unreadable entries only. A change in the parent fails the fork. | 2026-08-17, refined 2026-08-20 |
-| D2 | Retry once, then fail with a named cause. | 2026-08-20 |
+| D2 | **Superseded 2026-08-20.** Retry is dropped; a parent change fails and reverts, which is today's behaviour. Original decision was retry-once. | 2026-08-20 |
+| D4 | Non-regular entries (socket, FIFO) are skipped with a warning, not treated as a failure. Supersedes the earlier fail-on-swap resolution. | 2026-08-20 |
+| D5 | `.worktreeinclude` gains the readability guard; its residual post-verification race is accepted as a known limit. | 2026-08-20 |
+| D6 | A5 is narrowed to Option A: only the refuses-to-work defect is fixed. | 2026-08-20 |
 | D3 | Exit 0 with notices by default; a strict flag makes skips fail. | 2026-08-20 |
 
 **Assumption, correctable in one line:** the default tolerates any number of
 skipped entries, not exactly one. Basis: the owner's instruction to report
 "exactly which ones", plural.
 
-**Collision flagged, resolved as fail:** the owner asked for sockets and FIFOs
-to be skipped, and separately for parent changes to fail. These collide at one
-reachable point. Since Git never lists a non-regular entry, the only way
-`_copy_entry` meets one is a mid-fork swap, which is a parent change. The
-explicit fail-on-parent-change rule wins. Flipping this to a defensive skip is
-a one-line change if the owner prefers it.
+**Collision resolved 2026-08-20, the other way.** The owner chose the
+defensive skip. The collision dissolves because the copy loop no longer
+classifies: it skips and warns, and verification independently fails the fork
+if the entry became uncopyable through a mid-fork change. Both rules hold
+without either overriding the other.
+
+**Assumption carried forward, correctable in one line:** "we should fail and
+revert, I think we've already done that" is read as keeping today's behaviour
+with no retry, which is what the narrowing assumes.
 
 ## Known dependencies
 
@@ -295,6 +258,18 @@ because they change the size of the item, which is an owner question.
 | 3 | **High.** The accepted observation gap can still be **silent**, contradicting the claim that its worst case is a named skip. If a directory loses readability while `ls-files` is traversing, its descendants never enter `_manifest_entry` or the skipped set at all. The N2 evidence is itself the proof. | **Accepted.** The guarantee must be narrowed to paths Git already enumerated, with the pre-enumeration blind spot kept in the race model. |
 | 4 | Status normalization targets the wrong stream: `exact-copy-status` requests `--untracked-files=all`, so it never sees the collapsed `?? d/` form. That form appears in the raw `parent-untouched` bracket, which must **not** be normalized, because subtracting one skipped descendant from a collapsed record can hide drift in non-skipped siblings. | **Accepted.** Needs a record-aware NUL porcelain parser on expanded paths only. |
 | 5 | Post-verification `.worktreeinclude` copying remains an unchecked race. It resolves paths independently and runs after all verification, so a writer changing a file after `lstat` or during `copy2` yields torn or stale child content that nothing later detects. | **Accepted.** A plain readability guard does not close it; a per-copy stability bracket would. |
+
+### Effect of the Option A narrowing on the open findings
+
+Recorded 2026-08-20, after the owner narrowed the item.
+
+| Finding from pass 2 | Status under the narrowed scope |
+|---|---|
+| 1. `absent` rule rejects legitimate deletions | **Closed.** No skip is ever triggered by absence; only a failed read or an unsupported entry type marks a path. Deletion behaviour is untouched. |
+| 2. Retry has no rollback-and-recreate boundary | **Closed.** The retry is dropped. |
+| 3. The observation gap can still be silent | **Out of scope, recorded.** The enumeration blind spot is N2, already routed to its own issue. The design no longer claims the gap yields a named skip. |
+| 4. Status normalization targets the wrong stream | **Reduced.** Only `exact-copy-status` is normalized, and it requests `--untracked-files=all`, so paths are expanded and the collapsed form never arises. `parent-untouched` is left alone. |
+| 5. Post-verification include race | **Accepted as a known limit**, by owner decision. The guard neither creates nor closes it. |
 
 ### Gates 4 and 6
 
