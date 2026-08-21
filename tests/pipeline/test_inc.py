@@ -691,3 +691,44 @@ def test_the_hook_itself_runs_with_the_ladder_s_signals_unblocked(repo_scenario)
     assert "SIGTERM" not in hook.stdout_tail
     assert "SIGINT" not in hook.stdout_tail
     assert signal.pthread_sigmask(signal.SIG_BLOCK, set()) == entry_mask
+
+
+class _FakeRunningHookProcess(_FakeHookProcess):
+    """The same stand-in, still running: `poll()` has no status to report."""
+
+    returncode = None
+
+
+@pytest.mark.matrix("T-INC-21")
+def test_a_live_leader_is_signalled_without_a_probe(monkeypatch):
+    """T-INC-21 — a live leader answers the emptiness question by itself.
+
+    `start_new_session=True` makes the hook a session leader, which can neither
+    `setsid()` (it is already a process-group leader) nor `setpgid()` away (a
+    session leader may not change its group), so while it is alive its group
+    holds it. Probing that with `killpg(pgid, 0)` cannot return anything else,
+    and it costs the one thing worth saving here: syscalls between the last
+    confirmation that the pid is ours and the signal that uses it. Skipping it
+    also makes this path provably safe rather than merely narrow — an unreaped
+    child pins its pid, and only this process can reap it.
+
+    Given:  a hook group whose leader is still running
+    Expect: `_group_is_empty()` answers False having issued no `killpg` at all,
+            and the signal that follows is the only one
+    Source: P02 A12 gate-6 round 4; REQ-24
+    """
+    from agent_fork import include
+
+    calls = []
+
+    def killpg(pid, signum):
+        calls.append((pid, int(signum)))
+
+    monkeypatch.setattr(include.os, "killpg", killpg)
+    group = include._HookGroup(cast(Any, _FakeRunningHookProcess()))
+
+    assert include._group_is_empty(group) is False
+    assert calls == []
+    include._signal_hook_group(group, signal.SIGTERM)
+    assert calls == [(_FakeHookProcess.pid, int(signal.SIGTERM))]
+    assert group.emptied is False

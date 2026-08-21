@@ -205,9 +205,15 @@ def _signal_hook_group(group: _HookGroup, signum: signal.Signals) -> None:
     Addressing the group by the leader's pid stays safe *while the group still
     holds a member*: the kernel reserves that pid as the group id for exactly
     that long, and no longer. Once the group has emptied the pid is free to
-    name something unrelated, so ``_group_is_empty()`` runs first — both to
-    honour the latch, which makes emptiness permanent, and to shrink the
-    unavoidable check-to-signal gap to a single syscall.
+    name something unrelated, so ``_group_is_empty()`` runs first — to honour
+    the latch, which makes emptiness permanent, and because a live leader makes
+    the signal below provably safe with no probe at all.
+
+    That leaves one path that is narrowed rather than closed: a leader already
+    reaped, a group that has just emptied and has not been observed empty, and
+    a pid recycled *as a new group's id* between the probe and this ``killpg``.
+    Both steps are adjacent syscalls, and nothing portable to Linux and macOS
+    alike makes them one. "Known limits" 9 in the A12 design states it.
     """
     if _group_is_empty(group):
         return
@@ -235,13 +241,27 @@ def _group_is_empty(group: _HookGroup) -> bool:
     and believing it would put an unrelated process group back in range of the
     reap ladder.
 
-    ``poll()`` runs before the probe so an unreaped leader — a zombie is still
-    a group member as far as ``killpg`` is concerned — does not read as a
-    survivor.
+    A live leader then answers the question on its own, with no probe at all.
+    ``start_new_session=True`` makes the hook a session leader, and a session
+    leader can neither ``setsid()`` (it is already a process-group leader) nor
+    ``setpgid()`` away, so while it is alive its group holds it. Returning here
+    also keeps the pid provably the hook's: only this process reaps its own
+    child, it is single-threaded, and no ``waitpid`` runs between this answer
+    and the ``killpg`` that acts on it — so on this path the pid cannot have
+    been recycled, rather than merely being unlikely to have been.
+
+    Past that, the leader is gone and only the probe distinguishes a surviving
+    group member from an empty group. ``poll()`` is what makes that reading
+    honest: an unreaped leader is still a group member as far as ``killpg`` is
+    concerned, so a zombie would read as a survivor. Reaping is also what
+    releases the pid — see "Known limits" 9 in the A12 design for the residual
+    race that leaves, which no portable primitive on both supported platforms
+    removes.
     """
     if group.emptied:
         return True
-    group.process.poll()
+    if group.process.poll() is None:
+        return False
     try:
         os.killpg(group.process.pid, 0)
     except ProcessLookupError:
