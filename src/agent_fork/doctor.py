@@ -142,8 +142,27 @@ def _setup_hook_check(
 
 
 def run_doctor(
-    cwd: Path, env: Mapping[str, str], *, agent_mode: str | None = None
-) -> tuple[DoctorCheck, ...]:
+    cwd: Path,
+    env: Mapping[str, str],
+    *,
+    agent_mode: str | None = None,
+    output: str | None = None,
+) -> tuple[tuple[DoctorCheck, ...], str]:
+    """Return the diagnostic checks plus the resolved `output` format.
+
+    `agent_mode` and `output` are passed through as resolution flags, not
+    just applied after the fact — an explicit `--require-agent`/`--no-agent`
+    or `-o/--output` must be able to override an invalid lower-precedence
+    `AGENT_FORK_AGENT_MODE`/`AGENT_FORK_OUTPUT`, the same as every other
+    consumer. `output` falls back to `"text"` when configuration itself
+    fails to resolve — the "config validity" check below already reports
+    that failure; rendering the report still needs a format to render it in.
+    """
+    flags = {
+        key: value
+        for key, value in {"agent_mode": agent_mode, "output": output}.items()
+        if value is not None
+    }
     git = _version_check(
         "git PRODUCT_GIT_MIN",
         shutil.which("git", path=env.get("PATH")),
@@ -165,15 +184,25 @@ def run_doctor(
     hook_policy: str | None = None
     hook_timeout = 0
     try:
-        resolved = resolve_discovered_config(cwd, env)
+        resolved = resolve_discovered_config(cwd, env, flags=flags)
         selected_mode = agent_mode or resolved.agent_mode
         hook_policy = resolved.setup_hook_policy
         hook_timeout = resolved.setup_hook_timeout
+        resolved_output = resolved.output
         config = DoctorCheck(
             "config validity", True, f"valid ({resolved.config_path or 'defaults'})"
         )
     except ConfigError as error:
         selected_mode = agent_mode or "auto"
+        # An explicit -o/--output must still win even when a *different* key
+        # is the one that failed to resolve; absent that, prefer a *valid*
+        # AGENT_FORK_OUTPUT over the bare "text" default, so a JSON consumer
+        # still gets a JSON report precisely when the config is broken —
+        # the case it most needs to machine-read.
+        env_output = env.get("AGENT_FORK_OUTPUT")
+        resolved_output = output or (
+            env_output if env_output in ("text", "json") else "text"
+        )
         config = DoctorCheck("config validity", False, str(error))
     setup_hook = _setup_hook_check(cwd, env, hook_policy, hook_timeout)
     assessment = assess_agent_signals(env)
@@ -236,4 +265,13 @@ def run_doctor(
         paths_ok &= ok
         details.append(f"{label}={path} ({'writable' if ok else 'not writable'})")
     xdg = DoctorCheck("XDG paths", paths_ok, ", ".join(details))
-    return git, claude, codex, recipes, signals, config, xdg, setup_hook
+    return (
+        git,
+        claude,
+        codex,
+        recipes,
+        signals,
+        config,
+        xdg,
+        setup_hook,
+    ), resolved_output

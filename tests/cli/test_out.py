@@ -271,7 +271,7 @@ def test_dry_run_honors_json_output_aliases_without_mutation(repo_scenario):
                     "untracked": 1,
                     "ignored": 0,
                 },
-                # A12 added this key to the dry-run plan; T-CLI-51 owns its
+                # A12 added this key to the dry-run plan; T-CLI-61 owns its
                 # per-state assertions, so this row only pins its presence.
                 "setup_hook": document["plan"]["setup_hook"],
             },
@@ -598,6 +598,29 @@ def test_incomplete_agent_signal_error_has_stable_catalog_and_machine_details(
     assert PARENT not in rendered
 
 
+@pytest.mark.matrix("T-OUT-24")
+def test_invalid_output_env_never_leaks_human_formatted_stdout(repo_scenario):
+    """T-OUT-24 — an invalid `AGENT_FORK_OUTPUT` produces empty stdout across
+    every command that resolves configuration, not a partial or
+    human-formatted success rendering ahead of the refusal."""
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    environment = {
+        **world.env,
+        "AGENT_FORK_OUTPUT": "table",
+    }
+    for arguments in (
+        ["fork", "probe", "--dry-run", "--no-agent", "--no-with-state"],
+        ["config", "view"],
+        ["session"],
+        ["list"],
+    ):
+        completed = run_cli(arguments, environment, world.parent_path)
+        assert completed.returncode == 2, arguments
+        assert completed.stdout == b"", arguments
+
+
 def _commit_setup_hook(world, body):
     hook = world.parent_path / ".agent-fork/worktree-setup.sh"
     hook.parent.mkdir(parents=True, exist_ok=True)
@@ -613,9 +636,9 @@ def _commit_setup_hook(world, body):
     return hook
 
 
-@pytest.mark.matrix("T-OUT-24")
+@pytest.mark.matrix("T-OUT-25")
 def test_setup_hook_is_structured_on_stdout_and_narrated_only_on_stderr(repo_scenario):
-    """T-OUT-24 — A12 outcome 7 and 8: visible to a human, parseable by a machine.
+    """T-OUT-25 — A12 outcome 7 and 8: visible to a human, parseable by a machine.
 
     Given:  a fork whose setup hook runs, in `--json` mode and in `text` mode
     Expect: `--json` stdout is exactly one parseable line carrying the whole
@@ -725,9 +748,9 @@ def test_setup_hook_is_structured_on_stdout_and_narrated_only_on_stderr(repo_sce
         assert lines[4].startswith(b"cd ")
 
 
-@pytest.mark.matrix("T-OUT-26")
+@pytest.mark.matrix("T-OUT-27")
 def test_human_output_echoes_the_hook_tails_on_failure_and_under_debug(repo_scenario):
-    """T-OUT-26 — Axis C1's human echo: the tails are shown, not just stored.
+    """T-OUT-27 — Axis C1's human echo: the tails are shown, not just stored.
 
     Axis C1 promises human mode echoes the bounded `stdout_tail`/`stderr_tail`
     to stderr when the hook failed, timed out, or `--debug` is set. The failure
@@ -772,9 +795,9 @@ def test_human_output_echoes_the_hook_tails_on_failure_and_under_debug(repo_scen
 
 
 @pytest.mark.requires_process_group_signals
-@pytest.mark.matrix("T-OUT-27")
+@pytest.mark.matrix("T-OUT-28")
 def test_human_output_echoes_the_hook_tails_on_timeout(repo_scenario):
-    """T-OUT-27 — the timeout branch of the same Axis C1 echo.
+    """T-OUT-28 — the timeout branch of the same Axis C1 echo.
 
     Given:  a hook that prints, then blocks past a one-second timeout
     Expect: the timeout line and the bounded tail of what it printed first,
@@ -795,9 +818,9 @@ def test_human_output_echoes_the_hook_tails_on_timeout(repo_scenario):
     assert b"setup hook stdout: started\\n" in timed.stderr
 
 
-@pytest.mark.matrix("T-OUT-25")
+@pytest.mark.matrix("T-OUT-26")
 def test_interrupt_error_codes_join_the_stable_catalog(repo_scenario):
-    """T-OUT-25 — the two interrupt codes are published, not ad hoc.
+    """T-OUT-26 — the two interrupt codes are published, not ad hoc.
 
     Given:  `interrupted_sigint` and `interrupted_sigterm`
     Expect: both are in `ERROR_CATALOG` and `STABLE_ERROR_CODES` at exit codes

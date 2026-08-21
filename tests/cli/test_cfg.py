@@ -44,12 +44,29 @@ def test_config_set_then_validate_round_trips(repo_scenario):
     assert 'extra_args = ["--model", "claude future"]' in config_path.read_text()
 
 
+@pytest.mark.matrix("T-CFG-35")
+def test_config_set_output_round_trips(repo_scenario):
+    """T-CFG-35 — `config set output` round-trips through `config
+    validate`/`config get` (decision 4, ratified ACCEPT — A13 explicitly
+    reserved this exact round trip for A11)."""
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    written = run_cli(["config", "set", "output", "json"], world.env, world.parent_path)
+    assert written.returncode == 0, written.stderr.decode()
+    validated = run_cli(["config", "validate"], world.env, world.parent_path)
+    assert validated.returncode == 0, validated.stderr.decode()
+    read = run_cli(["config", "get", "output"], world.env, world.parent_path)
+    assert read.returncode == 0
+    assert read.stdout == b"json\n"
+
+
 HOOK_CONFIG_PATH = "agent-fork/agent-fork_config.toml"
 
 
-@pytest.mark.matrix("T-CFG-25")
+@pytest.mark.matrix("T-CFG-38")
 def test_setup_hook_keys_round_trip_through_the_config_cli(repo_scenario):
-    """T-CFG-25 — A12 keys are first-class in `config set` / `config get`.
+    """T-CFG-38 — A12 keys are first-class in `config set` / `config get`.
 
     Given:  `config set` for both A12 keys, then `config validate` and
             `config get`
@@ -86,9 +103,9 @@ def test_setup_hook_keys_round_trip_through_the_config_cli(repo_scenario):
         assert viewed.stdout == expected
 
 
-@pytest.mark.matrix("T-CFG-26")
+@pytest.mark.matrix("T-CFG-39")
 def test_invalid_setup_hook_values_are_rejected_at_validate_time(repo_scenario):
-    """T-CFG-26 — the A11 guard: never validate clean and crash at use.
+    """T-CFG-39 — the A11 guard: never validate clean and crash at use.
 
     A11 found a key that passed `config validate` and then crashed `fork`.
     Every rejection below therefore has to happen in `load_config()` /
@@ -125,11 +142,17 @@ def test_invalid_setup_hook_values_are_rejected_at_validate_time(repo_scenario):
     config_path.unlink()
 
     # The flag path bypasses `load_config()`, so `resolve_config()` has to
-    # reject the same values on its own.
+    # reject the same values on its own — through A11's `validate_values()`
+    # registry, whose `ConfigFinding.render()` names the key, the offending
+    # value, the allowed forms, and the winning source.
     with pytest.raises(ConfigError, match="greater than zero"):
         resolve_config(flags={"setup_hook_timeout": 0})
-    with pytest.raises(ConfigError, match="tracked, any, or off"):
+    with pytest.raises(ConfigError) as rejected_policy:
         resolve_config(flags={"setup_hook_policy": "nonsense"})
+    policy_message = str(rejected_policy.value)
+    assert "fork.setup_hook_policy" in policy_message
+    assert "'nonsense'" in policy_message
+    assert "allowed: tracked, any, off" in policy_message
 
     flagged = run_cli(
         ["fork", "bad-timeout", "--dry-run", "--no-agent", "--setup-hook-timeout", "0"],
