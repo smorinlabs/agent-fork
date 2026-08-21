@@ -587,12 +587,25 @@ and a malicious committed hook runs exactly as before.
 
 **Bounds.** The hook runs in its own process group with `stdin` connected to
 `/dev/null`, and gets `--setup-hook-timeout` seconds (default 300) before that
-whole group — the hook *and everything it spawned* — is terminated. A timeout
-bounds how long the hook runs; it cannot undo work the hook already did. A hook
-killed at the timeout may already have pushed a branch, written `~/.npmrc`, or
-changed shared repository configuration, and none of that is rolled back. The
-`/dev/null` stdin is a behavior change from earlier versions: a hook that used
-to prompt interactively now reads end-of-file instead of your terminal.
+whole group is terminated. The group is the exact unit of the guarantee: a
+timeout, or an interrupt, kills the hook and every process it started **that
+stayed in the group**. A process that calls `setsid()` puts itself in a
+different group, where `killpg` cannot reach it — that is how Unix works, not
+something `agent-fork` can override.
+
+What is guaranteed for such an escaped process is that it cannot make your fork
+hang. `agent-fork` waits a bounded moment for the hook's output to close, then
+lets go, reports the hook's own exit code, and sets `descendants_cleared` to
+`false` in `--json` with a matching notice, so a process left running is stated
+rather than hidden. On the success path nothing is killed at all: a hook that
+deliberately starts a background process keeps it.
+
+A timeout bounds how long the hook runs; it cannot undo work the hook already
+did. A hook killed at the timeout may already have pushed a branch, written
+`~/.npmrc`, or changed shared repository configuration, and none of that is
+rolled back. The `/dev/null` stdin is a behavior change from earlier versions:
+a hook that used to prompt interactively now reads end-of-file instead of your
+terminal.
 
 **Visibility.** `fork` narrates the hook on stderr in human output and carries a
 `setup_hook` object in `--json`, including a bounded tail of the hook's own
@@ -629,8 +642,11 @@ to run), under `off` (it is not evaluated), and when no hook is present.
   session files are never removed.
 - **Interrupts are handled.** SIGINT and SIGTERM exit 130 and 143 after rollback
   where applicable, with the stable codes `interrupted_sigint` and
-  `interrupted_sigterm`. A running repository setup hook and everything it
-  spawned are terminated before rollback removes the worktree.
+  `interrupted_sigterm`. A running repository setup hook, and every process it
+  started that remained in its process group, are terminated before rollback
+  removes the worktree; one that left the group by calling `setsid()` cannot be
+  reached, and is reported rather than waited for
+  ([details](#repository-hooks)).
 - **No network, no telemetry.** `agent-fork` makes no runtime network calls and
   collects no data ([details](#telemetry-and-networking)).
 
