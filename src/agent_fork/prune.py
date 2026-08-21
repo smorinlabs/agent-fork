@@ -22,6 +22,7 @@ from agent_fork.registry import (
     registry_path,
 )
 from agent_fork.repository import inspect_repository, live_worktree_pairs
+from agent_fork.text import escape_terminal_text
 
 
 @dataclass(frozen=True)
@@ -95,31 +96,48 @@ def plan_prune(*, env: Mapping[str, str] | None = None) -> PrunePlan:
 
 
 def apply_prune(
+    confirmed: PrunePlan,
     *,
     env: Mapping[str, str] | None = None,
     timeout: float = DEFAULT_LOCK_TIMEOUT,
 ) -> PrunePlan:
-    """Re-classify under the lock, then drop only the rows with nothing there.
+    """Remove only the records the user was shown and agreed to.
 
-    Classification is repeated inside the lock so a row created or removed
-    since planning cannot be acted on from a stale view.
+    Classification is repeated inside the lock, because a record can be
+    created or removed between planning and here — but the re-classification
+    *narrows* the set rather than replacing it. A record that became prunable
+    in the interval is not removed: the user never saw it, so consent does not
+    cover it, and the next run will offer it. Removing it here would be the
+    same defect this whole change exists to fix — acting on something other
+    than what was confirmed.
     """
+    agreed = {item.token() for item in confirmed.missing}
     path = registry_path(env)
     with registry_lock(path, timeout=timeout):
-        plan = _classify(_decode(path), env=env)
-        if plan.missing:
-            _atomic_write(path, list(plan.kept))
-        return plan
+        current = _classify(_decode(path), env=env)
+        removing = [item for item in current.missing if item.token() in agreed]
+        if removing:
+            removed = {item.token() for item in removing}
+            _atomic_write(
+                path, [item for item in _decode(path) if item.token() not in removed]
+            )
+        return PrunePlan(tuple(removing), current.displaced, current.kept)
 
 
 def render(plan: PrunePlan, *, dry_run: bool) -> list[str]:
     lines: list[str] = []
     verb = "would remove" if dry_run else "removed"
     for entry in plan.missing:
-        lines.append(f"{verb} {entry.name}\t{entry.branch}\t{entry.worktree}")
+        lines.append(
+            f"{verb} {escape_terminal_text(entry.name)}\t"
+            f"{escape_terminal_text(entry.branch)}\t"
+            f"{escape_terminal_text(entry.worktree)}"
+        )
     for entry in plan.displaced:
         lines.append(
-            f"kept {entry.name}\t{entry.branch}\t{entry.worktree}\t"
+            f"kept {escape_terminal_text(entry.name)}\t"
+            f"{escape_terminal_text(entry.branch)}\t"
+            f"{escape_terminal_text(entry.worktree)}\t"
             "(path occupied by something else; not this fork)"
         )
     if not plan.missing:

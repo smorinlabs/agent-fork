@@ -13,6 +13,7 @@ from pathlib import Path
 from agent_fork.errors import PreconditionError, RegistryBusyError
 from agent_fork.models import RegistryEntry
 from agent_fork.storage import atomic_write_json
+from agent_fork.text import escape_terminal_text
 from agent_fork.xdg import xdg_path
 
 REGISTRY_VERSION = 2
@@ -193,7 +194,8 @@ def add_entry(
             raise PreconditionError(
                 "conflict_fork_registered",
                 f"fork {entry.name!r} is already registered for this repository "
-                f"at {occupied.worktree}; remove it first, or choose another name",
+                f"at {escape_terminal_text(occupied.worktree)}; remove it "
+                "first, or choose another name",
             )
         kept = [
             item

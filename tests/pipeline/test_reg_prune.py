@@ -228,6 +228,63 @@ def test_v1_record_authorizes_nothing_and_prune_clears_it(repo_scenario):
     assert not Path(worktree).exists()
 
 
+@pytest.mark.matrix("T-REG-36")
+def test_prune_removes_only_what_the_user_was_shown(repo_scenario):
+    """Consent covers the records the user saw, not whatever is prunable now.
+
+    A record that becomes prunable between the prompt and the write was never
+    displayed, so removing it would act on something other than what was
+    confirmed — the defect this whole change exists to prevent.
+    """
+    from agent_fork.prune import apply_prune, plan_prune
+
+    world = repo_scenario()
+    shown = _fork(world.env, world.parent_path, "shown")
+    later = _fork(world.env, world.parent_path, "later")
+    assert shown.returncode == 0 and later.returncode == 0
+    shutil.rmtree(_worktree_of(shown.stdout))
+
+    # What the user is prompted with: one record.
+    plan = plan_prune(env=world.env)
+    assert [item.name for item in plan.missing] == ["shown"]
+
+    # A second record becomes prunable after they were asked.
+    shutil.rmtree(_worktree_of(later.stdout))
+
+    applied = apply_prune(plan, env=world.env)
+    assert [item.name for item in applied.missing] == ["shown"]
+    assert [row["name"] for row in _rows(world.env)] == ["later"], (
+        "a record the user never saw was removed"
+    )
+
+
+@pytest.mark.matrix("T-REG-37")
+def test_prune_escapes_registry_text_before_printing_it(repo_scenario):
+    """Registry fields are repository-controlled and must not reach a terminal raw."""
+    from agent_fork.models import RegistryEntry
+    from agent_fork.prune import plan_prune, render
+    from agent_fork.registry import add_entry
+
+    world = repo_scenario()
+    hostile = "evil\x1b[31mred"
+    add_entry(
+        RegistryEntry.create(
+            name=hostile,
+            branch=f"fork/{hostile}",
+            worktree=world.parent_path.parent / "gone-hostile",
+            agent=None,
+            repository=str(world.parent_path / ".git"),
+        ),
+        env=world.env,
+    )
+
+    lines = render(plan_prune(env=world.env), dry_run=True)
+    assert any("evil" in line for line in lines)
+    assert not any("\x1b" in line for line in lines), (
+        "an escape sequence from the registry reached the rendered output"
+    )
+
+
 @pytest.mark.matrix("T-REG-32")
 def test_prune_clears_a_v1_record_without_touching_its_worktree(repo_scenario):
     """Pruning first is also valid: it is bookkeeping, never disk state."""

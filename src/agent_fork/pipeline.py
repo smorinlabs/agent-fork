@@ -31,6 +31,7 @@ from agent_fork.repository import (
     validate_fork_guards,
 )
 from agent_fork.rollback import run_with_rollback
+from agent_fork.text import escape_terminal_text
 from agent_fork.verify import verify_fork
 
 
@@ -111,7 +112,8 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         raise PreconditionError(
             "conflict_fork_registered",
             f"fork {request.name!r} is already registered for this repository "
-            f"at {occupied.worktree}; remove it first, or choose another name",
+            f"at {escape_terminal_text(occupied.worktree)}; remove it first, "
+            "or choose another name",
         )
     planned_child_id = (
         request.child_session_id or str(uuid.uuid4())

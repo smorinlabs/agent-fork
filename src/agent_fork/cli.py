@@ -1355,7 +1355,7 @@ def main(argv: list[str] | None = None) -> int:
                 if sys.stdin.readline().strip().lower() not in {"y", "yes"}:
                     print("prune cancelled", file=sys.stderr)
                     return 2
-            applied = apply_prune(env=environment)
+            applied = apply_prune(plan, env=environment)
             if machine:
                 from agent_fork.output import json_line
 

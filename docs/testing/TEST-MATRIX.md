@@ -423,6 +423,8 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-31 | forking a name whose live fork is already registered refuses with `conflict_fork_registered` rather than displacing the record and orphaning its worktree | baseline | F | live | REQ-41 (A3); gate-6 r6 |
 | T-REG-32 | `prune` clears a v1 record without touching its worktree, after which the now-unregistered fork is removable by explicit path with `--force` | baseline | F | live | REQ-31a (A3); gate-6 r4 |
 | T-REG-35 | the same-name conflict is refused at preflight — before any worktree, include copy, or setup hook has run, since a rollback cannot reverse a hook's side effects | baseline | F | live | REQ-41 (A3); refuse-when-live review |
+| T-REG-36 | `prune` removes only the records the user was shown; one that becomes prunable after the prompt is left for the next run | baseline | F | live | REQ-31a (A3); PR #64 review |
+| T-REG-37 | `prune` escapes registry-sourced name, branch, and path before rendering them to a terminal | baseline | F | live | REQ-31a (A3); PR #64 review |
 | T-REG-33 | forking replaces a record whose worktree is gone: it describes nothing, so replacing it orphans nothing | baseline | F | live | REQ-41 (A3); gate-6 r6 |
 
 ---
