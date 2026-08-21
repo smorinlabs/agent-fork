@@ -228,7 +228,7 @@ def test_v1_record_authorizes_nothing_and_prune_clears_it(repo_scenario):
     assert not Path(worktree).exists()
 
 
-@pytest.mark.matrix("T-REG-36")
+@pytest.mark.matrix("T-REG-35")
 def test_prune_removes_only_what_the_user_was_shown(repo_scenario):
     """Consent covers the records the user saw, not whatever is prunable now.
 
@@ -258,7 +258,7 @@ def test_prune_removes_only_what_the_user_was_shown(repo_scenario):
     )
 
 
-@pytest.mark.matrix("T-REG-37")
+@pytest.mark.matrix("T-REG-36")
 def test_prune_escapes_registry_text_before_printing_it(repo_scenario):
     """Registry fields are repository-controlled and must not reach a terminal raw."""
     from agent_fork.models import RegistryEntry

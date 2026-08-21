@@ -291,7 +291,7 @@ def test_forking_replaces_a_record_whose_worktree_is_gone(repo_scenario):
     assert rows[0]["branch"] == "fork/again-elsewhere"
 
 
-@pytest.mark.matrix("T-REG-35")
+@pytest.mark.matrix("T-REG-34")
 def test_the_conflict_refusal_runs_before_the_setup_hook(repo_scenario):
     """A refusal must arrive before anything with side effects has happened.
 
