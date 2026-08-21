@@ -104,7 +104,11 @@ def _setup_hook_check(
     """
     name = "repository setup hook"
     if policy is None:
-        return DoctorCheck(name, True, "not evaluated: configuration is invalid")
+        return DoctorCheck(
+            name,
+            True,
+            "not evaluated: configuration could not be resolved (see config validity)",
+        )
     if policy == "off":
         return DoctorCheck(name, True, "disabled by config (setup_hook_policy = off)")
     try:

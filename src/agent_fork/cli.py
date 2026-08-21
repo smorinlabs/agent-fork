@@ -631,8 +631,6 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         print(dry.render(output_kind))
         return 0
 
-    # In machine mode stderr is reserved for exactly one JSON error object, so
-    # plain progress text would break a consumer parsing it.
     def announce(line: str) -> None:
         print(line, file=sys.stderr)
 
@@ -651,6 +649,8 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             codex_session_name_resolution=config.codex_session_name_resolution,
             setup_hook_policy=config.setup_hook_policy,
             setup_hook_timeout=config.setup_hook_timeout,
+            # Suppressed in machine mode: stderr is reserved there for exactly
+            # one JSON error object, which plain progress text would break.
             progress=None if output_kind == "json" else announce,
         ),
         env=environment,
