@@ -200,10 +200,12 @@ The owner's carry-by-default decision is unchanged: `--with-submodules` remains
 the default when A6b ships. Only the sequencing changed, so that users stop
 being blocked while A6b gets the review depth two passes say it needs.
 
-**A6a's scope has one open owner decision** — the unstaged-gitlink-advance case
-(matrix 1 cell `c`), which `--ignore-submodules=dirty` deliberately still
-reports and which therefore still fails. It is recorded in Open items below and
-is not resolved here.
+**A6a's handling of the unstaged-gitlink-advance case** (matrix 1 cell `c`,
+which `--ignore-submodules=dirty` deliberately still reports) was the one open
+owner decision at split time. It is resolved in "All three blocking decisions
+are resolved" below: a typed `submodule_unrepresentable` refusal, shipped in
+A6a and gated on submodules not being carried, so A6b removes the limitation
+rather than inheriting it.
 
 ## Design
 
