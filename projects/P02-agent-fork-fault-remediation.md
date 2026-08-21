@@ -449,6 +449,16 @@ repository-controlled text raw).
   `--no-renames` decomposes `old -> new` into unassociated endpoints and
   excluding only an unreadable `new` would silently drop `old` from the child.
 
+  **A skip requires all three preconditions**, or the entry is the typed
+  failure `entry_unreadable` (exit 1): the entry is untracked or ignored;
+  `lstat` succeeded so a stability sentinel exists; and the fork carries no
+  deletion that could pair with it, determined from an explicit
+  `--diff-filter=D` facet rather than inferred from absence. The sentinel is
+  `(st_dev, st_ino, st_mode, st_size, st_mtime_ns, st_ctime_ns)`, recorded at
+  observation and rechecked before success. Strict refusal is
+  `strict_skip_refused` (exit 1). Both codes carry stable `details` schemas and
+  are published in `README.md`. The design doc is the normative contract.
+
   Exit status is 0 when only skips occurred, non-zero under `--strict`. No
   skip is ever triggered by *absence*: `collect_inventory` keeps deletion and
   rename endpoints deliberately, so treating absence as a skip or a failure

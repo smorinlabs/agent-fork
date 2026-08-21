@@ -123,10 +123,13 @@ incomplete. That is precisely the failure mode being routed out as #59,
 reintroduced through the back door.
 
 **A5 therefore absorbs the narrow part of #28 it depends on:** classify only
-`ENOENT` and `ENOTDIR` as absent, and route every other `OSError` from `lstat`
-into the skip path for untracked and ignored entries, or into the typed
-failure for tracked ones. The rest of #28 — root-confined traversal, no-follow
-descriptors, rollback recovery preservation — stays in #28.
+`ENOENT` and `ENOTDIR` as absent. Every other `OSError` from `lstat` is the
+typed failure `entry_unreadable`, for tracked and untracked entries alike,
+because a path whose `lstat` failed yields no stability sentinel and so could
+never be proven unchanged. It is **not** routed into the skip path. See "Skip
+preconditions" below, which is the normative statement; this paragraph
+describes only the `#28` boundary. The rest of #28 — root-confined traversal,
+no-follow descriptors, rollback recovery preservation — stays in #28.
 
 ### Skip preconditions — all three must hold
 
@@ -140,7 +143,15 @@ every one of these holds. Otherwise it is a typed failure, `entry_unreadable`.
    fails rather than skipping. This bounds the absorbed `#28` slice: only
    `ENOENT` and `ENOTDIR` mean absent; every other `lstat` error is a failure,
    not a skip.
-3. **The fork carries no deletion that could pair with it.** A plain
+3. **The fork carries no deletion that could pair with it**, determined from
+   an explicit **deletion facet** rather than inferred from absence. `Inventory`
+   currently records staged and unstaged paths name-only and discards status,
+   so absence-based detection cannot see a staged `git rm --cached old` whose
+   working file still exists and is unreadable: `lstat` succeeds, no path looks
+   absent, materialization applies the cached deletion, the untracked
+   replacement is skipped, and the child loses HEAD's file. The facet is
+   collected explicitly from both cached and working-tree diffs with
+   `--diff-filter=D` and frozen alongside the inventory. A plain
    filesystem `mv old new`, without `git mv`, puts `old` in the unstaged
    deletion listing and `new` in the untracked listing. Transport applies the
    repository-wide deletion patch, removing `old`, and skipping an unreadable
@@ -176,6 +187,24 @@ implementations, and `ERROR_CATALOG` is asserted exactly by `tests/cli/test_out.
 | Exit status | `1` |
 | Summary | `--strict refused a fork with skipped entries` |
 | Companion code | `entry_unreadable`, exit `1`, for a carried entry that could not be read and could not be skipped |
+
+Both codes are added to `ERROR_CATALOG` **and** to the published catalog in
+`README.md`, which the exact-catalog test does not currently police.
+
+`entry_unreadable` carries its own stable `details` schema, because it names a
+path that was *not* skipped and may have to name the deletion blockers that
+prevented the skip:
+
+```json
+{"entry": {"path": "<escaped>", "reason": "unreadable|lstat-failed|tracked",
+           "phase": "capture|materialize|include"},
+ "deletion_blockers": ["<escaped>", "..."]}
+```
+
+`deletion_blockers` is byte-wise ordered and empty when the failure had another
+cause. Without this schema an implementation can satisfy the existing
+catalog-membership and generic-rendering tests while exposing the blocking
+paths only inside an unstable human message.
 
 `details` schema, stable within a major version under R7.2:
 
@@ -423,6 +452,42 @@ standard check concluded exit `5` for the strict refusal, reasoning from this
 repository's guard-refusal family. The review argued exit `1`. The review is
 right: exit `5` refuses *before* doing work, while a strict-skip refusal
 judges a completed attempt, which is `verify_failed`'s shape at exit `1`.
+
+### Gate 1 — Codex second lens, fifth pass, 2026-08-20
+
+Verdict: **needs-attention**. Codex session
+`01a02229-d1d5-7d61-9925-d83522271653`. Asked directly whether findings were
+new defects or refinements, the review answered: **one new defect, three
+refinements** — the first quantitative sign the loop is converging.
+
+Confirmed sound: exit `1` over exit `5`, against R6.1/R6.3 and
+`REQUIREMENTS.md`; and that an include-phase strict error raised before the
+registry write still enters rollback.
+
+| # | Finding | Class | Resolution |
+|---|---|---|---|
+| 1 | The `#28` paragraph still routed non-absence `lstat` errors into the skip path, contradicting the preconditions added in the same commit, and the register did not mirror the new rules. | refinement | **Fixed.** The `#28` paragraph now defers to the preconditions as the normative statement, and the register mirrors all three plus the sentinel and error codes. |
+| 2 | **NEW.** The sentinel is target-only, so an **ancestor** race defeats it: `lstat` on `d/file` succeeds, `d` becomes mode 000 before the separate open, the read fails and the entry is skipped, `d` is restored before verification, and every one of the six target fields is unchanged. The child omits a file that was readable at both boundaries. Renaming `d` away and back is the analogous path-identity race. | **new defect** | **Open — owner decision.** See below. |
+| 3 | The deletion precondition had no detector: `Inventory` keeps staged and unstaged paths name-only and discards status, so a staged `git rm --cached old` with an unreadable untracked `old` is invisible to absence-based detection. | refinement | **Fixed.** Explicit `--diff-filter=D` deletion facet, frozen alongside the inventory. |
+| 4 | `entry_unreadable` had no `details` schema and neither new code was added to the published `README.md` catalog, so an implementation could pass the catalog tests while exposing blocking paths only in an unstable message. | refinement | **Fixed.** Separate schema specified, including byte-wise ordered `deletion_blockers`; both codes published. |
+
+#### The open question from finding 2
+
+A pre-existing unreadable file and an ancestor-permission race produce an
+**identical runtime signature**: `lstat` succeeds, the later open returns
+`EACCES`. They cannot be told apart without either descriptor-based traversal
+or sentinels on every ancestor. Three ways forward:
+
+| Option | Closes the race | Cost |
+|---|---|---|
+| Absorb `#28`'s root-confined descriptor traversal into A5 | yes | Large. This is the architectural work deliberately left in `#28` |
+| Sentinel every ancestor from the worktree root, rechecked at verification | mostly — `chmod` always bumps a directory's `ctime`, so the change is detectable, modulo `ctime` granularity | Modest. `O(depth)` extra `lstat` calls per skipped path |
+| Accept as a documented known limit | no | None |
+
+Note on severity: unlike N2, this failure is **not silent**. The run emits a
+warning naming the skipped path, so the outcome is a *misattributed* skip
+rather than an unreported omission, and the owner's own requirement is that an
+unreadable file is skipped and named.
 
 ### Gates 4 and 6
 
