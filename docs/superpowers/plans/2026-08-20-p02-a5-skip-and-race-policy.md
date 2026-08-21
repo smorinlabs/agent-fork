@@ -271,6 +271,24 @@ Recorded 2026-08-20, after the owner narrowed the item.
 | 4. Status normalization targets the wrong stream | **Reduced.** Only `exact-copy-status` is normalized, and it requests `--untracked-files=all`, so paths are expanded and the collapsed form never arises. `parent-untouched` is left alone. |
 | 5. Post-verification include race | **Accepted as a known limit**, by owner decision. The guard neither creates nor closes it. |
 
+### Gate 1 — Codex second lens, third pass, 2026-08-20
+
+Verdict: **needs-attention**, two high, two medium. Codex session
+`01a021a1-4b67-7532-90b8-cac7924f793b`.
+
+**The central claim was verified sound.** A regular file swapped for a FIFO
+mid-fork and skipped by the copy loop is still caught: `compare_states`
+reports the type or membership loss, both content rungs fail, and rollback
+runs. Skipping cannot make verification pass on an incomplete child by that
+route.
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | **High.** The register still specified the superseded policy: copy-time failures, `absent`/`other` failures, and the retry. An implementer following it would ship the opposite behaviour. | **Fixed.** The register's decided direction is rewritten to state the narrowed policy verbatim. |
+| 2 | **High.** Skipping one endpoint of a tracked **rename** does not preserve committed content. `--no-renames` decomposes `old -> new` into unassociated delete and add endpoints, so excluding only an unreadable `new` still lets `old`'s deletion transport. The child loses `old` while the warning names only `new`. | **Open — owner scope decision.** Either handle skips at rename-pair level, or restrict skipping to untracked and ignored entries only. |
+| 3 | Parent changes to an initially skipped path can pass verification. An already-modified tracked file that is unreadable and then atomically replaced by different unreadable bytes is omitted from both normalized and content comparisons, while raw porcelain still reads ` M path`, so `parent-untouched` sees no change. | **Accepted, fix specified.** Record `lstat` metadata — size, mtime, inode — as a sentinel for each skipped path, which requires no read, and fail when the sentinel changes. This keeps "every parent change fails" honest. |
+| 4 | Strict failure has no route to emit the promised warning. Notices accumulate inside `fork()` and render only after it returns successfully; a strict exception reaches the generic handler, which prints only `render_error`. | **Accepted, fix specified.** A typed strict-skip error carries every escaped skipped path in both its human message and its JSON details. Tested at capture time, materialize time, and `.worktreeinclude`, in text and JSON modes. |
+
 ### Gates 4 and 6
 
 To be completed.

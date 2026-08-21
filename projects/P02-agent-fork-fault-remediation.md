@@ -418,29 +418,32 @@ repository-controlled text raw).
   the interaction with A6's dirty-submodule case. The window figures come
   from one machine at one repository size — indicative, not a bound.
 
-  **Decided direction (owner, 2026-08-20).** One rule governs all three cases:
-  *a condition present when the snapshot was taken is skipped; a condition that
-  appears after it is a parent change and fails the fork.* Concretely —
-  (a) unchanged in effect: git never lists a socket or FIFO, so the
-  non-regular branch in `_copy_entry` can only fire on a mid-fork swap, which
-  is a parent change and therefore keeps failing; (b) unreadable at snapshot
-  time (`content.py:_digest`) is skipped, dropped from the carried inventory so
-  transport and verification stay driven by one set, and named in `notices`
-  plus a `skipped` array in the JSON output; the same path unreadable only at
-  copy time is a parent change and fails; `absent` and `other` manifest kinds
-  at snapshot time likewise fail, because the inventory lists only paths git
-  had just seen; (c) keep the rollback, add a named cause ("the parent changed
-  during the fork; nothing was lost"), retry **once** with fresh snapshots, and
-  emit a distinct message when the retry fails identically. The retry fires on any
-  content or drift failure and is itself the classifier: succeeding means
-  transient drift, failing with drift means a continuous writer, and failing
-  with the same content-only mismatch means a probable transport defect. An
-  earlier drift-only trigger was refuted by the gate 1 Codex review, which
-  produced a reverting writer that yields a lone `content-match` failure from
-  a genuine race.
-  A single `--strict`-style flag inverts (b): skips become refusals with a
-  non-zero exit. Flag name and strict-mode exit code are subject to the CLI
-  Design Standard check at the design gate. Full record: the
+  **Decided direction (owner, 2026-08-20, narrowed to Option A).** This
+  supersedes every earlier direction recorded for A5, including the
+  snapshot-versus-copy timing rule, the fail-on-swap resolution, and the
+  retry. A5 now fixes exactly one defect: *agent-fork must not refuse to work
+  because of a single entry it cannot copy.*
+
+  **The copy loop never fails the fork.** It skips what it cannot carry and
+  names it; verification remains the sole arbiter of whether the result is
+  acceptable. Verified by the third gate 1 review: a regular file swapped for
+  a FIFO mid-fork is still caught, because `compare_states` reports the type
+  loss, both content rungs fail, and rollback runs.
+
+  | Condition while copying | Default | `--strict` |
+  |---|---|---|
+  | File cannot be read | skip, warn, name every skipped path | fail, same warning |
+  | Socket, FIFO, other non-regular type | skip, warn, name every skipped path | fail, same warning |
+  | Parent changed during the fork | fail and revert, unchanged from today | same |
+
+  Exit status is 0 when only skips occurred, non-zero under `--strict`. No
+  skip is ever triggered by *absence*: `collect_inventory` keeps deletion and
+  rename endpoints deliberately, so treating absence as a skip or a failure
+  would break ordinary deletions, which `T-VER-26` guards. The retry is
+  dropped. `.worktreeinclude` gains the same readability guard, with its
+  residual post-verification race accepted as a known limit. Flag name and
+  strict exit code are subject to the CLI Design Standard check. Full record,
+  including the probe matrix and three review rounds: the
   [A5 design doc](../docs/superpowers/plans/2026-08-20-p02-a5-skip-and-race-policy.md).
 - **A6 — Dirty submodules likely make the repo unforkable by default.**
   `git worktree add` leaves submodules uninitialized; `materialize.py:89-99`
