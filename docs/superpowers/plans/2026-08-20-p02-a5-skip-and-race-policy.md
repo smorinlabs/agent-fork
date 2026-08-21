@@ -128,6 +128,76 @@ into the skip path for untracked and ignored entries, or into the typed
 failure for tracked ones. The rest of #28 — root-confined traversal, no-follow
 descriptors, rollback recovery preservation — stays in #28.
 
+### Skip preconditions — all three must hold
+
+Revised 2026-08-20 after the fourth review. A path is skipped **only** when
+every one of these holds. Otherwise it is a typed failure, `entry_unreadable`.
+
+1. **The entry is untracked or ignored.** Tracked paths never skip.
+2. **`lstat` succeeded**, so a stability sentinel can be recorded. A path whose
+   `lstat` itself fails with `EACCES`, `EIO`, or any non-absence error yields
+   no metadata, so nothing could later prove it stayed unchanged. Such a path
+   fails rather than skipping. This bounds the absorbed `#28` slice: only
+   `ENOENT` and `ENOTDIR` mean absent; every other `lstat` error is a failure,
+   not a skip.
+3. **The fork carries no deletion that could pair with it.** A plain
+   filesystem `mv old new`, without `git mv`, puts `old` in the unstaged
+   deletion listing and `new` in the untracked listing. Transport applies the
+   repository-wide deletion patch, removing `old`, and skipping an unreadable
+   `new` would leave the child holding **neither endpoint** while the warning
+   named only `new`. Restricting skips to untracked paths did not close this,
+   because the two endpoints live in different listings. Since the pairing
+   cannot be recovered under `--no-renames`, the conservative rule applies:
+   when the fork carries any deletion, an otherwise-skippable entry fails
+   instead. Both paths are named in the error.
+
+### The stability sentinel
+
+Recorded at observation time for every skipped path, and re-checked before the
+fork is reported successful. Any difference fails the fork.
+
+    (st_dev, st_ino, st_mode, st_size, st_mtime_ns, st_ctime_ns)
+
+`st_mode` and `st_ctime_ns` are load-bearing, not padding. Changing an
+unreadable file from mode `000` to `0644` preserves inode, size, and mtime,
+and its porcelain record stays `?? path`, so without the mode field a file
+that *became readable* mid-fork would be silently omitted while every check
+reported agreement. `st_ctime_ns` catches a same-size rewrite whose mtime was
+restored.
+
+### The strict-skip error contract
+
+Specified here because "typed error with JSON details" admits incompatible
+implementations, and `ERROR_CATALOG` is asserted exactly by `tests/cli/test_out.py`.
+
+| Field | Value |
+|---|---|
+| Catalog code | `strict_skip_refused` |
+| Exit status | `1` |
+| Summary | `--strict refused a fork with skipped entries` |
+| Companion code | `entry_unreadable`, exit `1`, for a carried entry that could not be read and could not be skipped |
+
+`details` schema, stable within a major version under R7.2:
+
+```json
+{"skipped": [{"path": "<escaped>", "reason": "unreadable|unsupported-type",
+              "phase": "capture|materialize|include"}],
+ "count": 2}
+```
+
+Paths are escaped with `escape_terminal_text` and sorted byte-wise so output
+is deterministic. **Aggregation boundary:** capture-phase and materialize-phase
+skips are collected and raised together, so one run reports every skipped path
+rather than only the first. `.worktreeinclude` copying runs after verification
+and is aggregated into the same error, which still rolls back because it
+precedes the registry write.
+
+The exit status is `1`, not `5`. Exit `5` in this codebase is the
+precondition-guard family — `cleanup_dirty_worktree`, `conflict_branch_exists`
+— which refuse before doing work. A strict-skip refusal happens after the fork
+has run and its result was judged unacceptable, which is `verify_failed`'s
+shape, and `verify_failed` is exit `1`.
+
 ### `.worktreeinclude`
 
 The same readability guard is added beside the file-type guard `include.py`
@@ -333,6 +403,26 @@ route.
 | 2 | **Resolved by owner decision, Option A.** Skipping is restricted to untracked and ignored entries, so no tracked path is ever excluded from transport and the rename decomposition cannot lose an endpoint. The finding as stated: `--no-renames` decomposes `old -> new` into unassociated delete and add endpoints, so excluding only an unreadable `new` still lets `old`'s deletion transport. The child loses `old` while the warning names only `new`. | **Closed.** Owner chose to restrict skipping to untracked and ignored entries. Unreadable tracked files keep failing, with a typed error naming the path. |
 | 3 | Parent changes to an initially skipped path can pass verification. An already-modified tracked file that is unreadable and then atomically replaced by different unreadable bytes is omitted from both normalized and content comparisons, while raw porcelain still reads ` M path`, so `parent-untouched` sees no change. | **Accepted, fix specified.** Record `lstat` metadata — size, mtime, inode — as a sentinel for each skipped path, which requires no read, and fail when the sentinel changes. This keeps "every parent change fails" honest. |
 | 4 | Strict failure has no route to emit the promised warning. Notices accumulate inside `fork()` and render only after it returns successfully; a strict exception reaches the generic handler, which prints only `render_error`. | **Accepted, fix specified.** A typed strict-skip error carries every escaped skipped path in both its human message and its JSON details. Tested at capture time, materialize time, and `.worktreeinclude`, in text and JSON modes. |
+
+### Gate 1 — Codex second lens, fourth pass, 2026-08-20
+
+Verdict: **needs-attention**, two high, two medium. Codex session
+`01a0221e-18aa-7613-9cb3-a5cb2279d4bf`. Confirmed sound: the errno premise for
+the `#28` slice, retaining `ENOTDIR` as absence, and the four-site threading
+against the current call graph.
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | **High.** Option A does not close the rename hole. A plain `mv old new` puts `old` in the unstaged deletion listing and `new` in the untracked listing, so restricting skips to untracked paths still lets the child end with neither endpoint. | **Accepted.** Third skip precondition added: an entry does not skip when the fork carries any deletion. |
+| 2 | **High.** An absorbed `lstat` failure cannot produce the required sentinel, so verification could never prove such a path stayed stable. | **Accepted.** Second skip precondition added: `lstat` must have succeeded. Otherwise it is a typed failure. |
+| 3 | The sentinel omitted mode and ctime, so a file going from mode `000` to `0644` was undetectable. | **Accepted.** Sentinel widened to device, inode, mode, size, `mtime_ns`, `ctime_ns`. |
+| 4 | The strict-skip error was not a defined contract: no catalog code, exit status, details schema, ordering, or aggregation boundary. | **Accepted.** Contract specified in full, including the exit-status rationale. |
+
+**Disagreement recorded and resolved against my earlier reading.** The CLI
+standard check concluded exit `5` for the strict refusal, reasoning from this
+repository's guard-refusal family. The review argued exit `1`. The review is
+right: exit `5` refuses *before* doing work, while a strict-skip refusal
+judges a completed attempt, which is `verify_failed`'s shape at exit `1`.
 
 ### Gates 4 and 6
 
