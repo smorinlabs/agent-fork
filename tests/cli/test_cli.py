@@ -1394,3 +1394,46 @@ def test_interrupt_renders_json_when_the_mode_comes_from_configuration(repo_scen
             "message": "interrupted after rollback",
         }
     }
+
+
+@pytest.mark.matrix("T-CLI-55")
+def test_interrupt_before_the_hook_step_renders_json_when_configured(
+    repo_scenario, monkeypatch, capsys
+):
+    """T-CLI-55 — R7.8 is owed from the moment the output mode is knowable.
+
+    `_fork_cli()` published the resolved mode immediately before the hook step,
+    which left agent-mode resolution, repository inspection, anchor and branch
+    Git calls, naming, and destination calculation — everything between
+    configuration resolution and that publication — rendering interrupts from
+    the raw flags. A fork put into JSON mode by `AGENT_FORK_OUTPUT` and
+    interrupted anywhere in that window printed human text. The publication now
+    happens as soon as configuration resolves, which is the earliest point the
+    mode exists.
+
+    Given:  `AGENT_FORK_OUTPUT=json`, no `--json` flag, and an interrupt raised
+            from `inspect_repository()` — the first step after resolution
+    Expect: exit 130 and exactly one JSON error object on stderr
+    Source: R7.8; REQ-22; P02 A12 gate-6 round 3
+    """
+    from agent_fork import repository
+    from agent_fork.cli import main
+
+    world = repo_scenario("plain@main")
+    monkeypatch.setattr("os.environ", dict(world.env, AGENT_FORK_OUTPUT="json"))
+    monkeypatch.chdir(world.parent_path)
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(repository, "inspect_repository", interrupted)
+    assert main(["fork", "early", "--no-agent"]) == 130
+    captured = capsys.readouterr()
+    lines = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == {
+        "error": {
+            "code": "interrupted_sigint",
+            "message": "interrupted before any mutation",
+        }
+    }

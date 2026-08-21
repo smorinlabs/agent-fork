@@ -1187,8 +1187,8 @@ plan and which describe the product.
 | # | Defect | Correction | Rows |
 |---|---|---|---|
 | 1 | Reaping decided from the leader's exit status, not the group. Timeout path: a hook that backgrounded a process and exited was reported `timed_out: true` after 121 s, and the post-reap drain was unbounded. Interrupt path: `signal_process_group()` returned before `killpg` when the leader had already exited, so a surviving group member ignoring SIGTERM never got SIGKILL | `_signal_hook_group()` (unconditional `killpg`), group-emptiness probing in `_reap()`, and `_collect_output()`'s two separate bounds; `descendants_cleared` reports what is left. "Execution and reaping" and "Known limits" above are rewritten to match | `T-INC-17`, `T-RBK-10` |
-| 2 | An interrupt between `Popen()` and the `_ACTIVE` registration leaked the process group | Spawn and registration moved inside the reap-protected region, registration in a `finally` | covered by 1's rows |
-| 3 | `main()`'s interrupt boundary chose JSON-versus-human from the raw arguments, not the resolved output mode | `_fork_cli()` publishes the resolved mode; `_machine()` prefers it. Note for the record: `output` is not a `[fork]` config key — `AGENT_FORK_OUTPUT` is the whole non-flag route | `T-CLI-54` |
+| 2 | An interrupt between `Popen()` and the `_ACTIVE` registration leaked the process group | Spawn and registration moved inside the reap-protected region, registration in a `finally`. **Insufficient — see round 3, item 1: enclosure narrows the window, it does not close it** | covered by 1's rows |
+| 3 | `main()`'s interrupt boundary chose JSON-versus-human from the raw arguments, not the resolved output mode | `_fork_cli()` publishes the resolved mode; `_machine()` prefers it. Note for the record: `output` is not a `[fork]` config key — `AGENT_FORK_OUTPUT` is the whole non-flag route. **Partial — see round 3, item 3: publication happened too late in `_fork_cli()`** | `T-CLI-54` |
 | 4 | Axis C1's human-mode tail echo was never implemented — `stdout_tail`/`stderr_tail` appeared nowhere in `cli.py` | Echoed to stderr for failed, timed-out, and `--debug`, reusing the already-bounded, already-escaped fields | `T-OUT-26`, `T-OUT-27` |
 | 5 | `CONFORMANCE.md` overclaimed machine-mode stderr purity: the hook's skip and failure notices still land there as plain text | Claim corrected, not the behavior — the notice path is A13(a) / `P02-T13ABF`, out of scope and deliberately preserved | `T-OUT-24` extended |
 
@@ -1196,6 +1196,18 @@ Three nitpicks were taken as well: a digits-only pre-check on
 `setup_hook_timeout` (`int("1_000")` silently became 1000), a fallback so a
 reason-less eligibility cannot render the literal `None` in dry-run text, and
 `T-INC-14`'s missing exact-bound case (output of exactly 4096 bytes), which
-passed as written.
+passed as written. Matrix rows move from 532 to 537.
 
-Matrix rows move from 532 to 537.
+### Round 3 (2026-08-21)
+
+An independent Codex confirmation pass over the round-2 fixes found rows 1 and
+4-5 genuinely closed, row 2 still open, row 3 only partly closed, and one new
+hazard introduced by row 1's own fix. All three are fixed here.
+
+| # | Defect | Correction | Rows |
+|---|---|---|---|
+| 1 | The `Popen()`-to-registration window was **not** closed by round 2. `process = Popen(...)` spawns before it binds the name, so a handler firing in the gap has nothing to reap (the local is unbound) and nothing to signal (`_ACTIVE` is unwritten) — enclosure in the protected block cannot help | `{SIGINT, SIGTERM}` blocked with `signal.pthread_sigmask` across the spawn and registration, restored with `SIG_SETMASK` inside the protected block; `preexec_fn` restores the child's inherited mask so the hook can still receive the ladder's SIGTERM. "Signal path" above is rewritten to match | `T-INC-19`, `T-INC-20` |
+| 2 | New hazard from round 1's fix: a PID is reserved as its group's id only while the group is non-empty, so the unconditional `killpg` could signal an unrelated process group after the hook's own had emptied and the PID had been reused — worse than the orphan A12 exists to prevent | Emptiness latched on a `_HookGroup` record read by every signalling path; `_signal_hook_group()` probes and returns rather than signalling once latched. The reap-ladder section's "can never name an unrelated process" claim is corrected | `T-INC-18` |
+| 3 | Round 2's resolved-output publication sat immediately before the hook step, leaving agent-mode resolution, repository inspection, the anchor and branch Git calls, naming, and destination calculation inside the window it was meant to close | Published immediately after configuration resolution, the first point the mode is knowable | `T-CLI-55` |
+
+Matrix rows move from 537 to 541.

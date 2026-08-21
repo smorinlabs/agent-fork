@@ -471,6 +471,16 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     config = resolve_discovered_config(
         cwd, environment, explicit_path=args.config, flags=flags
     )
+    output_kind = "json" if args.json else (args.output or config.output)
+    # Published here, the first point at which the mode is knowable, and read by
+    # `main()`'s exception boundary, which otherwise sees only the raw flags and
+    # would render a human error for a fork put into JSON mode by
+    # `AGENT_FORK_OUTPUT` — breaking R7.8's one-JSON-object-on-stderr contract
+    # exactly when it matters, on the interrupt path. Publishing it any later
+    # leaves every step in between (agent-mode resolution, repository
+    # inspection, the anchor and branch Git calls, naming, destination) inside
+    # the window it exists to close.
+    args._resolved_machine = output_kind == "json"
     context = resolve_agent_mode(
         config.agent_mode,
         environment,
@@ -564,13 +574,6 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         if context is not None
         else ()
     )
-    output_kind = "json" if args.json else (args.output or config.output)
-    # Published to `main()`'s exception boundary, which otherwise sees only the
-    # raw flags and would render a human error for a fork put into JSON mode by
-    # `AGENT_FORK_OUTPUT` — breaking R7.8's one-JSON-object-on-stderr contract
-    # exactly when it matters, on the interrupt path.
-    args._resolved_machine = output_kind == "json"
-
     if args.dry_run:
         if context is not None:
             agent_check = preflight_agent(
