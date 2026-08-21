@@ -296,3 +296,67 @@ def test_producer_pipe_failure_fails_and_rolls_back(repo_scenario, verify):
             )
     assert not creation.path.exists()
     assert verify in (True, False)
+
+
+@pytest.mark.requires_process_group_signals
+@pytest.mark.matrix("T-RBK-10")
+def test_terminating_the_hook_group_reaches_survivors_after_the_leader_exits(tmp_path):
+    """T-RBK-10 — the interrupt terminator must signal the group, not the leader.
+
+    Given:  a hook whose own shell exits immediately after backgrounding a
+            SIGTERM-ignoring child that stays in the hook's process group, so
+            the leader is already gone when the interrupt arrives
+    Expect: `terminate_active_setup_hook()` still SIGKILLs the group, and the
+            survivor dies — a group outlives its leader, so gating the signal
+            on the leader's exit status skips exactly the process that needs it
+    Source: P02 A12 gate-6 review (Codex); REQ-22
+    """
+    from agent_fork import include
+
+    recorded = tmp_path / "survivor.pid"
+    script = tmp_path / "hook.sh"
+    script.write_text(
+        "#!/bin/sh\n"
+        f"sh -c 'trap \"\" TERM; printf \"%s\" \"$$\" > \"{recorded}\"; "
+        "sleep 120' &\n"
+        "exit 0\n"
+    )
+    script.chmod(0o755)
+    process = subprocess.Popen(
+        [str(script)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        for _ in range(500):
+            if process.poll() is not None and recorded.exists():
+                break
+            time.sleep(0.01)
+        assert process.poll() is not None, "the hook's own shell never exited"
+        survivor = int(recorded.read_text())
+
+        include._ACTIVE.process = process
+        try:
+            include.terminate_active_setup_hook()
+        finally:
+            include._ACTIVE.process = None
+
+        for _ in range(300):
+            try:
+                os.kill(survivor, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail(f"setup-hook group member {survivor} survived the interrupt")
+    finally:
+        if recorded.exists():
+            try:
+                os.kill(int(recorded.read_text()), signal.SIGKILL)
+            except (ProcessLookupError, ValueError):
+                pass
+        for pipe in (process.stdout, process.stderr):
+            if pipe is not None:
+                pipe.close()

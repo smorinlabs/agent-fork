@@ -1,8 +1,10 @@
 """G-INC — include/hook behavior through the real fork orchestrator."""
 
 import os
+import shlex
 import signal
 import subprocess
+import sys
 import time
 
 import pytest
@@ -439,3 +441,63 @@ def test_setup_hook_timeout_kills_the_whole_process_group(repo_scenario):
     else:
         os.kill(grandchild, signal.SIGKILL)
         pytest.fail(f"setup-hook grandchild {grandchild} survived the timeout")
+
+
+@pytest.mark.requires_process_group_signals
+@pytest.mark.matrix("T-INC-17")
+def test_hook_that_detaches_a_process_finishes_promptly_and_reports_honestly(
+    repo_scenario,
+):
+    """T-INC-17 — a fast hook is never a timeout, and the drain is never unbounded.
+
+    Given:  a hook that starts a `setsid()`-detached process holding its output
+            pipes open and then exits 0 immediately
+    Expect: the step ends in seconds rather than at the configured timeout,
+            `timed_out` stays false, the hook's own exit code is reported, and
+            `descendants_cleared` is false with a notice naming what was left
+    Source: P02 A12 gate-6 review (Claude); Axis A1's reap ladder
+    """
+    from agent_fork.pipeline import fork
+
+    world = repo_scenario()
+    detach = (
+        "import os, sys, time; os.setsid(); "
+        "open(sys.argv[1], 'w').write(str(os.getpid())); "
+        "time.sleep(120)"
+    )
+    _commit_support(
+        world,
+        hook=(
+            "#!/bin/sh\n"
+            f"{shlex.quote(sys.executable)} -c {shlex.quote(detach)} "
+            '"$REPO_ROOT/escapee.pid" &\n'
+            "exit 0\n"
+        ),
+    )
+    recorded = world.parent_path / "escapee.pid"
+    started = time.monotonic()
+    result = fork(
+        _request(world, name="hook-detach", setup_hook_timeout=60), env=world.env
+    )
+    elapsed = time.monotonic() - started
+    try:
+        hook = result.setup_hook
+        assert hook.status == "ran"
+        assert hook.exit_code == 0
+        assert hook.timed_out is False
+        assert hook.descendants_cleared is False
+        assert any("stopped waiting" in notice for notice in hook.notices)
+        # The whole point: the hook's own leader exited at once, so the step
+        # must not sit on the 60-second budget waiting for a process that
+        # `killpg` can no longer reach.
+        assert elapsed < 30
+    finally:
+        for _ in range(500):
+            if recorded.exists():
+                break
+            time.sleep(0.01)
+        if recorded.exists():
+            try:
+                os.kill(int(recorded.read_text()), signal.SIGKILL)
+            except (ProcessLookupError, ValueError):
+                pass

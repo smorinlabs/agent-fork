@@ -10,8 +10,8 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · agent-signal = absent | incomplete-marker | incomplete-id | detected-claude | detected-codex | ambiguous-partial-marker | ambiguous-partial-id | ambiguous-complete · agent-mode = auto | strict | git-only · backend = git (jj reserved, no v1 values).
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
-- Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04, T-RBK-08/09, T-INC-16, and T-CLI-53 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 532 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04, T-RBK-08/09, T-RBK-10, T-INC-16, T-INC-17, and T-CLI-53 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
+- Total rows: 534 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -364,6 +364,7 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 | T-RBK-07 | interrupted Git cleanup observes an already-exited process before a redundant process-group signal, preserving the original interruption instead of masking it with macOS `EPERM` | baseline | U | live | REQ-22; macOS process-group regression |
 | T-RBK-08 | A12 Gate-1 fact 6 — SIGINT while the setup hook runs → exit 130, clean rollback, and no surviving process from the hook's group (its backgrounded grandchild is not reparented to PID 1) | baseline | F | live | REQ-22; P02 A12 |
 | T-RBK-09 | A12 Gate-1 fact 6 — SIGTERM while the setup hook runs → exit 143, with the same rollback and process-group reaping guarantees | baseline | F | live | REQ-22; P02 A12 |
+| T-RBK-10 | A12 gate-6 — `terminate_active_setup_hook()` signals the hook's process group even after its leader has exited, so a SIGTERM-ignoring group member is still SIGKILLed instead of being skipped | baseline | U | live | REQ-22; P02 A12 gate-6 |
 
 ---
 
@@ -465,6 +466,7 @@ Varying axes: none of the shared four vary (baseline pinned).
 | T-INC-14 | A12 Gate-1 fact 3 — successful stdout/stderr are retained as bounded tails with pre-bound byte totals and a `truncated` flag | baseline | F | live | P02 A12 |
 | T-INC-15 | A12 — success-path hook output is escaped, extending T-INC-07's guarantee beyond the failure path | baseline | F | live | P02 A12; issue #32 |
 | T-INC-16 | A12 Gate-1 fact 2 — a hook exceeding its timeout is killed with its whole process group (its backgrounded grandchild is gone), `timed_out=true`, and the fork still succeeds | baseline | F | live | P02 A12 |
+| T-INC-17 | A12 gate-6 — a hook that exits 0 after detaching a `setsid()` process keeping its pipes open ends in seconds rather than at the timeout, reports `timed_out=false` with its real exit code, and discloses `descendants_cleared=false` | baseline | F | live | P02 A12 gate-6 |
 
 ---
 
