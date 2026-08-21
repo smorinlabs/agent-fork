@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,6 +114,7 @@ class CleanupResult:
     removed: bool
     notices: tuple[str, ...]
     details: CleanupDetails
+    retained_metadata: dict[str, object]
 
 
 def _git_root(worktree: Path, *, env: Mapping[str, str]) -> Path:
@@ -363,6 +365,157 @@ def _validate(
     return details
 
 
+_EMPTY_RETAINED_METADATA: dict[str, object] = {
+    "lineage_claims": [],
+    "inferred_records": [],
+    "freshness_entries": [],
+    "removal_commands": [],
+}
+
+
+def _retained_metadata(
+    plan: CleanupPlan, *, env: Mapping[str, str]
+) -> tuple[dict[str, object], tuple[str, ...]]:
+    """Read-only disclosure of lineage/inference/freshness metadata this cleanup
+    does not touch: which child sessions retain evidence, where the stores live,
+    and the exact source-qualified command to remove each retained record."""
+    try:
+        from agent_fork.lineage import lineage_path, read_lineage
+        from agent_fork.lineage_inference_store import (
+            _legacy_index_freshness_path,
+            _read_targets,
+            index_freshness_path,
+            inference_path,
+            read_inferences,
+        )
+
+        resolved_worktree = str(plan.worktree.resolve())
+        claims = [
+            claim
+            for claim in read_lineage(env=env)
+            if claim.worktree is not None
+            and str(Path(claim.worktree).resolve()) == resolved_worktree
+        ]
+        if not claims:
+            return dict(_EMPTY_RETAINED_METADATA), ()
+
+        inferred_by_child = {
+            record.child_session_id for record in read_inferences(env=env)
+        }
+        state_targets = _read_targets(index_freshness_path(env))
+        legacy_targets = _read_targets(_legacy_index_freshness_path(env))
+        # A structurally invalid freshness store is a fault to disclose, not
+        # a cache miss to paper over as "no freshness evidence retained" —
+        # but it is a fault ONLY about freshness. An unrelated, independently
+        # readable lineage claim or inferred record must still be disclosed;
+        # nulling the whole result would suppress real information the user
+        # needs, per the design's "disclosure must never fail a cleanup"
+        # guarantee, with an honest notice instead of silence.
+        freshness_unreadable = state_targets is None or legacy_targets is None
+        if state_targets is None:
+            state_targets = {}
+        if legacy_targets is None:
+            legacy_targets = {}
+
+        lineage_claims: list[str] = []
+        inferred_records: list[str] = []
+        freshness_entries: list[str] = []
+        freshness_entries_state: list[str] = []
+        freshness_entries_legacy: list[str] = []
+        removal_commands: list[dict[str, str]] = []
+        for claim in sorted(claims, key=lambda item: item.child_session_id):
+            # Raw values in every machine-readable field below: JSON encoding
+            # already represents control characters safely, and escaping
+            # here would corrupt a session ID a script pastes back into a
+            # command. Escaping applies only to the human `notices` text.
+            child = claim.child_session_id
+            quoted_child = shlex.quote(child)
+            lineage_claims.append(child)
+            removal_commands.append(
+                {
+                    "session_id": child,
+                    "source": "planned",
+                    "command": (
+                        "agent-fork session claude-parent delete --session-id "
+                        f"{quoted_child} --source planned --yes"
+                    ),
+                }
+            )
+            if child in inferred_by_child:
+                inferred_records.append(child)
+                removal_commands.append(
+                    {
+                        "session_id": child,
+                        "source": "inferred",
+                        "command": (
+                            "agent-fork session claude-parent delete --session-id "
+                            f"{quoted_child} --source inferred --yes"
+                        ),
+                    }
+                )
+            in_state = child in state_targets
+            in_legacy = child in legacy_targets
+            if in_state or in_legacy:
+                freshness_entries.append(child)
+                if in_state:
+                    freshness_entries_state.append(child)
+                else:
+                    freshness_entries_legacy.append(child)
+
+        metadata = {
+            "lineage_claims": lineage_claims,
+            "inferred_records": inferred_records,
+            "freshness_entries": freshness_entries,
+            "removal_commands": removal_commands,
+        }
+        notices = (
+            "retained planned lineage claim(s) for: "
+            + ", ".join(_escape_terminal_text(item) for item in lineage_claims)
+            + f"; store: {_escape_terminal_text(str(lineage_path(env)))}",
+        )
+        if inferred_records:
+            notices += (
+                "retained inferred record(s) for: "
+                + ", ".join(_escape_terminal_text(item) for item in inferred_records)
+                + f"; store: {_escape_terminal_text(str(inference_path(env)))}",
+            )
+        if freshness_entries_state:
+            notices += (
+                "retained freshness corroboration for: "
+                + ", ".join(
+                    _escape_terminal_text(item) for item in freshness_entries_state
+                )
+                + f"; store: {_escape_terminal_text(str(index_freshness_path(env)))}",
+            )
+        if freshness_entries_legacy:
+            notices += (
+                "retained freshness corroboration (not yet migrated) for: "
+                + ", ".join(
+                    _escape_terminal_text(item) for item in freshness_entries_legacy
+                )
+                + "; store: "
+                + _escape_terminal_text(str(_legacy_index_freshness_path(env))),
+            )
+        if freshness_unreadable:
+            notices += (
+                "could not read Claude parent freshness metadata; freshness "
+                "corroboration for retained records could not be disclosed",
+            )
+        notices += (
+            "these are kept because the forked agent session remains resumable "
+            "and this is Agent Fork's strongest local parent evidence",
+            "shared transcript screen cache shards hold no parent conclusion, are "
+            "rebuilt on demand, and are reclaimed by the bounded cache sweep "
+            "rather than by cleanup",
+        )
+        return metadata, notices
+    except (OSError, ValueError):
+        return dict(_EMPTY_RETAINED_METADATA), (
+            "could not read Claude parent lineage/inference metadata; "
+            "nothing disclosed",
+        )
+
+
 def cleanup(
     plan: CleanupPlan,
     *,
@@ -382,12 +535,14 @@ def cleanup(
         allow_dirty=allow_dirty,
         allow_unpushed=allow_unpushed,
     )
+    retained_metadata, retained_notices = _retained_metadata(plan, env=env)
     notices = (
         "agent session files were not deleted; the fork session remains resumable "
         "and may be archived with the agent CLI",
+        *retained_notices,
     )
     if dry_run:
-        return CleanupResult(plan, False, notices, details)
+        return CleanupResult(plan, False, notices, details, retained_metadata)
     run_git(
         plan.git_root,
         ["worktree", "remove", "--force", str(plan.worktree)],
@@ -398,4 +553,4 @@ def cleanup(
         run_git(plan.git_root, ["branch", "-D", plan.branch], env=env)
     if plan.owned:
         remove_entry(plan.entry.name, env=env)
-    return CleanupResult(plan, True, notices, details)
+    return CleanupResult(plan, True, notices, details, retained_metadata)

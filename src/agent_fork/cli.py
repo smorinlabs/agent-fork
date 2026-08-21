@@ -782,14 +782,39 @@ def main(argv: list[str] | None = None) -> int:
             if args.session_action == "claude-parent":
                 from agent_fork.claude_lineage_inference import (
                     ClaudeLineageCorpus,
+                    CorpusLimitError,
+                    map_timeout_to_limit_error,
                     to_record,
                 )
                 from agent_fork.errors import (
                     AgentSignalIncompleteError,
                     ClaudeParentError,
+                    ClaudeParentIncompleteAnalysisError,
                     ClaudeParentNotRecordableError,
                     ClaudeParentPartialRecordError,
                 )
+
+                def _incomplete_analysis_document(error, *, session_id=None):
+                    return {
+                        "agent": "claude",
+                        "session_id": session_id,
+                        "relationship": {"status": "incomplete"},
+                        "limit": {
+                            "name": error.limit,
+                            "allowed": error.allowed,
+                            "observed": error.observed,
+                            "scope": error.scope,
+                        },
+                        "recorded": False,
+                        "remediation": (
+                            "the Claude transcript corpus exceeds agent-fork's bounded "
+                            "analysis limit; archive or relocate older project "
+                            "transcripts under ~/.claude/projects, then rerun. "
+                            "agent-fork does not record a parent inferred from an "
+                            "incomplete corpus."
+                        ),
+                    }
+
                 from agent_fork.lineage import (
                     find_lineage,
                     read_lineage,
@@ -797,7 +822,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 from agent_fork.lineage_inference_store import (
                     add_inference,
+                    find_inference,
                     read_inferences,
+                    remove_index_freshness,
                     remove_inference,
                 )
 
@@ -818,7 +845,11 @@ def main(argv: list[str] | None = None) -> int:
                                 print("  ".join(str(value) for value in fields))
                         else:
                             for key, value in document.items():
-                                print(f"{key}: {terminal_text(value)}")
+                                if isinstance(value, list):
+                                    for entry in value:
+                                        print(f"{key}: {terminal_text(entry)}")
+                                else:
+                                    print(f"{key}: {terminal_text(value)}")
 
                 def records():
                     values = []
@@ -883,8 +914,22 @@ def main(argv: list[str] | None = None) -> int:
                             f"source: {terminal_text(selected['source'])}",
                             file=sys.stderr,
                         )
+                        if selected["source"] == "inferred":
+                            will_remove_freshness = True
+                        else:
+                            will_remove_freshness = (
+                                find_inference(args.session_id, env=environment) is None
+                            )
+                        removed_bits = [f"the {selected['source']} record"]
+                        if will_remove_freshness:
+                            removed_bits.append("its corroborating freshness entry")
                         print(
-                            "This does not delete Claude transcripts or Git resources.",
+                            f"This will remove {' and '.join(removed_bits)}.",
+                            file=sys.stderr,
+                        )
+                        print(
+                            "This will not remove Claude transcripts, Git "
+                            "resources, or the shared transcript screen cache.",
                             file=sys.stderr,
                         )
                         if selected["source"] == "planned":
@@ -897,15 +942,63 @@ def main(argv: list[str] | None = None) -> int:
                         if sys.stdin.readline().strip().lower() not in {"y", "yes"}:
                             print("Claude parent delete cancelled", file=sys.stderr)
                             return 2
-                    if found[0]["source"] == "planned":
-                        remove_lineage("claude", args.session_id, env=environment)
-                    else:
+                    delete_notices = []
+
+                    def _remove_freshness_entry_tolerantly(session_id):
+                        # An advisory, unrelated cache/state fault must never
+                        # block removing the user's own primary record.
+                        try:
+                            return remove_index_freshness(session_id, env=environment)
+                        except ValueError:
+                            delete_notices.append(
+                                "could not confirm freshness-entry removal: the "
+                                "freshness index is unreadable"
+                            )
+                            return False
+
+                    if found[0]["source"] == "inferred":
+                        removed_freshness_entry = _remove_freshness_entry_tolerantly(
+                            args.session_id
+                        )
                         remove_inference(args.session_id, env=environment)
+                        retained_planned_record = (
+                            find_lineage("claude", args.session_id, env=environment)
+                            is not None
+                        )
+                        retained_inferred_record = False
+                    else:
+                        surviving_inferred = find_inference(
+                            args.session_id, env=environment
+                        )
+                        if surviving_inferred is None:
+                            removed_freshness_entry = (
+                                _remove_freshness_entry_tolerantly(args.session_id)
+                            )
+                        else:
+                            removed_freshness_entry = False
+                            delete_notices.append(
+                                "freshness entry retained: an inferred record for "
+                                "this child still relies on it"
+                            )
+                        remove_lineage("claude", args.session_id, env=environment)
+                        retained_planned_record = False
+                        retained_inferred_record = surviving_inferred is not None
+                    delete_notices.append(
+                        "shared transcript screen cache retained at "
+                        "~/.cache/agent-fork/claude-lineage-index-v3/; it holds no "
+                        "parent conclusion and is rebuilt on demand"
+                    )
                     emit(
                         {
                             "deleted": True,
                             "session_id": args.session_id,
                             "source": found[0]["source"],
+                            "removed_record": found[0]["source"],
+                            "removed_freshness_entry": removed_freshness_entry,
+                            "retained_planned_record": retained_planned_record,
+                            "retained_inferred_record": retained_inferred_record,
+                            "retained_screen_cache": True,
+                            "notices": delete_notices,
                         }
                     )
                     return 0
@@ -932,7 +1025,13 @@ def main(argv: list[str] | None = None) -> int:
                     ids = [assessment.context.parent_session_id]
                 elif args.session_id:
                     ids = [args.session_id]
-                corpus = ClaudeLineageCorpus(environment)
+                try:
+                    corpus = ClaudeLineageCorpus(environment)
+                except CorpusLimitError as error:
+                    raise ClaudeParentIncompleteAnalysisError(
+                        str(error),
+                        details={"analysis": _incomplete_analysis_document(error)},
+                    ) from error
                 if args.all:
                     ids = [
                         p.stem
@@ -947,7 +1046,9 @@ def main(argv: list[str] | None = None) -> int:
                     from agent_fork.bulk_output import BulkSpool
 
                     bulk_spool = BulkSpool()
+                limit_breach_targets = 0
                 for sid in ids:
+                    freshness_failures_before = corpus.work.freshness_write_failures
                     try:
                         result = corpus.infer_one(sid)
                         recorded = False
@@ -961,6 +1062,34 @@ def main(argv: list[str] | None = None) -> int:
                                 recorded = True
                                 recorded_count += 1
                         document = {**result.document(), "recorded": recorded}
+                        this_target_freshness_failed = (
+                            corpus.work.freshness_write_failures
+                            > freshness_failures_before
+                        )
+                        if recorded and this_target_freshness_failed:
+                            existing_notices = document["notices"]
+                            assert isinstance(existing_notices, list)
+                            document["notices"] = [
+                                *existing_notices,
+                                "the record was written but will report "
+                                "freshness_unknown until the freshness index "
+                                "becomes writable",
+                            ]
+                        if bulk_spool is None:
+                            documents.append(document)
+                        else:
+                            bulk_spool.append(document)
+                    except (CorpusLimitError, TimeoutError) as error:
+                        failures += 1
+                        limit_breach_targets += 1
+                        limit_error = (
+                            error
+                            if isinstance(error, CorpusLimitError)
+                            else map_timeout_to_limit_error(error, corpus.limits)
+                        )
+                        document = _incomplete_analysis_document(
+                            limit_error, session_id=sid
+                        )
                         if bulk_spool is None:
                             documents.append(document)
                         else:
@@ -1020,6 +1149,14 @@ def main(argv: list[str] | None = None) -> int:
                         "summary": {"total": len(documents), "failed": failures},
                     }
                 )
+                if failures and limit_breach_targets:
+                    # non-`--all` path: exactly one target, and its failure
+                    # was specifically a corpus/candidate/time limit breach —
+                    # surface the typed code rather than a generic one.
+                    raise ClaudeParentIncompleteAnalysisError(
+                        "Claude transcript corpus exceeded a bounded analysis limit",
+                        details={"analysis": analysis},
+                    )
                 if failures and (args.record or args.record_all):
                     record_error = (
                         ClaudeParentNotRecordableError
@@ -1094,6 +1231,30 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     )
                 print(f"lineage: {terminal_text(inspection.lineage_status)}")
+                pi = inspection.parent_inference
+                if pi.status not in {"not_consulted", "absent"}:
+                    if pi.status == "superseded":
+                        print(f"parent inference: {terminal_text(pi.status)}")
+                    else:
+                        detail_bits = []
+                        if pi.analyzed_at is not None:
+                            detail_bits.append(
+                                f"analyzed {terminal_text(pi.analyzed_at)}"
+                            )
+                        if pi.changed_sources:
+                            detail_bits.append(
+                                f"{', '.join(pi.changed_sources)} transcript changed"
+                            )
+                        detail = f"  ({'; '.join(detail_bits)})" if detail_bits else ""
+                        parent_id = (
+                            terminal_text(pi.parent_session_id)
+                            if pi.parent_session_id is not None
+                            else "-"
+                        )
+                        print(
+                            f"parent inference: {terminal_text(pi.status)} "
+                            f"{parent_id}{detail}"
+                        )
             for notice in inspection.notices:
                 print(f"notice: {terminal_text(notice)}")
             print(f"directory: {terminal_text(inspection.directory)}")
@@ -1208,6 +1369,7 @@ def main(argv: list[str] | None = None) -> int:
                     "keep_branch": args.keep_branch,
                     "dry_run": args.dry_run,
                     "notices": list(result.notices),
+                    "retained_metadata": result.retained_metadata,
                 }
                 if args.dry_run:
                     document["details"] = result.details.document()
