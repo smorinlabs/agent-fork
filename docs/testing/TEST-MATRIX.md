@@ -10,7 +10,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · agent-signal = absent | incomplete-marker | incomplete-id | detected-claude | detected-codex | ambiguous-partial-marker | ambiguous-partial-id | ambiguous-complete · agent-mode = auto | strict | git-only · backend = git (jj reserved, no v1 values).
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
-- Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
+- Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04, T-RBK-08/09, T-INC-16, and T-CLI-53 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
 - Total rows: 513 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
@@ -359,6 +359,8 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 | T-RBK-05 | producer-pipe-failure, verify on — fake `git` where `diff --cached` exits 1 with empty stdout → materialize fails, rollback runs, exit 1 | baseline | F | live | REQ-22; spec §5; spec §6.6 |
 | T-RBK-06 | producer-pipe-failure, verify off (`--no-verify`) — same fake failure → still fails, rollback runs, exit 1 | baseline | F | live | REQ-22; spec §5; spec §6.6 |
 | T-RBK-07 | interrupted Git cleanup observes an already-exited process before a redundant process-group signal, preserving the original interruption instead of masking it with macOS `EPERM` | baseline | U | live | REQ-22; macOS process-group regression |
+| T-RBK-08 | A12 Gate-1 fact 6 — SIGINT while the setup hook runs → exit 130, clean rollback, and no surviving process from the hook's group (its backgrounded grandchild is not reparented to PID 1) | baseline | F | live | REQ-22; P02 A12 |
+| T-RBK-09 | A12 Gate-1 fact 6 — SIGTERM while the setup hook runs → exit 143, with the same rollback and process-group reaping guarantees | baseline | F | live | REQ-22; P02 A12 |
 
 ---
 

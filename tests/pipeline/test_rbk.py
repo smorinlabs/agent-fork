@@ -163,6 +163,115 @@ def test_signal_mid_materialize_exits_with_signal_code_and_rolls_back(
     assert not creation.path.exists()
 
 
+@pytest.mark.requires_process_group_signals
+@pytest.mark.parametrize(
+    "sent,expected",
+    [
+        pytest.param(
+            signal.SIGINT, 130, id="T-RBK-08", marks=pytest.mark.matrix("T-RBK-08")
+        ),
+        pytest.param(
+            signal.SIGTERM, 143, id="T-RBK-09", marks=pytest.mark.matrix("T-RBK-09")
+        ),
+    ],
+)
+def test_signal_mid_setup_hook_reaps_the_hook_group_and_rolls_back(
+    repo_scenario, sent, expected
+):
+    """T-RBK-08 / T-RBK-09 — A12 Gate-1 fact 6.
+
+    Given:  a setup hook that backgrounds a long-lived child, then blocks, and a
+            SIGINT or SIGTERM delivered to the CLI while it runs
+    Expect: exit 130 / 143, the worktree rolled back, and the hook's own
+            grandchild gone rather than reparented to PID 1
+    Source: REQ-22; P02 A12
+    """
+    from agent_fork.include import SetupHookPolicy, run_setup_hook
+    from agent_fork.repository import create_worktree_at_anchor
+    from agent_fork.rollback import OperationInterrupted, run_with_rollback
+
+    world = repo_scenario()
+    hook = world.parent_path / ".agent-fork/worktree-setup.sh"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    # Both sentinels live in the parent repository, not the child: rollback
+    # removes the child worktree before this test can read anything from it.
+    hook.write_text(
+        "#!/bin/sh\n"
+        "sleep 120 &\n"
+        'printf "%s" "$!" > "$REPO_ROOT/grandchild.pid"\n'
+        ': > "$REPO_ROOT/hook-ready"\n'
+        "sleep 120\n"
+    )
+    hook.chmod(0o755)
+    subprocess.run(
+        ["git", "-C", str(world.parent_path), "add", "."],
+        env=world.env,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(world.parent_path), "commit", "-m", "add blocking hook"],
+        env=world.env,
+        capture_output=True,
+        check=True,
+    )
+    creation = create_worktree_at_anchor(
+        world.parent_path,
+        "fork/rollback",
+        world.parent_path.parent / "hook-signal-child",
+        env=world.env,
+    )
+    ready = world.parent_path / "hook-ready"
+    recorded = world.parent_path / "grandchild.pid"
+
+    pid = os.fork()
+    if pid == 0:
+        try:
+            run_with_rollback(
+                creation,
+                lambda: run_setup_hook(
+                    world.parent_path,
+                    creation.path,
+                    anchor=creation.anchor,
+                    policy=SetupHookPolicy(mode="tracked", timeout_seconds=120),
+                    env=world.env,
+                ),
+                env=world.env,
+            )
+        except OperationInterrupted as error:
+            os._exit(error.exit_code)
+        os._exit(1)
+    for _ in range(500):
+        if ready.exists():
+            break
+        time.sleep(0.01)
+    assert ready.exists(), "setup hook never signalled readiness"
+    grandchild = int(recorded.read_text())
+    os.kill(pid, sent)
+    status = None
+    for _ in range(500):
+        waited, candidate = os.waitpid(pid, os.WNOHANG)
+        if waited:
+            status = candidate
+            break
+        time.sleep(0.01)
+    if status is None:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        pytest.fail("signal worker did not exit within five seconds")
+    assert os.waitstatus_to_exitcode(status) == expected
+    assert not creation.path.exists()
+    for _ in range(200):
+        try:
+            os.kill(grandchild, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.01)
+    else:
+        os.kill(grandchild, signal.SIGKILL)
+        pytest.fail(f"setup-hook grandchild {grandchild} survived the interrupt")
+
+
 @pytest.mark.parametrize(
     "verify",
     [
