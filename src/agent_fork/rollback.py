@@ -28,7 +28,10 @@ def run_with_rollback(creation, operation, *, env=None):
             rollback_worktree(creation, env=env)
             raise
 
-    return interrupts.run_with_interruption_handler(operation_with_rollback)
+    return interrupts.run_with_interruption_handler(
+        operation_with_rollback,
+        message="interrupted after rollback",
+    )
 
 
 def manual_recovery_command(creation: WorktreeCreation) -> str:

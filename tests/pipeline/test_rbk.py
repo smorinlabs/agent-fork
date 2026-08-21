@@ -1,5 +1,6 @@
 """G-RBK — rollback, producer failure, and real signal tests."""
 
+import json
 import os
 import signal
 import subprocess
@@ -282,45 +283,161 @@ def test_sigterm_mid_cleanup_kills_git_and_reports_partial_removal(repo_scenario
     from agent_fork.registry import find_candidates
     from conftest import origin, shim_git
 
-    world = repo_scenario("plain@main", remote=origin())
-    forked = fork(
-        ForkRequest(
-            parent=world.parent_path,
-            destination=world.parent_path.parent / "cleanup-signal-child",
-            name="cleanup-signal",
-            branch="fork/cleanup-signal",
-            agent=AgentContext("claude", "11111111-1111-1111-1111-111111111111"),
-            agent_executable="/fake/claude",
-            agent_version_output="Claude Code 2.1.220",
-            git_version_output="git version 2.43.0",
-            child_session_id="33333333-3333-3333-3333-333333333333",
-        ),
-        env=world.env,
-    )
+    for machine in (False, True):
+        case = "json" if machine else "text"
+        name = f"cleanup-signal-{case}"
+        world = repo_scenario("plain@main", remote=origin())
+        forked = fork(
+            ForkRequest(
+                parent=world.parent_path,
+                destination=world.parent_path.parent / f"{name}-child",
+                name=name,
+                branch=f"fork/{name}",
+                agent=AgentContext("claude", "11111111-1111-1111-1111-111111111111"),
+                agent_executable="/fake/claude",
+                agent_version_output="Claude Code 2.1.220",
+                git_version_output="git version 2.43.0",
+                child_session_id="33333333-3333-3333-3333-333333333333",
+            ),
+            env=world.env,
+        )
 
-    with shim_git(park_at="worktree remove --force") as shim:
+        with shim_git(park_at="worktree remove --force") as shim:
+            environment = dict(world.env)
+            environment["PATH"] = f"{shim.directory}{os.pathsep}{environment['PATH']}"
+            executable = Path(sys.executable).with_name("agent-fork")
+            arguments = [str(executable), "cleanup", name, "--yes"]
+            if machine:
+                arguments.append("--json")
+            process = subprocess.Popen(
+                arguments,
+                env=environment,
+                cwd=world.parent_path,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+            git_pid = None
+            try:
+                for _ in range(500):
+                    if shim.ready.exists():
+                        break
+                    time.sleep(0.01)
+                assert shim.ready.exists(), "cleanup did not reach git worktree remove"
+                git_pid = int(shim.parked_pid.read_text())
+
+                os.kill(process.pid, signal.SIGTERM)
+                stdout, stderr = process.communicate(timeout=5)
+
+                git_alive = True
+                for _ in range(500):
+                    try:
+                        os.kill(git_pid, 0)
+                    except ProcessLookupError:
+                        git_alive = False
+                        break
+                    time.sleep(0.01)
+
+                assert not git_alive, "Git continued running after cleanup exited"
+                assert process.returncode == 143
+                assert stdout == b""
+                if machine:
+                    error = json.loads(stderr)["error"]
+                    assert error == {
+                        "code": "interrupted_sigterm",
+                        "details": {"exit_code": 143, "signal": "SIGTERM"},
+                        "message": (
+                            "cleanup was interrupted and removal may be partial; "
+                            "if the worktree is gone but its registry record "
+                            "remains, run `agent-fork prune`"
+                        ),
+                    }
+                else:
+                    assert (
+                        b"cleanup was interrupted and removal may be partial" in stderr
+                    )
+                    assert b"agent-fork prune" in stderr
+                assert forked.creation.path.exists()
+                assert find_candidates(name, env=world.env)
+            finally:
+                shim.release.touch()
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                if git_pid is not None:
+                    for _ in range(100):
+                        try:
+                            os.kill(git_pid, 0)
+                        except ProcessLookupError:
+                            break
+                        time.sleep(0.01)
+                    else:
+                        os.killpg(git_pid, signal.SIGKILL)
+
+
+@pytest.mark.requires_process_group_signals
+@pytest.mark.matrix("T-RBK-13")
+def test_signal_during_git_spawn_registration_kills_child(repo_scenario, monkeypatch):
+    from agent_fork.git import run_git
+    from agent_fork.interrupts import (
+        OperationInterrupted,
+        run_with_interruption_handler,
+    )
+    from conftest import shim_git
+
+    world = repo_scenario()
+    spawn_root = Path(world.env["TMPDIR"]) / "spawn-registration"
+    spawn_root.mkdir()
+    spawn_ready = spawn_root / "ready"
+    spawn_release = spawn_root / "release"
+    real_popen = subprocess.Popen
+
+    with shim_git(park_at="status") as shim:
         environment = dict(world.env)
         environment["PATH"] = f"{shim.directory}{os.pathsep}{environment['PATH']}"
-        executable = Path(sys.executable).with_name("agent-fork")
-        process = subprocess.Popen(
-            [str(executable), "cleanup", "cleanup-signal", "--yes"],
-            env=environment,
-            cwd=world.parent_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-        )
+
+        def delayed_popen(*args, **kwargs):
+            child = real_popen(*args, **kwargs)
+            spawn_ready.touch()
+            while not spawn_release.exists():
+                time.sleep(0.01)
+            return child
+
+        monkeypatch.setattr(subprocess, "Popen", delayed_popen)
+        worker_pid = os.fork()
+        if worker_pid == 0:
+            try:
+                run_with_interruption_handler(
+                    lambda: run_git(world.parent_path, ["status"], env=environment)
+                )
+            except OperationInterrupted as error:
+                os._exit(error.exit_code)
+            os._exit(1)
+
         git_pid = None
+        worker_reaped = False
         try:
             for _ in range(500):
-                if shim.ready.exists():
+                if spawn_ready.exists() and shim.ready.exists():
                     break
                 time.sleep(0.01)
-            assert shim.ready.exists(), "cleanup did not reach git worktree remove"
+            assert spawn_ready.exists(), "Popen did not reach the registration window"
+            assert shim.ready.exists(), "Git child did not enter its parked command"
             git_pid = int(shim.parked_pid.read_text())
 
-            os.kill(process.pid, signal.SIGTERM)
-            stdout, stderr = process.communicate(timeout=5)
+            os.kill(worker_pid, signal.SIGTERM)
+            spawn_release.touch()
+
+            status = None
+            for _ in range(500):
+                waited, candidate = os.waitpid(worker_pid, os.WNOHANG)
+                if waited:
+                    status = candidate
+                    worker_reaped = True
+                    break
+                time.sleep(0.01)
+            assert status is not None, "signal worker did not exit within five seconds"
+            assert os.waitstatus_to_exitcode(status) == 143
 
             git_alive = True
             for _ in range(500):
@@ -330,28 +447,20 @@ def test_sigterm_mid_cleanup_kills_git_and_reports_partial_removal(repo_scenario
                     git_alive = False
                     break
                 time.sleep(0.01)
-
-            assert not git_alive, "Git continued running after cleanup exited"
-            assert process.returncode == 143
-            assert stdout == b""
-            assert b"cleanup was interrupted and removal may be partial" in stderr
-            assert b"agent-fork prune" in stderr
-            assert forked.creation.path.exists()
-            assert find_candidates("cleanup-signal", env=world.env)
+            assert not git_alive, "Git survived the spawn-to-registration signal window"
         finally:
+            spawn_release.touch()
             shim.release.touch()
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
+            if not worker_reaped:
+                waited, _ = os.waitpid(worker_pid, os.WNOHANG)
+                if not waited:
+                    os.kill(worker_pid, signal.SIGKILL)
+                    os.waitpid(worker_pid, 0)
             if git_pid is not None:
-                for _ in range(100):
-                    try:
-                        os.kill(git_pid, 0)
-                    except ProcessLookupError:
-                        break
-                    time.sleep(0.01)
-                else:
+                try:
                     os.killpg(git_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
 
 @pytest.mark.parametrize(

@@ -747,6 +747,9 @@ Under any machine format, a failure prints a single error object on stderr:
 Codes are stable compatibility identifiers; messages may gain detail without
 changing their meaning. Error objects may add a documented `details` object;
 cleanup guard refusals use the cleanup schema shown above.
+Interruption errors use `interrupted_sigint` or `interrupted_sigterm`; their
+`details` object contains the signal name and resulting process exit code, for
+example `{"exit_code":143,"signal":"SIGTERM"}`.
 
 | Exit | Meaning | Codes |
 |---|---|---|
