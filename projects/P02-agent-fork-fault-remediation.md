@@ -468,14 +468,50 @@ repository-controlled text raw).
   strict exit code are subject to the CLI Design Standard check. Full record,
   including the probe matrix and three review rounds: the
   [A5 design doc](../docs/superpowers/plans/2026-08-20-p02-a5-skip-and-race-policy.md).
-- **A6 — Dirty submodules likely make the repo unforkable by default.**
-  `git worktree add` leaves submodules uninitialized; `materialize.py:89-99`
-  only emits a (misleading "copied opaquely") notice; parent ` M vendor/mod`
-  status has no child counterpart → `exact-copy-status` fails → rollback.
-  Tests cover only the clean-submodule case. Proposed direction:
-  verification exemption for submodule status lines at minimum. Impact:
-  medium-high for submodule users. Type: correctness fix. Reasoned, not yet
-  reproduced — verification gate must build the dirty-submodule repro first.
+- **A6 — Submodule working-tree state makes the repo unforkable, and is
+  silently dropped when verification is off.** Rewritten 2026-08-17 to match
+  the probe matrices; see the [design doc](../docs/superpowers/plans/2026-08-17-p02-a6-dirty-submodules.md).
+  Reproduced end to end: an edited file, an untracked file, or an unstaged
+  submodule advance all yield parent ` M vendor/module` with no child
+  counterpart, and the fork fails and rolls back. **Two rungs fail, not one** —
+  `exact-copy-status` and also `content-match`, because
+  `collect_inventory` (`content.py:158`) lists `vendor/module` as unstaged, so
+  a status-only exemption would not have sufficed; the original entry predates
+  that rung. **Narrower than first written**: a submodule advance *staged* in
+  the parent already forks correctly (the gitlink travels in the
+  `diff-index --cached` patch), so the fault is confined to working-tree state.
+  Rollback is clean. Under `--no-verify` the fork succeeds and drops the state
+  silently, while `materialize.py:109` claims "submodules copied opaquely" over
+  an empty directory. Direction (owner decision 2026-08-17, superseding
+  "verification exemption at minimum"): **carry submodules identically by
+  default**, opt out with `--no-with-submodules`. Feasibility shown across eight
+  local, depth-1, status-comparison cells under a manual prototype — not yet
+  proven in production shape (gate 4 finding 5). Impact: medium-high for
+  submodule users. Type: correctness fix, feature-shaped by owner decision.
+
+  **Split into two remediations (owner decision 2026-08-20)**, after two gate-4
+  passes returned NOT-READY on integration complexity rather than on the carry
+  mechanism, which matched on 8 of 8 cells at first attempt:
+  - **A6a — unblock forking.** `--ignore-submodules` filtering at
+    `verify.py:103`, `verify.py:146`/`pipeline.py:114` (matched pair), and the
+    unstaged inventory listing at `content.py:158`, plus a notice that names
+    what was not carried instead of claiming submodules were "copied opaquely"
+    over an empty directory. Already validated against real child worktrees:
+    the edited-file, untracked-file, and mixed-dirt cells go from rollback to
+    success, and the staged-gitlink case keeps the check it passes today.
+    The unstaged-gitlink-advance case gets a typed `PreconditionError` refusal
+    before any mutation (exit 5, owner decision 2026-08-20). That guard is
+    **conditional, not permanent**: matrix 2 shows the case forks correctly once
+    submodules are carried, so it is written against a "submodules not carried"
+    condition and survives A6b only on the `--no-with-submodules` path.
+    A6a's own gate-4 pass is waived (owner decision 2026-08-20); gate 6 is
+    unchanged.
+  - **A6b — carry submodules identically.** The full recipe, recursive
+    snapshot, `config_pins` at the `run_git` chokepoint, and recursive
+    verification, per the design doc. Requires a further gate-4 pass.
+  Rationale: A6a ends the unforkable-repository fault on validated evidence in
+  days; A6b keeps the owner's carry-by-default decision intact and gets the
+  review depth two passes say it needs.
 - **A7 — Stale registry entries are uncleanable; no prune/repair verb.**
   Reproduced: hand-delete a fork worktree, then `cleanup <name> --yes` dies
   with raw git `runtime_error` (`cleanup.py:126-166` runs `git -C
@@ -586,8 +622,8 @@ swept with the rest.
 - [x] [P02-T04] A4 fix per process (revised scope) — TDD, RED first: the ambiguity row demonstrated the real defect (`parse_version` returned the banner's `(10, 2, 3)` instead of the CLI's `2.1.233`). Shipped: `version_tokens` + ambiguity notice, `recipe_flags`/`missing_recipe_flags`/`read_help` with a warn-level probe in `preflight_agent` (detection pre-mutation; notice rendered with the fork result), `.`-guard on `_VERSION`, and T-PRE-21..26. Test-stub fidelity fix in `tests/cli/test_out.py` — the fake CLI answered `--help` with its version string, so the probe correctly reported the *stub's* missing flags; the stub now serves real help (the TS04 review independently confirmed this as fidelity repair, not evidence suppression). Post-review fixes: `UnicodeDecodeError` caught in `read_help`; option-declaration parsing so deprecation prose cannot prove a flag survives; three-state unverified notice; ambiguity counted across stdout and stderr; `doctor` drift scoped to the selected agent so an unused CLI cannot change the exit contract; T-PRE-26 tightened to equality; T-PRE-27/28 and T-CLI-26 added. PR #37 review added T-PRE-29 (the unverified notice named `codex --help` while the probe ran `codex fork --help`). Final state at merge: `just all` green, 430 passed, 1 skipped; `just check-matrix` clean (earlier snapshots in this item's history recorded 415/419/424 as the suite grew — the merge figure is the one to trust)
 - [ ] [P02-TS05] A5 adversarial verification (incl. Codex): socket/fifo, unreadable-file, and parent-race rollback repros
 - [ ] [P02-T05] A5 fix per process
-- [ ] [P02-TS06] A6 adversarial verification (incl. Codex): dirty-submodule fork repro (currently reasoned, not reproduced)
-- [ ] [P02-T06] A6 fix per process
+- [x] [P02-TS06] A6 adversarial verification (incl. Codex): CONFIRMED-WITH-CORRECTIONS 2026-08-17 — matrix 1 reproduced the rollback across four dirty shapes and refuted the "unforkable by default" breadth (staged gitlink advance already forks); matrix 2 showed identical carry is feasible across eight local depth-1 cells. Codex second lens returned CONFIRM-WITH-CORRECTIONS; its findings 5 and 6 narrowed the verdict wording and corrected the cleanup evidence provenance. Register entry rewritten; see the [design doc](../docs/superpowers/plans/2026-08-17-p02-a6-dirty-submodules.md)
+- [~] [P02-T06] A6 remediation umbrella — close after **A6a** (unblock: `--ignore-submodules` filtering plus an accurate notice; evidence already validated) and **A6b** (carry submodules identically by default, `--with-submodules` / `--no-with-submodules`, owner decision 2026-08-17) both merge. Split 2026-08-20 after two gate-4 passes returned NOT-READY on integration complexity, not on the carry mechanism. Plan and both gate-4 reports in the [design doc](../docs/superpowers/plans/2026-08-17-p02-a6-dirty-submodules.md)
 - [ ] [P02-TS07] A7 adversarial verification (incl. Codex): stale-entry dead-end repro (already reproduced once; re-verify + bound the fix)
 - [ ] [P02-T07] A7 fix per process
 - [x] [P02-TS08] A8 adversarial verification (incl. Codex) — **CONFIRMED-WITH-CORRECTIONS 2026-08-17.** Executed dry-run/real pairs reproduced collision suffix drift, local-midnight name drift, cross-confirmation anchor drift, same-count carried-file substitution, and distinct dry-run/real Claude child UUIDs; an instrumented real fork also observed three independent `HEAD^{commit}` resolutions and produced a detached-derived name from one commit while materializing another. P01-T51 covers only candidate-name drift and is absorbed here. The proposed `{name, branch, destination, anchor, child_session_id}` tuple is incomplete: the immutable execution plan must also bind carry mode plus the complete approved source-state inventory or a collision-resistant digest and refuse pre-mutation on drift. Owner declined that remedy in T08; confirmation-boundary drift remains a known limitation.
