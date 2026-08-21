@@ -222,7 +222,8 @@ agent-fork cleanup try-redis --yes   # remove one when you are done
 2. **Anchor** to the parent's current commit and create the fork branch.
 3. **Create** a linked Git worktree at the destination.
 4. **Copy** staged, then unstaged, then untracked files into it, preserving
-   symlinks and the executable bit.
+   symlinks and the executable bit — then, per gitlink, carry each submodule
+   the same way, recursively (see [Submodules](#submodules)).
 5. **Verify** that the new worktree matches what was promised — Git-visible
    state, and the contents themselves: staged entries, file types, permissions,
    symlink targets, and a checksum of every carried file. The parent is
@@ -410,6 +411,7 @@ still exit `0`; a dirty or unpushed guard refusal exits `5`.
 | `--worktree-name COMPONENT` | Replace only the derived directory name |
 | `--with-state` / `--no-with-state` | Carry staged, unstaged, and untracked state (default: enabled) |
 | `--with-ignored` / `--no-with-ignored` | Also carry ignored files (default: disabled) |
+| `--with-submodules` / `--no-with-submodules` | Carry each submodule's working-tree state, recursively (default: enabled) |
 | `--verify` / `--no-verify` | Verify the completed fork (default: enabled) |
 | `--codex-session-name-resolution` / `--no-codex-session-name-resolution` | Resolve renamed Codex sessions (default: enabled) |
 | `--force` | Override only the Git-version floor |
@@ -423,6 +425,7 @@ agent-fork fork review-auth                 # auto-detect agent or Git-only
 agent-fork fork terminal-copy --no-agent    # explicitly Git-only
 agent-fork fork session-copy --require-agent
 agent-fork fork review-auth --with-ignored
+agent-fork fork review-auth --no-with-submodules
 agent-fork fork --no-with-state --dry-run
 agent-fork fork --no-with-state --dry-run -o json
 agent-fork fork review-auth -o json
@@ -499,6 +502,7 @@ Configuration is TOML, discovered per the XDG/project precedence documented in
 |---|---|---|---|
 | `with_state` | `true` | — | Carry staged, unstaged, and untracked files |
 | `with_ignored` | `false` | — | Also carry ignored files; implies `with_state` |
+| `with_submodules` | `true` | — | Carry each submodule's state recursively; does not imply `with_state` |
 | `branch_prefix` | `"fork/"` | — | Whitespace falls back to the default |
 | `worktree_location` | `"sibling"` | — | `sibling`, `central` (XDG data), `subdirectory`, or a path template |
 | `agent_mode` | `"auto"` | `AGENT_FORK_AGENT_MODE` | `auto`, `strict`, or `git-only` |
@@ -554,6 +558,37 @@ with `REPO_ROOT` and `WORKTREE_PATH` set.
   where applicable.
 - **No network, no telemetry.** `agent-fork` makes no runtime network calls and
   collects no data ([details](#telemetry-and-networking)).
+
+## Submodules
+
+By default, `agent-fork` carries a dirty submodule the same way it carries any
+other uncommitted state: the child sees the same staged, unstaged, and
+untracked content inside the submodule that the parent had, at every nesting
+depth. This includes submodules the parent's own index does not record as
+carriable on its own — for example a submodule advanced to a commit only its
+own `HEAD` knows about, which a plain `git worktree add` cannot represent.
+
+Per submodule, the recipe is: skip it if the parent itself never initialized
+it; otherwise initialize the child's copy offline, from the parent's own
+checkout rather than the remote; restore only the child's own
+`remote.origin.url` (never `git submodule sync`, which would corrupt the
+parent's shared configuration from a linked worktree); check out the parent
+submodule's exact commit, detached; copy its working-tree state the same way
+the top-level worktree's state is copied; then recurse into any submodules
+nested inside it. Verification re-checks the same signals recursively —
+initialization, commit identity, detached state, and content — so a submodule
+carried to the wrong commit fails the fork rather than passing silently.
+
+The one fidelity limit: only `remote.origin.url` is restored inside each
+carried submodule. Other configuration — fetch refspecs, sparse-checkout
+settings, hooks — is whatever the fresh `git submodule add` step produced, not
+a copy of the parent's own local overrides. A completed fork's notices name
+this limit and list what was carried.
+
+`--no-with-submodules` reproduces the older, pre-carry behavior: submodules
+are left as opaque gitlinks, a notice explains what was not carried, and an
+unstaged submodule advance the child cannot represent is refused before any
+mutation (`submodule_unrepresentable`, exit 5) rather than silently dropped.
 
 ## Compatibility policy
 

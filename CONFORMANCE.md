@@ -91,7 +91,7 @@ open implementation finding.
 | REQ-22 | Implemented | G-RBK failure, manual recovery, producer, SIGINT, and SIGTERM rows |
 | REQ-23 | Implemented | G-VER full ladder, ignored-aware comparison, opt-out, rollback |
 | REQ-24 | Implemented | G-INC include precedence and non-fatal setup hook |
-| REQ-25 | Implemented | Opaque gitlink handling and submodule notices in G-MAT |
+| REQ-25 | Implemented | Recursive submodule carrying by default (`with_submodules`) via the G-MAT recipe and the G-VER recursive verification ladder; `--no-with-submodules` falls back to the original opaque-gitlink, warn-only behavior |
 | REQ-26 | Implemented | G-DET ambient strict detection plus T-DET-13..20 exact shared signal truth table; the direct skill selects it through `--require-agent`; pre-0.95 Codex ladder remains tombstoned per A7 |
 | REQ-27 | Implemented | G-PRE CLI/version/rollout matrix |
 | REQ-28 | Implemented + real-validated | G-EMT locked templates; E1–E3 rerun 2026-08-10 |

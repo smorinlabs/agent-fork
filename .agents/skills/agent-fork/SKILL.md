@@ -297,10 +297,13 @@ is unsupported and must refuse before normalization and before any CLI call.
   /agent-fork --session-only
   ```
 
-Advanced destination, state-copy, verification, identity, output, clipboard,
-dry-run, and force controls are direct-CLI use cases, not skill arguments
-(this restricts what the user may pass to the skill, not the confirmation's
-own dry-run call above).
+Advanced destination, state-copy, submodule-copy, verification, identity,
+output, clipboard, dry-run, and force controls are direct-CLI use cases, not
+skill arguments (this restricts what the user may pass to the skill, not the
+confirmation's own dry-run call above). Submodules are carried recursively by
+default (`--no-with-submodules` opts out); a dirty submodule counts as at
+most one entry in `plan.files_to_carry` above (its own gitlink path) — the
+individual files changed inside it are not broken out separately.
 
 ## Normalize an explicit or recommended name
 
