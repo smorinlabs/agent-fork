@@ -34,6 +34,11 @@ LEFTOVER_NOTICE = (
 )
 _REAP_GRACE_SECONDS = 1.0
 _POLL_SLICE_SECONDS = 0.05
+# Exactly the signals `rollback.run_with_rollback()` handles, blocked around
+# the spawn so an interrupt cannot land between the hook starting and the
+# record that makes it reachable. Blocking is per-thread and this runs on the
+# main thread, which is where CPython runs Python-level handlers.
+_HANDLED_SIGNALS = frozenset({signal.SIGINT, signal.SIGTERM})
 
 # The active hook group, mirroring `git._ACTIVE` so `rollback.interrupt()`
 # can reach a running hook's process group during signal cleanup.
@@ -487,6 +492,15 @@ def run_setup_hook(
     stdout = stderr = b""
     outcome = "completed"
     try:
+        # The spawn and the registration are one critical section, held under a
+        # blocked mask. `process = Popen(...)` evaluates the spawn before
+        # binding the name, and CPython runs signal handlers between bytecodes,
+        # so a handler firing in that gap would find a running hook registered
+        # nowhere — reachable by neither `rollback.interrupt()` nor the ladder
+        # below. Blocking defers such a signal to the `SIG_SETMASK` below,
+        # which restores whatever mask the caller had rather than assuming it
+        # was empty.
+        restore_mask = signal.pthread_sigmask(signal.SIG_BLOCK, _HANDLED_SIGNALS)
         try:
             process = subprocess.Popen(
                 [str(hook)],
@@ -500,12 +514,27 @@ def run_setup_hook(
                 # is DEVNULL rather than an inherited TTY the hook would block
                 # on.
                 start_new_session=True,
+                # A signal mask is inherited across fork and survives exec, so
+                # without this the hook would run unable to receive the reap
+                # ladder's SIGTERM at all — only the SIGKILL escalation would
+                # land, and a hook trapping SIGTERM to shut down in order would
+                # never see it. `preexec_fn` runs in the forked child before
+                # exec; its documented hazard is other threads holding locks at
+                # fork time, and agent-fork spawns hooks from a single-threaded
+                # CLI.
+                preexec_fn=lambda: signal.pthread_sigmask(
+                    signal.SIG_SETMASK, restore_mask
+                ),
             )
         except OSError as error:
             spawn_error = error
         else:
             group = _HookGroup(process)
             _ACTIVE.group = group
+        finally:
+            # Inside the `except BaseException` block, so the signal delivered
+            # right here lands on the reap path with the group registered.
+            signal.pthread_sigmask(signal.SIG_SETMASK, restore_mask)
         if process is not None and group is not None:
             stdout, stderr, outcome = _collect_output(
                 process,

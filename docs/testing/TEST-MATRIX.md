@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04, T-RBK-08/09, T-RBK-10, T-INC-16, T-INC-17, T-CLI-53, T-CLI-54, and T-OUT-27 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 538 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 540 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -468,6 +468,8 @@ Varying axes: none of the shared four vary (baseline pinned).
 | T-INC-16 | A12 Gate-1 fact 2 — a hook exceeding its timeout is killed with its whole process group (its backgrounded grandchild is gone), `timed_out=true`, and the fork still succeeds | baseline | F | live | P02 A12 |
 | T-INC-17 | A12 gate-6 — a hook that exits 0 after detaching a `setsid()` process keeping its pipes open ends in seconds rather than at the timeout, reports `timed_out=false` with its real exit code, and discloses `descendants_cleared=false` | baseline | F | live | P02 A12 gate-6 |
 | T-INC-18 | A12 gate-6 round 3 — a hook process group observed empty once is retired for good: neither the reap ladder's SIGKILL escalation nor `terminate_active_setup_hook()` signals that PID again, so a reused PID cannot be killed | baseline | F | live | P02 A12 gate-6 round 3; REQ-22 |
+| T-INC-19 | A12 gate-6 round 3 — SIGINT/SIGTERM are blocked across the spawn-and-register critical section, so a signal raised while `Popen` is returning is deferred until the hook is in `_ACTIVE` and is then reaped, not leaked; the caller's mask is restored afterwards | baseline | F | live | P02 A12 gate-6 round 3; REQ-22 |
+| T-INC-20 | A12 gate-6 round 3 — the hook itself runs with SIGINT and SIGTERM unblocked: the spawn-time mask is inherited across fork and survives exec, so it is restored in the child or the reap ladder's SIGTERM could never be delivered | baseline | F | live | P02 A12 gate-6 round 3; REQ-24 |
 
 ---
 

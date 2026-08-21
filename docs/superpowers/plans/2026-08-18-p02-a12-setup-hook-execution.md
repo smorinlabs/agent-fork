@@ -556,22 +556,53 @@ the hook already did.
 Signal path: `rollback.interrupt()` fires inside `communicate()`, calls both
 `terminate_active_git()` and `terminate_active_setup_hook()`, and raises
 `OperationInterrupted`. `run_setup_hook()` wraps `communicate()` in
-`except BaseException: _reap(process); raise` with a `finally` that clears the
+`except BaseException: _reap(group); raise` with a `finally` that clears the
 active slot — again the `run_git` shape. `terminate_active_setup_hook()` is
 load-bearing on its own, not merely the early half of the ladder: when the
 hook's own shell has already exited, `run_setup_hook()` can be past its ladder
 while group members it left behind are still running, and this call is what
 reaches them (`T-RBK-10`).
 
-**The `Popen`-to-registration window is inside the protected region.** The spawn
-and the `_ACTIVE` registration sit in one `try`, with the registration in a
-`finally`, all of it enclosed by the `except BaseException: _reap(...)` block.
-An interrupt arriving between `Popen` returning and the slot being written
-would otherwise leak the group — reachable by neither the handler nor the
-ladder. CPython runs a signal handler between bytecodes in the main thread, so
-enclosing the gap is the available lever; no OS-level signal blocking is
-involved. `git.py` has the same shape unprotected; that is pre-existing and
-out of scope for A12. `run_with_rollback()` then rolls back
+**The `Popen`-to-registration window is closed by blocking the handled
+signals** (amended 2026-08-21, gate-6 round 3). `process = Popen(...)`
+evaluates the spawn before binding the name, and CPython runs signal handlers
+between bytecodes, so a handler firing in that gap finds a running hook
+registered nowhere — reachable by neither `rollback.interrupt()` nor the reap
+ladder. An earlier revision of this section claimed that enclosing the gap in
+the reap-protected `try` closed it and that "no OS-level signal blocking is
+involved"; both were wrong. Enclosure does not help, because the `except
+BaseException` handler reaps the local `process`, which is exactly the name
+that is not yet bound.
+
+What closes it:
+
+```python
+restore_mask = signal.pthread_sigmask(signal.SIG_BLOCK, _HANDLED_SIGNALS)
+try:
+    process = subprocess.Popen(..., preexec_fn=<restore the child's mask>)
+    ...
+    _ACTIVE.group = _HookGroup(process)
+finally:
+    signal.pthread_sigmask(signal.SIG_SETMASK, restore_mask)
+```
+
+`_HANDLED_SIGNALS` is exactly `{SIGINT, SIGTERM}`, the pair
+`run_with_rollback()` handles. A signal arriving anywhere in the critical
+section stays pending until `SIG_SETMASK` restores the caller's own mask — one
+bytecode after the registration, and still inside the `except BaseException`
+block, so the deferred delivery lands on the reap path with the group
+registered. `SIG_SETMASK` with the saved mask rather than `SIG_UNBLOCK`: a
+caller who already had these signals blocked gets them back blocked.
+`pthread_sigmask` is available on both supported platforms (macOS, Linux).
+
+The `preexec_fn` is required, not decorative: a signal mask is inherited across
+fork and survives exec (verified on CPython 3.13, macOS), so without it the
+hook would run with SIGINT and SIGTERM blocked — the reap ladder's SIGTERM
+would never be deliverable and only the SIGKILL escalation would work
+(`T-INC-20`). Its documented hazard is other threads holding locks at fork
+time, and hooks are spawned from a single-threaded CLI. `git.py` has the
+unprotected shape; that is pre-existing and out of scope for A12.
+`run_with_rollback()` then rolls back
 and re-raises. Because the group is reaped *before* rollback, nothing is still
 writing into the directory being removed, which is precisely the ordering that
 produced the PID-1 orphan in Gate-1 fact 6.

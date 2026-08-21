@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import time
+from typing import Any, cast
 
 import pytest
 
@@ -564,7 +565,7 @@ def test_an_emptied_hook_group_is_never_signalled_again(monkeypatch):
     signalled = []
     alive = {"value": True}
     monkeypatch.setattr(include.os, "killpg", _killpg_recorder(signalled, alive))
-    group = include._HookGroup(_FakeHookProcess())
+    group = include._HookGroup(cast(Any, _FakeHookProcess()))
 
     assert include._reap(group) == ()
     assert signalled == [(424242, int(signal.SIGTERM))]
@@ -578,3 +579,115 @@ def test_an_emptied_hook_group_is_never_signalled_again(monkeypatch):
     include.terminate_active_setup_hook()
     assert include._reap(group) == ()
     assert signalled == [(424242, int(signal.SIGTERM))]
+
+
+@pytest.mark.matrix("T-INC-19")
+def test_a_signal_during_the_spawn_is_deferred_until_the_hook_is_registered(
+    tmp_path, monkeypatch
+):
+    """T-INC-19 — the spawn and the registration have to be one atomic step.
+
+    `process = subprocess.Popen(...)` evaluates the right-hand side — the
+    actual spawn — before binding the name, and CPython runs signal handlers
+    between bytecodes. A handler firing in that gap sees a hook that is running
+    but registered nowhere: `terminate_active_setup_hook()` cannot find it and
+    `run_setup_hook()`'s own reap-on-interrupt has no local to reap, so the
+    group leaks unsignalled. Blocking SIGINT and SIGTERM for the duration of
+    the critical section defers such a signal to immediately after
+    registration, which is the only lever that closes the gap rather than
+    narrowing it.
+
+    Given:  a `Popen` double that raises a real SIGTERM at this process the
+            instant the "spawn" returns, and a handler shaped like
+            `rollback.interrupt()`
+    Expect: the handler runs *after* registration, sees the hook in `_ACTIVE`,
+            and SIGKILLs its group; the mask is blocked across the spawn and
+            restored on the way out
+    Source: P02 A12 gate-6 round 3 review; REQ-22
+    """
+    from agent_fork import include
+    from agent_fork.rollback import OperationInterrupted
+
+    observed = {}
+    signalled = []
+    alive = {"value": True}
+    spawned = _FakeHookProcess()
+
+    def fake_popen(*args, **kwargs):
+        # The kernel has spawned the hook and this call is about to return —
+        # the name in `run_setup_hook()` is not bound yet. This is the window.
+        os.kill(os.getpid(), signal.SIGTERM)
+        observed["mask"] = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+        observed["registered_during_spawn"] = getattr(include._ACTIVE, "group", None)
+        return spawned
+
+    def handler(signum, frame):
+        observed["registered_at_delivery"] = getattr(include._ACTIVE, "group", None)
+        include.terminate_active_setup_hook()
+        raise OperationInterrupted(signum)
+
+    monkeypatch.setattr(include.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        include, "setup_hook_eligibility", lambda *args, **kwargs: ("eligible", None)
+    )
+    monkeypatch.setattr(include.os, "killpg", _killpg_recorder(signalled, alive))
+    hook = tmp_path / include.SETUP_HOOK_RELATIVE_PATH
+    hook.parent.mkdir(parents=True)
+    hook.write_text("#!/bin/sh\n")
+    hook.chmod(0o755)
+
+    entry_mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+    previous = signal.signal(signal.SIGTERM, handler)
+    try:
+        with pytest.raises(OperationInterrupted):
+            include.run_setup_hook(
+                tmp_path, tmp_path, anchor="HEAD", policy=include.SetupHookPolicy()
+            )
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+    assert {signal.SIGINT, signal.SIGTERM} <= observed["mask"]
+    assert observed["registered_during_spawn"] is None
+    assert observed["registered_at_delivery"] is not None
+    assert observed["registered_at_delivery"].process is spawned
+    assert (spawned.pid, int(signal.SIGKILL)) in signalled
+    assert getattr(include._ACTIVE, "group", None) is None
+    assert signal.pthread_sigmask(signal.SIG_BLOCK, set()) == entry_mask
+
+
+@pytest.mark.matrix("T-INC-20")
+def test_the_hook_itself_runs_with_the_ladder_s_signals_unblocked(repo_scenario):
+    """T-INC-20 — a blocked mask is inherited across fork and survives exec.
+
+    T-INC-19's fix blocks SIGINT and SIGTERM in the parent around the spawn, and
+    the child inherits whatever mask is in force when it is forked. Left alone,
+    the hook would run unable to receive the reap ladder's SIGTERM at all —
+    only the SIGKILL escalation would ever land, and a hook trapping SIGTERM for
+    an orderly shutdown would never see it. The mask is therefore restored in
+    the child.
+
+    Given:  a hook that prints its own blocked-signal set
+    Expect: neither SIGINT nor SIGTERM in it, and the parent's own mask
+            unchanged across the step
+    Source: P02 A12 gate-6 round 3 review; REQ-24
+    """
+    from agent_fork.pipeline import fork
+
+    world = repo_scenario()
+    dump = (
+        "import signal, sys; "
+        "sys.stdout.write(','.join(sorted(name.name for name in "
+        "signal.pthread_sigmask(signal.SIG_BLOCK, set()))) or 'none')"
+    )
+    _commit_support(
+        world,
+        hook=f"#!/bin/sh\n{shlex.quote(sys.executable)} -c {shlex.quote(dump)}\n",
+    )
+    entry_mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+    result = fork(_request(world, name="hook-mask"), env=world.env)
+    hook = result.setup_hook
+    assert hook.status == "ran"
+    assert hook.exit_code == 0, hook.stderr_tail
+    assert "SIGTERM" not in hook.stdout_tail
+    assert "SIGINT" not in hook.stdout_tail
+    assert signal.pthread_sigmask(signal.SIG_BLOCK, set()) == entry_mask
