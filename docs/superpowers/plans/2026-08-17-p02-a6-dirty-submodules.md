@@ -8,7 +8,7 @@ verification verdict through implementation sign-off.
 | 1. Adversarial verification | **CONFIRMED-WITH-CORRECTIONS** (2026-08-17) — matrices below; Codex second lens returned CONFIRM-WITH-CORRECTIONS, findings 5 and 6 narrow the verdict wording |
 | 3. Design doc | this document |
 | 4. Plan + adversarial plan review (incl. Codex) | **NOT-READY on four passes, closed by owner decision 2026-08-21 rather than pursuing a fifth.** Passes 1–3 summarized below this table's history (see git log on this file for the full text of each). Pass 4, 2026-08-21, scoped to the steps-6/7/8 merge: four findings, all absorbed — see the pass-4 commit (`d8099b9`) for the full list. Across four passes, zero mechanism-level defects survived past pass 2; every pass-3 and pass-4 finding was plan-prose precision, not a design flaw, and two of those findings were introduced by the prior round's own fix rather than pre-existing — the pattern of diminishing severity plus doc-editing risk outweighing review value is why the owner stopped here. Remaining precision risk is deferred to gate 6, which caught real bugs on A6a's own two rounds and reviews actual code rather than prose describing code that does not yet exist. |
-| 5. Implementation (TDD, subagent-driven) | **complete**, 2026-08-21 — all 8 steps landed (commits `1c760d8`..`641adec`, this branch); `just all` green (570 passed, 1 skipped), `just check-matrix` green, `just test-git-matrix` green against both system Git and Flox Git |
+| 5. Implementation (TDD, subagent-driven) | **complete**, 2026-08-21 — all 8 steps landed plus a coverage-gap-closure pass (commits `1c760d8`..`83ce5e6`, this branch); `just all` green (572 passed, 1 skipped), `just check-matrix` green, `just test-git-matrix` green against both system Git and Flox Git |
 | 6. Adversarial implementation review (incl. Codex) | pending |
 
 ## Gate 4 — adversarial plan review, first pass
@@ -423,6 +423,25 @@ matrix gains rows for `diff.ignoreSubmodules`, `submodule.<name>.ignore`,
 `submodule.recurse`, and `status.submoduleSummary` set in repository
 configuration — none of these may be assumed to hold their defaults or to be
 cloned.
+
+**Implementation-time finding (2026-08-21, during the coverage audit
+preceding gate 6).** `_SEMANTIC_PINS` ships with only `diff.ignoreSubmodules`.
+Verified empirically: an ambient `submodule.<name>.ignore=all` in the
+parent's own config defeats the `-c diff.ignoreSubmodules=none` pin on
+`collect_inventory`'s unstaged listing exactly as this section warned
+(command-line `--ignore-submodules=none` overrides it; the `-c` pin does
+not) — confirmed with a direct `git diff --name-only` comparison, pinned
+vs. unpinned vs. the explicit flag. But an end-to-end fork under this exact
+condition still carries and verifies correctly: `snapshot_submodules`,
+`carry_submodules`, and `verify_submodules` all enumerate via `.gitmodules`
+directly, and `capture_state` derives gitlink paths from the index
+(`GITLINK_MODE`), so none of the three correctness-critical paths trust
+`collect_inventory`'s filtered `unstaged` list for submodule membership. The
+gap is real but currently inert — its only observed effect is a cosmetic
+undercount in dry-run's `files_to_carry.unstaged`. `submodule.recurse` and
+`status.submoduleSummary` were not independently probed; `status.submoduleSummary`
+only affects git's human-readable long-format summary text, not `--porcelain`
+output, so it cannot affect any machine-parsed call agent-fork makes.
 
 ### Recursive verification (finding 2)
 
