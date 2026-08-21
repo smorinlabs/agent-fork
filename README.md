@@ -524,11 +524,25 @@ Configuration is TOML, discovered per the XDG/project precedence documented in
 |---|---|---|---|
 | `with_state` | `true` | — | Carry staged, unstaged, and untracked files |
 | `with_ignored` | `false` | — | Also carry ignored files; implies `with_state` |
-| `branch_prefix` | `"fork/"` | — | Whitespace falls back to the default |
-| `worktree_location` | `"sibling"` | — | `sibling`, `central` (XDG data), `subdirectory`, or a path template |
+| `branch_prefix` | `"fork/"` | — | Whitespace falls back to the default; must compose into a valid Git branch name |
+| `worktree_location` | `"sibling"` | — | `sibling`, `central` (XDG data), `subdirectory`, or a path template — see below |
 | `agent_mode` | `"auto"` | `AGENT_FORK_AGENT_MODE` | `auto`, `strict`, or `git-only` |
 | `verify` | `true` | — | Run the verification ladder |
 | `copy` | `false` | — | Copy the paste command to the clipboard |
+| `output` | `"text"` | `AGENT_FORK_OUTPUT` | `text` or `json`, for every command that resolves configuration |
+
+A path-template `worktree_location` may use only the bare placeholders
+`{repo-name}`, `{repo-root}` (the repo root's *parent* directory), `{branch}`,
+and `{branch-escaped}` — no format specifier, conversion, or subscript (e.g.
+`{repo-name:>10}`, `{repo-name!r}`, `{repo-root[0]}`), and the template must
+render to an absolute path (start with `/`, `~`, or `{repo-root}`). A `~user`
+form is rejected; a bare `~/` is accepted. `{session-id}` is not a supported
+placeholder — no session ID exists yet when the destination is derived, and
+none is planned to be added.
+
+If `config validate` (or `doctor`, or a dry run) rejects a value, the message
+names the exact key, the value, the allowed forms, and which of TOML/environment/flag
+supplied the winning value.
 
 Per-agent tables append arguments to the emitted command, each element
 individually shell-quoted:
@@ -544,8 +558,16 @@ session_name_resolution = true
 
 `AGENT_FORK_CONFIG` selects a config file, equivalent to `--config`.
 `AGENT_FORK_OUTPUT` selects `text` or `json` for commands that resolve effective
-configuration and defaults to `text`. The output setting is not a `[fork]`
-TOML key and cannot be changed with `config set`.
+configuration and defaults to `text`; it is equivalent to the `output` key
+above and can also be set via `config set output <text|json>`.
+
+Every effective key is addressable with `config get`/`config set`, using
+either the bare `[fork]` name (e.g. `branch_prefix`) or a fully dotted form
+(e.g. `fork.branch_prefix`, `agents.claude.extra_args`,
+`agents.codex.session_name_resolution`). The two `extra_args` arrays are
+readable but not settable from the CLI — `config set` on either refuses with
+the exact TOML file and table to hand-edit instead; general array-editing
+syntax is out of scope.
 
 An explicit flag beats config **and** suppresses dependent config settings — a
 config `with_ignored = true` combined with `--no-with-state` carries no state.

@@ -103,15 +103,17 @@ Positional `[NAME]` = the fork's identity (R2.3): seeds the default branch, deri
 |---|---|---|
 | `with_state` | `true` (tri-state) | agent-deck semantics incl. explicit-false honored |
 | `with_ignored` | `false` (tri-state) | implies `with_state`; #1354 default; flag `--with-ignored` |
-| `branch_prefix` | `"fork/"` | whitespace → default |
-| `worktree_location` | `"sibling"` | `sibling` \| `central` (XDG data) \| `subdirectory` \| path template; explicit value suppresses the mirror-parent heuristic (D5 note) |
+| `branch_prefix` | `"fork/"` | whitespace → default; must compose into a valid Git branch name (A11) |
+| `worktree_location` | `"sibling"` | `sibling` \| `central` (XDG data) \| `subdirectory` \| path template; explicit value suppresses the mirror-parent heuristic (D5 note); template grammar constrained per A11 (bare placeholders only, must render absolute) |
+| `agent_mode` | `"auto"` | `auto` \| `strict` \| `git-only` (REQ-45) |
 | `verify` | `true` | §4 ladder (D8: on by default) |
 | `copy` | `false` | clipboard (D9: ships in v1) |
+| `output` | `"text"` | `text` \| `json`; env `AGENT_FORK_OUTPUT`; flag/env/config parity (A11, REQ-14) |
 
   Plus per-agent tables (**D11 DECIDED — ships in v1**): `[agents.<name>] extra_args = []` — array of strings appended to that agent's emitted command, each element individually shell-quoted; config-only (no flag equivalent); visible in `--dry-run` and `-o json` output. No `session_name_template` key exists (D6: session name = fork name).
   **Dropped from agent-deck:** `docker` (out of scope), `worktree` toggle (v1 fork *is* a worktree — locked), `inherit_from_parent` (no parent-session runtime to mirror in a standalone CLI).
   **Amended 2026-08-08 (owner, test-architecture spec A12):** Cross-source conflicts: an explicit flag beats config **and suppresses dependent config settings** (config `with_ignored=true` + `--no-with-state` → no state carried). The RESEARCH §1.1 implication rule applies only within a single source.
-- **REQ-14** Env vars: curated `AGENT_FORK_*` subset only (R5.4) — `AGENT_FORK_CONFIG`, `AGENT_FORK_OUTPUT`; flag/env/config name parity via deterministic transform (R3.8). Host-agent env (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, …) is **read**, never required when flags are given.
+- **REQ-14** Env vars: curated `AGENT_FORK_*` subset only (R5.4) — `AGENT_FORK_CONFIG`, `AGENT_FORK_OUTPUT`, `AGENT_FORK_AGENT_MODE`; flag/env/config name parity via deterministic transform (R3.8). Host-agent env (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, …) is **read**, never required when flags are given. **Amended 2026-08-20 (A11):** a `config validate` exit 0 guarantees the static configuration is usable — every consumer (`config validate`/`get`/`set`, `doctor`, `fork` dry-run and real, `list`/`session`/`cleanup`) rejects the same invalid values identically, before mutation. Live conditions (destination collisions, existing branches, mid-operation parents) remain fork-time-only checks, not part of this guarantee.
 - **REQ-15** No secrets accepted anywhere on argv (R5.5). Note: `--with-ignored` may *copy* secret-bearing files (`.env`) between working trees — a documented behavior note + the off-default, not a secrets-handling feature.
 
 ### 3.6 Output contract

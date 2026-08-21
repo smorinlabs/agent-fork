@@ -65,7 +65,7 @@ Default targets: only registry-recorded forks. Guards (exit 5): uncommitted chan
 ### D13 — `cleanup` keeps its name (`ch-11-a` ★)
 The R2.1 waiver in `CONFORMANCE.md` stands, now marked confirmed. `prune`-style sweeping, if ever wanted, becomes `cleanup --all`, not a new verb.
 
-### D7 — Final v1 config schema (`ch-12-a` ★, amended by D5 note + D11)
+### D7 — Final v1 config schema (`ch-12-a` ★, amended by D5 note + D11; `output` added by A11 2026-08-20)
 
 ```toml
 # .agent-fork/agent-fork_config.toml (project) · $XDG_CONFIG_HOME/agent-fork/… (user)
@@ -77,6 +77,7 @@ worktree_location = "sibling"   # sibling | central | subdirectory | <path templ
 verify            = true
 copy              = false
 agent_mode         = "auto"      # auto | strict | git-only
+output             = "text"      # text | json
 
 [agents.claude]
 extra_args = []                 # e.g. ["--model", "opus"] — appended to the emitted command
@@ -84,7 +85,7 @@ extra_args = []                 # e.g. ["--model", "opus"] — appended to the e
 extra_args = []
 ```
 
-Dropped from agent-deck's `[fork]`: `docker`, the `worktree` toggle, `inherit_from_parent` (no meaning in a standalone CLI). Every `[fork]` key mirrors a flag (R3.8 parity); `[agents.*]` is config-only by design (no flag equivalent in v1).
+Dropped from agent-deck's `[fork]`: `docker`, the `worktree` toggle, `inherit_from_parent` (no meaning in a standalone CLI). Every `[fork]` key mirrors a flag (R3.8 parity); `[agents.*]` is config-only by design (no flag equivalent in v1). **A11 (2026-08-20, owner-ratified ACCEPT):** `output` joined the schema on the same R3.8/REQ-14 parity grounds — it previously had an `AGENT_FORK_OUTPUT` environment equivalent and a `-o/--output` flag but no `[fork]` counterpart, the sole exception to that parity rule.
 
 ### D11 — Extra-args passthrough ships in v1 (`ch-13-b` ⚠ went against)
 `[agents.<name>] extra_args` (array of strings) is appended to that agent's emitted launch command. Constraints: each element individually shell-quoted at emission (no string-splitting, no interpolation); values appear in `--dry-run` and `-o json` output (`command` field reflects them); tests cover the quoting boundary (spaces, quotes, `$`, `;`). *Consequence for testing:* launch-template tests assert the fixed prefix byte-for-byte plus a quoted-suffix property, rather than the whole line as a constant.

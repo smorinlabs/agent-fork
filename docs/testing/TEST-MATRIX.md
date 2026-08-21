@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 513 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 543 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density). A6a (merged via PR #58) added 45 rows; A10 (merged via PR #63) added 55 rows. A11 (2026-08-20) added 30 rows on top of the pre-A6a 413-row baseline: T-CFG-24..36 (13), T-LOC-19..24 (6), T-CLI-51..60 (10, renumbered a second time — first from the design doc's original T-CLI-36..45 to T-CLI-39..48 to resolve a collision with A6a's own T-CLI-36..38, then to T-CLI-51..60 when a second sync found A10 (merged in between) had independently claimed T-CLI-39..50 — this is a fast-moving trunk; renumbering a fresh branch's own unmerged IDs at merge time is not a violation of "never renumbered", which protects already-landed IDs), T-OUT-24 (1). Rows T-CFG-35, T-LOC-23, T-CLI-57..60 were added during Gate 6 (post-implementation adversarial review) to cover findings that review surfaced, not the original Gate-4 plan — T-CLI-59 closes a regression introduced by T-CLI-58's own fix; T-LOC-23 and T-CLI-60 close two further findings from a second Gate-6 verification round. T-CFG-36 and T-LOC-24 close two escaping gaps a PR #62 bot review found (`config.py`'s and `location.py`'s own direct `ConfigError` raises bypassed the `ConfigFinding.render()` convention); T-LOC-23's fallback assertion was also hardened to no longer depend on the runner's own passwd database (same review round).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -44,12 +44,25 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 | T-CFG-15 | agent-mode precedence is CLI > environment > config > `auto` | baseline | U | live | REQ-45; D16 |
 | T-CFG-16 | invalid configured agent mode is rejected as `config_error` | baseline | U | live | REQ-45; D16 |
 | T-CFG-17 | Codex session-name resolution defaults on and obeys CLI > config precedence | agent=codex | U | live | REQ-46; D17 |
-| T-CFG-18 | output defaults to `text`; only `text` and `json` are valid effective values; an explicit fork output overrides an invalid lower-precedence `AGENT_FORK_OUTPUT` value | baseline | U | live | P02 A13(b); REQ-14; R5.1 |
+| T-CFG-18 | output defaults to `text`; only `text` and `json` are valid effective values (message names key/value/allowed/source, A11); an explicit fork output overrides an invalid lower-precedence `AGENT_FORK_OUTPUT` value | baseline | U | live | P02 A11/A13(b); REQ-14; R5.1 |
 | T-CFG-19 | shared XDG resolver uses an explicit base and needs no `HOME` | baseline | U | live | REQ-41 |
 | T-CFG-20 | shared XDG resolver expands the `HOME` default rather than emitting a literal tilde | baseline | U | live | REQ-41 |
 | T-CFG-21 | shared XDG resolver returns the base itself when no trailing segments are given | baseline | U | live | REQ-41 |
 | T-CFG-22 | an empty XDG value counts as unset per the specification, so state never resolves relative to the current working directory | baseline | U | live | REQ-41 |
 | T-CFG-23 | an empty `HOME` counts as unset too — `env.get("HOME", "~")` returns the empty string when the variable is set but empty, so the default never applies | baseline | U | live | REQ-41 |
+| T-CFG-24 | `[fork].output` is accepted by the loader and resolves through the normal precedence chain (decision 4, ratified ACCEPT) | baseline | U | live | P02 A11; REQ-14; D7 |
+| T-CFG-25 | `validate_values()` names the exact key, value, allowed forms, and winning source for one finding | baseline | U | live | P02 A11 |
+| T-CFG-26 | `validate_values()` returns every finding for a multi-bad-key configuration, not just the first | baseline | U | live | P02 A11 |
+| T-CFG-27 | an invalid `branch_prefix` composed-sample corpus is rejected, including a leading `-` | baseline | U | live | P02 A11 |
+| T-CFG-28 | a `branch_prefix` legal only once composed (e.g. `"topic."`) remains valid; whitespace-only still falls back to the default | baseline | U | live | P02 A11 |
+| T-CFG-29 | the pure `branch_prefix_reason()` predicate agrees with real `git check-ref-format --branch` on a composed-sample corpus | baseline | F | live | P02 A11 |
+| T-CFG-30 | dotted `config get` addresses both agents' `extra_args` and `session_name_resolution`; arrays render as round-trip-parseable TOML literals | baseline | U | live | P02 A11 |
+| T-CFG-31 | every internal-only attribute the former `hasattr` fallback leaked is rejected — `config_path`, `mode`, `worktree_location_explicit`, `claude_extra_args`, `codex_extra_args`, and the bare `codex_session_name_resolution` | baseline | U | live | P02 A11 |
+| T-CFG-32 | `config set` on an array key refuses, naming the exact resolved TOML file and table/key to hand-edit | baseline | U | live | P02 A11 |
+| T-CFG-33 | an invalid `config set` value refuses before `path.parent.mkdir()`, not merely before the write — no directory created, existing file byte-unchanged | baseline | U | live | P02 A11 |
+| T-CFG-34 | a pre-existing invalid value elsewhere in the file does not block `config set` on an unrelated, valid key | baseline | U | live | P02 A11 |
+| T-CFG-35 | `config set output` round-trips through `config validate`/`config get` (decision 4, ratified ACCEPT) | baseline | C | live | P02 A11 |
+| T-CFG-36 | an unknown key — a raw CLI argument — is escaped in `config_get()`'s and `set_user_value()`'s "unknown config key" message, not interpolated raw (PR #62 review finding) | baseline | U | live | P02 A11 |
 
 ---
 
@@ -233,7 +246,7 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 | T-LOC-01 | `sibling` default path derivation — worktree placed at `<repo>-<branch>` | baseline | U | live | D5; RESEARCH §2.4 |
 | T-LOC-02 | `central` location — worktree placed under the XDG data path `~/.local/share/agent-fork/worktrees/<repo>/<slug>` | baseline | U | live | D5 |
 | T-LOC-03 | `subdirectory` location — worktree placed at `<root>/.worktrees/<slug>` | baseline | U | live | D5 |
-| T-LOC-04 | path template resolves each placeholder — `{repo-name}` → repo basename, `{repo-root}` → parent dir of root, `{branch}` → fork branch slug — asserted individually in one templated location | baseline | U | live | D5; RESEARCH §2.4 |
+| T-LOC-04 | path template resolves each supported placeholder — `{repo-root}` → parent dir of root, `{repo-name}` → repo basename, `{branch}`/`{branch-escaped}` — asserted individually. Amended by A11: `{session-id}` is no longer renderable; its rejection is T-LOC-20 | baseline | U | live | D5; RESEARCH §2.4; P02 A11 |
 | T-LOC-05 | explicit `worktree_location` config value suppresses the mirror-parent heuristic | baseline | U | live | D5 |
 | T-LOC-06 | mirror-parent heuristic — parent is a linked worktree → fork mirrors the parent's observed placement pattern | topology=linked-worktree | F | live | D5; RESEARCH §4 |
 | T-LOC-07 | bare-at-root placement override — fork worktree placed as a child of the bare dir | topology=bare@bare | F | live | D5; RESEARCH §2.4 |
@@ -248,6 +261,12 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 | T-LOC-16 | bare-at-root result accepts partial override after derivation | topology=bare@bare | F | live | D15; REQ-44 |
 | T-LOC-17 | symlinked base resolves once and remains contained | baseline | F | live | D15; REQ-44 |
 | T-LOC-18 | explicit worktree leaf rejects control characters, so a newline-bearing name is refused before any mutation rather than failing verification afterwards | baseline | U | live | P02 A13(d); REQ-44 |
+| T-LOC-19 | template grammar rejects unknown field names, positional/auto-numbered fields, conversions, non-empty format specs, and indexing subscripts before any rendering | baseline | U | live | P02 A11 |
+| T-LOC-20 | `{session-id}` is permanently rejected, naming the key, value, and reason (A8 closed WILL NOT FIX; no successor tracked) | baseline | U | live | P02 A11 |
+| T-LOC-21 | an empty render, a CWD-relative render, a `..`-escaping render, control characters, and an unresolvable `~user` form are all rejected | baseline | U | live | P02 A11 |
+| T-LOC-22 | every template the widened grammar accepts renders without raising — absolute literals, a leading `{repo-root}` field, and a bare `~/` prefix | baseline | U | live | P02 A11 |
+| T-LOC-23 | a present-but-empty `HOME` is rejected for a `~`-leading template (matching `xdg.py`'s empty-counts-as-unset convention), while a genuinely absent `HOME` still falls back to the pwd database (Gate-6 second-pass finding); the fallback half is independent of the runner's own passwd database (PR #62 review finding) | baseline | U | live | P02 A11 |
+| T-LOC-24 | an unknown placeholder name — attacker/repo-controlled text parsed straight out of the template — is escaped in the raised `ConfigError`, not interpolated raw (PR #62 review finding) | baseline | U | live | P02 A11 |
 
 ---
 
@@ -513,6 +532,7 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-21 | `fork --dry-run -o json` and `fork --dry-run --json` emit the same parseable preview object with every planned mutation and perform no mutation | baseline | C | live | REQ-17; REQ-18; issue #14; R4.2; R8.6 |
 | T-OUT-22 | `agent_signal_incomplete` is cataloged at exit 3 and emits exact non-secret `status`, `present`, and `missing` machine details | agent-signal=incomplete-marker | C | live | P02 A9; REQ-17; R7.8; R7.12 |
 | T-OUT-23 | bidirectional formatting characters are escaped by the renderer and rejected by the command-safety predicate, which share one control set | baseline | U | live | REQ-17 |
+| T-OUT-24 | an invalid `AGENT_FORK_OUTPUT` produces empty stdout across every command that resolves configuration, never a partial human-formatted success | baseline | C | live | P02 A11 |
 
 ---
 
@@ -556,7 +576,7 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-29 | automatic real fork refuses incomplete Claude input with exit 3 and exact JSON details | agent-signal=incomplete-marker; agent-mode=auto | C | live | P02 A9; REQ-17; REQ-45 |
 | T-CLI-30 | strict real fork refuses incomplete Claude input with exit 3 and exact JSON details | agent-signal=incomplete-id; agent-mode=strict | C | live | P02 A9; REQ-17; REQ-45 |
 | T-CLI-31 | automatic incomplete dry-run refusal emits one stderr JSON error and creates no Git or Agent Fork artifact | agent-signal=incomplete-marker; agent-mode=auto | C | live | P02 A9; REQ-18; REQ-29; R8.6 |
-| T-CLI-32 | every output parser accepts only `text` and `json`; all human-result defaults equal explicit `text`; `table` is rejected; completions omit it; invalid environment output follows each command's existing config-resolution contract | baseline | C | live | P02 A13(b); REQ-10; R4.2; R5.1 |
+| T-CLI-32 | every output parser accepts only `text` and `json`; every route defaults to `None`, not just `fork` (A11, F8); `table` is rejected; completions omit it; `list`/`session`/`cleanup` reject an invalid `AGENT_FORK_OUTPUT` identically to every other consumer instead of ignoring it | baseline | C | live | P02 A11/A13(b); REQ-10; R4.2; R5.1 |
 | T-CLI-33 | every option argparse declares for each subcommand reaches the completion vocabulary — the parity invariant that replaces hand-maintained option lists | baseline | U | live | REQ-10 |
 | T-CLI-34 | every subcommand argparse declares reaches the completion vocabulary | baseline | U | live | REQ-10 |
 | T-CLI-35 | completion output choices are exactly those the parser accepts, so a removed alias cannot linger in completions | baseline | U | live | P02 A13(b); REQ-10 |
@@ -575,6 +595,16 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-48 | the freshness-write-failure notice reflects only whether THIS target's write failed under `--all --record-all`, not whether the corpus-wide counter is merely nonzero: two independently recordable targets, only the first's write fails, only the first's document carries the notice | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
 | T-CLI-49 | `analyzed_at` on the human `parent inference:` line is escaped through `terminal_text` like its neighbors on the same line; JSON output keeps the raw value | freshness=A10 | C | live | P02 A10 gate-6; REQ-17 |
 | T-CLI-50 | a corrupted freshness index at the target's location does not block `delete`: the primary record is still removed and the command still exits 0, with `removed_freshness_entry: false` and a "could not confirm" notice | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
+| T-CLI-51 | a bogus `worktree_location` template is rejected identically by `config validate`, `fork --dry-run`, and real `fork` | baseline | C | live | P02 A11 |
+| T-CLI-52 | a `{session-id}` `worktree_location` template is rejected identically by `config validate`, `fork --dry-run`, and real `fork` | baseline | C | live | P02 A11 |
+| T-CLI-53 | an invalid composed `branch_prefix` is rejected identically by `config validate`, `fork --dry-run`, and real `fork` | baseline | C | live | P02 A11 |
+| T-CLI-54 | the real-fork refusal case creates no branch, worktree, registry, lineage, or cache artifact | baseline | C | live | P02 A11 |
+| T-CLI-55 | `doctor` reports every finding for a multi-bad-key configuration joined onto one line, and exits 0 for a valid configuration | baseline | C | live | P02 A11 |
+| T-CLI-56 | `config view` honors a valid `AGENT_FORK_OUTPUT=json` with no explicit flag | baseline | C | live | P02 A11 |
+| T-CLI-57 | a `branch_prefix` ending `.loc` composed with a name starting `k` (`foo.lock`) passes `config validate`/`doctor` but is refused at fork time — the required, not optional, completion of the `branch_prefix` contract (T11h/F7) | baseline | C | live | P02 A11 |
+| T-CLI-58 | a valid `AGENT_FORK_OUTPUT=json` keeps rendering errors as JSON even when a *different*, unrelated key is what actually fails to resolve (F16/Gate-6) | baseline | C | live | P02 A11 |
+| T-CLI-59 | an explicit `-o text` still beats a valid `AGENT_FORK_OUTPUT=json` on an error path, including one from an unrelated key (Gate-6 second-pass regression in T-CLI-58's own fix) | baseline | C | live | P02 A11 |
+| T-CLI-60 | `doctor` honors a valid `AGENT_FORK_OUTPUT=json` when a *different*, unrelated key is what fails to resolve, instead of falling back to plain text (Gate-6 second-pass finding) | baseline | C | live | P02 A11 |
 
 ---
 

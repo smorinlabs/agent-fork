@@ -42,3 +42,20 @@ def test_config_set_then_validate_round_trips(repo_scenario):
     assert viewed.returncode == 0
     assert viewed.stdout == b"team/\n"
     assert 'extra_args = ["--model", "claude future"]' in config_path.read_text()
+
+
+@pytest.mark.matrix("T-CFG-35")
+def test_config_set_output_round_trips(repo_scenario):
+    """T-CFG-35 — `config set output` round-trips through `config
+    validate`/`config get` (decision 4, ratified ACCEPT — A13 explicitly
+    reserved this exact round trip for A11)."""
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main")
+    written = run_cli(["config", "set", "output", "json"], world.env, world.parent_path)
+    assert written.returncode == 0, written.stderr.decode()
+    validated = run_cli(["config", "validate"], world.env, world.parent_path)
+    assert validated.returncode == 0, validated.stderr.decode()
+    read = run_cli(["config", "get", "output"], world.env, world.parent_path)
+    assert read.returncode == 0
+    assert read.stdout == b"json\n"
