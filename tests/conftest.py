@@ -165,9 +165,21 @@ def empty_dir(ignored: bool) -> StateSpec:
     return StateSpec("empty-dir-ignored" if ignored else "empty-dir", "empty-dir")
 
 
-def submodule(path: str | None = None) -> StateSpec:
-    """Submodule gitlink, seeded with `-c protocol.file.allow=always` (spec §6.3)."""
-    return StateSpec("submodule", path or "vendor/submodule")
+def submodule(path: str | None = None, dirty: str | None = None) -> StateSpec:
+    """Submodule gitlink, seeded with `-c protocol.file.allow=always` (spec §6.3).
+
+    ``dirty`` selects what state the submodule carries, which is what A6
+    distinguishes. ``None`` leaves it clean. ``"modified"`` edits a tracked file
+    inside it and ``"untracked"`` adds an untracked one — both make the parent
+    report ` M <path>` while the child, whose submodule is never initialized,
+    reports nothing. ``"advanced"`` commits inside the submodule without staging
+    the gitlink in the parent, and ``"advanced-staged"`` also stages it; only the
+    staged form is transportable, because the gitlink OID then travels in the
+    parent's staged patch.
+    """
+    if dirty not in (None, "modified", "untracked", "advanced", "advanced-staged"):
+        raise ValueError(f"unknown submodule dirt: {dirty}")
+    return StateSpec("submodule", path or "vendor/submodule", target=dirty)
 
 
 def worktreeinclude(pattern: str | None = None) -> StateSpec:
@@ -652,10 +664,53 @@ def _apply_states(handle: WorldHandle, states: tuple[StateSpec, ...]) -> None:
                 str(module),
                 spec.path,
             )
+            _dirty_submodule(handle, parent, path, spec.path, spec.target)
         elif spec.kind == "worktreeinclude":
             path.write_text(f"{spec.target}\n")
         else:
             raise ValueError(f"unknown state kind: {spec.kind}")
+
+
+def _dirty_submodule(
+    handle: WorldHandle,
+    parent: Path,
+    path: Path,
+    relative: str,
+    dirt: str | None,
+):
+    """Put the submodule at ``path`` into the state named by ``dirt``.
+
+    ``_init_plain`` seeds every submodule with `tracked.txt`, so "modified"
+    rewrites that file rather than introducing a second fixture filename.
+    """
+    if dirt is None:
+        return
+    # Commit the gitlink first, so the dirt below is the only state in play.
+    # Clean submodules deliberately stay uncommitted: T-VER-30 and T-MAT-14 pin
+    # the index-only gitlink shape, which a commit would erase.
+    # Pathspec-scoped, so a `staged()` element earlier in the same states tuple
+    # is not swept into this commit and silently lost.
+    _run_git(
+        handle.env,
+        parent,
+        "commit",
+        "-m",
+        f"add submodule {relative}",
+        "--",
+        ".gitmodules",
+        f":(literal){relative}",
+    )
+    if dirt == "modified":
+        (path / "tracked.txt").write_text("submodule modified\n")
+    elif dirt == "untracked":
+        (path / "loose.txt").write_text("untracked inside the submodule\n")
+    elif dirt in ("advanced", "advanced-staged"):
+        (path / "tracked.txt").write_text("submodule advanced\n")
+        _run_git(handle.env, path, "commit", "-am", "advance the submodule")
+        if dirt == "advanced-staged":
+            _run_git(handle.env, parent, "add", "--", f":(literal){relative}")
+    else:
+        raise ValueError(f"unknown submodule dirt: {dirt}")
 
 
 def _apply_origin(handle: WorldHandle, spec: OriginSpec) -> None:
