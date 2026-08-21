@@ -26,6 +26,24 @@ def _user_config_path(environment: dict[str, str]) -> Path:
     return xdg_path(environment, "XDG_CONFIG_HOME", ".config", *XDG_RELATIVE_PATH.parts)
 
 
+def _machine_error_output(args, environment: dict[str, str]) -> bool:
+    """Decide human vs. machine rendering for an error raised by `main()`.
+
+    An explicit `-o`/`--json` flag decides outright, full stop — including
+    when it says "text" and `AGENT_FORK_OUTPUT` says "json". Only when no
+    explicit flag was given at all does a valid `AGENT_FORK_OUTPUT` act as a
+    fallback signal, covering the case where resolution failed on a
+    *different* key before the per-command output mutations above ever ran
+    (F16). Consulting the environment unconditionally would let it override
+    an explicit flag it has no precedence to override.
+    """
+    explicit_json = bool(getattr(args, "json", False))
+    explicit_output = getattr(args, "output", None)
+    if explicit_json or explicit_output is not None:
+        return explicit_json or explicit_output == "json"
+    return environment.get("AGENT_FORK_OUTPUT") == "json"
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-fork",
@@ -204,7 +222,7 @@ def _parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    output_options(session)
+    output_options(session, default=None)
     session_actions = session.add_subparsers(dest="session_action")
     session_validate = session_actions.add_parser(
         "validate", allow_abbrev=False, help="Assert detected session facts"
@@ -252,7 +270,7 @@ def _parser() -> argparse.ArgumentParser:
         help="List forks created by agent-fork",
         description="List registered forks in deterministic creation order.",
     )
-    output_options(listing)
+    output_options(listing, default=None)
     pruning = commands.add_parser(
         "prune",
         allow_abbrev=False,
@@ -270,7 +288,7 @@ def _parser() -> argparse.ArgumentParser:
     pruning.add_argument(
         "--yes", action="store_true", help="Confirm removal non-interactively"
     )
-    output_options(pruning)
+    output_options(pruning, default=None)
     cleanup = commands.add_parser(
         "cleanup",
         allow_abbrev=False,
@@ -310,13 +328,13 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Inspect safety and print the removal plan without changing anything",
     )
-    output_options(cleanup)
+    output_options(cleanup, default=None)
     doctor = commands.add_parser(
         "doctor",
         allow_abbrev=False,
         help="Diagnose Git, agent, config, and XDG readiness",
     )
-    output_options(doctor)
+    output_options(doctor, default=None)
     doctor_mode = doctor.add_mutually_exclusive_group()
     doctor_mode.add_argument("--require-agent", action="store_true")
     doctor_mode.add_argument("--no-agent", action="store_true")
@@ -337,7 +355,7 @@ def _parser() -> argparse.ArgumentParser:
     viewer = actions.add_parser(
         "view", allow_abbrev=False, help="Show effective configuration"
     )
-    output_options(viewer)
+    output_options(viewer, default=None)
     getter = actions.add_parser(
         "get", allow_abbrev=False, help="Get one effective configuration value"
     )
@@ -431,6 +449,12 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     config = resolve_discovered_config(
         cwd, environment, explicit_path=args.config, flags=flags
     )
+    # Mutate args.output immediately, not just at the point output_kind is
+    # used below: a PreconditionError raised later (an invalid branch name,
+    # a naming collision) before output_kind's own computation must still
+    # render per this decision, and the exception handler in main() reads
+    # args.output/args.json, not a local variable of this function.
+    args.output = "json" if args.json else (args.output or config.output)
     context = resolve_agent_mode(
         config.agent_mode,
         environment,
@@ -501,17 +525,22 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         name = sanitize_name(args.name)
     identity = naming_plan(name, branch_prefix=config.branch_prefix)
     branch = args.branch or identity.branch
-    if args.branch:
-        valid = run_git(
-            parent_path,
-            ["check-ref-format", "--branch", branch],
-            env=environment,
-            check=False,
-        )
-        if valid.returncode != 0:
-            from agent_fork.errors import PreconditionError
+    # Runs for every branch, not only an explicit --branch: branch_prefix's
+    # own composed-sample validation (branch_prefix_reason(), a "x"-suffixed
+    # check at config-resolution time) is necessary but not sufficient — a
+    # prefix and a real sanitized name can compose into an illegal ref at
+    # their boundary even when both check out independently (A11 Gate-4
+    # finding F7, e.g. a prefix ending "foo.loc" plus a name starting "k").
+    valid = run_git(
+        parent_path,
+        ["check-ref-format", "--branch", branch],
+        env=environment,
+        check=False,
+    )
+    if valid.returncode != 0:
+        from agent_fork.errors import PreconditionError
 
-            raise PreconditionError("invalid_branch", f"invalid branch name: {branch}")
+        raise PreconditionError("invalid_branch", f"invalid branch name: {branch}")
     destination = (
         args.worktree_dir.expanduser().resolve()
         if args.worktree_dir is not None
@@ -524,7 +553,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         if context is not None
         else ()
     )
-    output_kind = "json" if args.json else (args.output or config.output)
+    output_kind = args.output
 
     if args.dry_run:
         if context is not None:
@@ -708,8 +737,18 @@ def main(argv: list[str] | None = None) -> int:
                 if args.no_agent
                 else None
             )
-            checks = run_doctor(Path.cwd(), environment, agent_mode=doctor_mode)
-            machine = args.json or args.output == "json"
+            # Lock in the explicit flag (if any) before resolving, so it can
+            # override an invalid lower-precedence AGENT_FORK_OUTPUT — and so
+            # any error raised after this point still renders per this
+            # decision, via the mutated args.output the exception handler
+            # below reads.
+            args.output = "json" if args.json else args.output
+            checks, resolved_output = run_doctor(
+                Path.cwd(), environment, agent_mode=doctor_mode, output=args.output
+            )
+            args.output = args.output or resolved_output
+            output_kind = args.output
+            machine = output_kind == "json"
             if machine:
                 print(
                     json_line(
@@ -742,6 +781,22 @@ def main(argv: list[str] | None = None) -> int:
                 validate_session,
             )
 
+            # Lock in the explicit flag (if any) before resolving, so it can
+            # override an invalid lower-precedence AGENT_FORK_OUTPUT — and so
+            # any error raised after this point still renders per this
+            # decision, via the mutated args.output the exception handler
+            # below reads.
+            args.output = "json" if args.json else args.output
+            resolved_session_config = resolve_discovered_config(
+                Path.cwd(),
+                environment,
+                explicit_path=args.config,
+                flags={"output": args.output} if args.output else None,
+                require_repo=False,
+            )
+            args.output = args.output or resolved_session_config.output
+            output_kind = args.output
+            machine = output_kind == "json"
             if args.session_action == "claude-parent":
                 from agent_fork.claude_lineage_inference import (
                     ClaudeLineageCorpus,
@@ -792,7 +847,6 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
                 action = args.claude_parent_action
-                machine = args.json or args.output == "json"
 
                 def emit(document):
                     if machine:
@@ -1143,7 +1197,6 @@ def main(argv: list[str] | None = None) -> int:
                 emit(analysis)
                 return 0
             inspection = inspect_session(environment, cwd=Path.cwd())
-            machine = args.json or args.output == "json"
             if args.session_action == "validate":
                 has_parent = (
                     True
@@ -1314,6 +1367,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "cleanup":
             from agent_fork.cleanup import cleanup, resolve_cleanup_target
 
+            # Lock in the explicit flag (if any) before resolving, so it can
+            # override an invalid lower-precedence AGENT_FORK_OUTPUT — and so
+            # any error raised after this point still renders per this
+            # decision, via the mutated args.output the exception handler
+            # below reads.
+            args.output = "json" if args.json else args.output
+            resolved_cleanup_config = resolve_discovered_config(
+                Path.cwd(),
+                environment,
+                explicit_path=args.config,
+                flags={"output": args.output} if args.output else None,
+                require_repo=False,
+            )
+            args.output = args.output or resolved_cleanup_config.output
+            output_kind = args.output
+            machine = output_kind == "json"
             plan = resolve_cleanup_target(
                 args.target, cwd=Path.cwd(), env=environment, force=args.force
             )
@@ -1343,7 +1412,6 @@ def main(argv: list[str] | None = None) -> int:
                 keep_branch=args.keep_branch,
                 dry_run=args.dry_run,
             )
-            machine = args.json or args.output == "json"
             if machine:
                 from agent_fork.output import json_line
 
@@ -1373,8 +1441,23 @@ def main(argv: list[str] | None = None) -> int:
             from agent_fork.registry import read_registry
             from agent_fork.text import escape_terminal_text
 
+            # Lock in the explicit flag (if any) before resolving, so it can
+            # override an invalid lower-precedence AGENT_FORK_OUTPUT — and so
+            # any error raised after this point still renders per this
+            # decision, via the mutated args.output the exception handler
+            # below reads.
+            args.output = "json" if args.json else args.output
+            resolved_list_config = resolve_discovered_config(
+                Path.cwd(),
+                environment,
+                explicit_path=args.config,
+                flags={"output": args.output} if args.output else None,
+                require_repo=False,
+            )
+            args.output = args.output or resolved_list_config.output
+            output_kind = args.output
             entries = read_registry(env=environment)
-            if args.json or args.output == "json":
+            if output_kind == "json":
                 print(
                     json_line(
                         {
@@ -1400,13 +1483,32 @@ def main(argv: list[str] | None = None) -> int:
             set_user_value(path, args.key, args.value)
             return 0
         if args.command == "config":
+            # Only `config view` carries an explicit -o/--json flag; lock it
+            # in before resolving so it can override an invalid
+            # lower-precedence AGENT_FORK_OUTPUT, and so any error raised
+            # after this point still renders per this decision, via the
+            # mutated args.output the exception handler below reads.
+            # `validate`/`get` have no such flag and correctly get no rescue.
+            view_output_flag = (
+                (
+                    "json"
+                    if getattr(args, "json", False)
+                    else getattr(args, "output", None)
+                )
+                if args.config_action == "view"
+                else None
+            )
             resolved = resolve_discovered_config(
-                Path.cwd(), environment, explicit_path=args.config
+                Path.cwd(),
+                environment,
+                explicit_path=args.config,
+                flags={"output": view_output_flag} if view_output_flag else None,
             )
             if args.config_action == "validate":
                 print("config valid")
                 return 0
             if args.config_action == "view":
+                args.output = view_output_flag or resolved.output
                 document = {
                     "with_state": resolved.with_state,
                     "with_ignored": resolved.with_ignored,
@@ -1426,7 +1528,8 @@ def main(argv: list[str] | None = None) -> int:
                         },
                     },
                 }
-                if args.json or args.output == "json":
+                output_kind = args.output
+                if output_kind == "json":
                     from agent_fork.output import json_line
 
                     print(json_line(document))
@@ -1435,24 +1538,12 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"{key} = {value}")
                 return 0
             if args.config_action == "get":
-                aliases = {
-                    "agents.codex.session_name_resolution": (
-                        resolved.codex_session_name_resolution
-                    )
-                }
-                if args.key in aliases:
-                    value = aliases[args.key]
-                elif hasattr(resolved, args.key):
-                    value = getattr(resolved, args.key)
-                else:
-                    raise ConfigError(f"unknown config key: {args.key}")
-                print(str(value).lower() if isinstance(value, bool) else value)
+                from agent_fork.config import config_get
+
+                print(config_get(resolved, args.key))
                 return 0
     except ConfigError as error:
-        machine = (
-            bool(getattr(args, "json", False))
-            or getattr(args, "output", None) == "json"
-        )
+        machine = _machine_error_output(args, environment)
         if machine:
             from agent_fork.output import render_error
 
@@ -1466,10 +1557,7 @@ def main(argv: list[str] | None = None) -> int:
         from agent_fork.errors import AgentForkError
         from agent_fork.output import render_error
 
-        machine = (
-            bool(getattr(args, "json", False))
-            or getattr(args, "output", None) == "json"
-        )
+        machine = _machine_error_output(args, environment)
         if args.debug and not machine:
             traceback.print_exc()
         print(render_error(error, machine=machine), file=sys.stderr)
