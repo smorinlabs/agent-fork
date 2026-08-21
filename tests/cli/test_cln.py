@@ -85,7 +85,7 @@ def test_tty_consent_prompt_names_exact_removal_targets(repo_scenario):
     from conftest import pty_run
 
     world, result = _forked(repo_scenario, "prompt")
-    completed = pty_run(["cleanup", "prompt"], world.env, 2)
+    completed = pty_run(["cleanup", "prompt"], world.env, 2, world.parent_path)
     assert completed.returncode == 2
     prompt = completed.tty.decode()
     assert f"remove worktree {result.creation.path}" in prompt
@@ -96,7 +96,7 @@ def test_tty_consent_prompt_names_exact_removal_targets(repo_scenario):
 
 @pytest.mark.matrix("T-CLN-13")
 def test_dry_run_prints_removal_plan_without_mutating(repo_scenario):
-    from agent_fork.registry import find_owned
+    from agent_fork.registry import find_candidates
     from conftest import run_cli
 
     world, result = _forked(repo_scenario, "dry")
@@ -105,7 +105,7 @@ def test_dry_run_prints_removal_plan_without_mutating(repo_scenario):
     assert b"would remove worktree" in completed.stdout
     assert str(result.creation.path).encode() in completed.stdout
     assert result.creation.path.exists()
-    assert find_owned("dry", env=world.env) is not None
+    assert find_candidates("dry", env=world.env)
 
 
 @pytest.mark.matrix("T-CLN-15")
@@ -364,6 +364,7 @@ def test_human_cleanup_details_escape_terminal_controls(repo_scenario):
     from agent_fork.cleanup import (
         CleanupDetails,
         CleanupPlan,
+        ConfirmedFork,
         DirtyPath,
         UnpushedCommit,
         _refusal_message,
@@ -405,7 +406,15 @@ def test_human_cleanup_details_escape_terminal_controls(repo_scenario):
         worktree=unsafe_worktree,
         agent=None,
     )
-    plan = CleanupPlan(entry, unsafe_worktree, unsafe, Path("/tmp/repo"), True)
+    plan = CleanupPlan(
+        entry,
+        ConfirmedFork.from_observation(
+            (str(unsafe_worktree), unsafe),
+            anchor=unsafe_worktree,
+            git_root=Path("/tmp/repo"),
+        ),
+        True,
+    )
     rendered_details = CleanupDetails(
         dirty=(DirtyPath("??", unsafe),),
         dirty_count=1,
@@ -558,6 +567,12 @@ def test_cleanup_disclosure_handles_no_match_and_read_failure(
 
     monkeypatch.setattr(lineage_module, "read_lineage", failing_read_lineage)
     monkeypatch.setattr("os.environ", other_world.env)
+    # `main` resolves the target against the invoking directory, so the test
+    # has to stand in the repository that owns the fork. Without this it runs
+    # in the test runner's own repository and is refused as a cross-repository
+    # cleanup — correctly, since a fork name means nothing outside its own
+    # repository.
+    monkeypatch.chdir(other_world.parent_path)
 
     out = io.StringIO()
     with redirect_stdout(out):

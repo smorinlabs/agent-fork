@@ -128,6 +128,62 @@ def _worktree_branches(
     return branches
 
 
+def live_worktree_pairs(
+    parent: Path, *, env: Mapping[str, str] | None = None
+) -> frozenset[tuple[str, str]]:
+    """Freshly observed (worktree path, branch) pairs for one repository.
+
+    This is the evidence registry records are checked against, so it reports
+    only what is demonstrably there *now*. Enumeration comes from
+    `list_worktrees`, and every listed path is then asked directly which
+    repository it belongs to and which branch it is on, because being listed
+    is not the same as being present:
+
+    - Git keeps listing a worktree whose directory was deleted, marking it
+      `prunable`, until someone runs `git worktree prune`;
+    - a directory can be replaced by an unrelated repository's worktree while
+      the original repository still lists the path.
+
+    Both are excluded by the probe rather than by parsing list metadata, which
+    is why this does not need the `prunable` field. Detached worktrees are
+    excluded too: a fork always has a branch, so a record matching nothing
+    here is not one of this repository's forks.
+    """
+    own_common_dir = inspect_repository(parent, env=env).common_dir
+    pairs: set[tuple[str, str]] = set()
+    for record in list_worktrees(parent, env=env):
+        current = _current_worktree_identity(record.path, env=env)
+        if current is None:
+            continue
+        common_dir, branch = current
+        if common_dir == own_common_dir:
+            pairs.add((str(record.path), branch))
+    return frozenset(pairs)
+
+
+def _current_worktree_identity(
+    path: Path, *, env: Mapping[str, str] | None
+) -> tuple[Path, str] | None:
+    """The repository and branch a directory belongs to right now.
+
+    Returns None when the path is not a usable worktree or has no branch: a
+    fork always has one, so a detached or broken directory can never confirm a
+    registry record.
+    """
+    probe = run_git(
+        path,
+        ["rev-parse", "--git-common-dir", "--abbrev-ref", "HEAD"],
+        env=env,
+        check=False,
+    )
+    if probe.returncode != 0:
+        return None
+    lines = probe.stdout.decode(errors="surrogateescape").splitlines()
+    if len(lines) != 2 or lines[1] == "HEAD":
+        return None
+    return _resolve_git_path(path, lines[0]), lines[1]
+
+
 _OPERATION_SENTINELS = {
     "rebase": ("rebase-merge", "rebase-apply"),
     "merge": ("MERGE_HEAD",),
