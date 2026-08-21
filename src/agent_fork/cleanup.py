@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -403,16 +404,18 @@ def _retained_metadata(
         }
         state_targets = _read_targets(index_freshness_path(env))
         legacy_targets = _read_targets(_legacy_index_freshness_path(env))
-        if state_targets is None or legacy_targets is None:
-            # A structurally invalid store is a fault to disclose, not a
-            # cache miss to paper over as "no freshness evidence retained" —
-            # degrade to the same neutral shape as an unreadable lineage
-            # store, per the design's "disclosure must never fail a
-            # cleanup" guarantee, with an honest notice instead of silence.
-            return dict(_EMPTY_RETAINED_METADATA), (
-                "could not read Claude parent freshness metadata; nothing "
-                "disclosed for it",
-            )
+        # A structurally invalid freshness store is a fault to disclose, not
+        # a cache miss to paper over as "no freshness evidence retained" —
+        # but it is a fault ONLY about freshness. An unrelated, independently
+        # readable lineage claim or inferred record must still be disclosed;
+        # nulling the whole result would suppress real information the user
+        # needs, per the design's "disclosure must never fail a cleanup"
+        # guarantee, with an honest notice instead of silence.
+        freshness_unreadable = state_targets is None or legacy_targets is None
+        if state_targets is None:
+            state_targets = {}
+        if legacy_targets is None:
+            legacy_targets = {}
 
         lineage_claims: list[str] = []
         inferred_records: list[str] = []
@@ -426,6 +429,7 @@ def _retained_metadata(
             # here would corrupt a session ID a script pastes back into a
             # command. Escaping applies only to the human `notices` text.
             child = claim.child_session_id
+            quoted_child = shlex.quote(child)
             lineage_claims.append(child)
             removal_commands.append(
                 {
@@ -433,7 +437,7 @@ def _retained_metadata(
                     "source": "planned",
                     "command": (
                         "agent-fork session claude-parent delete --session-id "
-                        f"{child} --source planned --yes"
+                        f"{quoted_child} --source planned --yes"
                     ),
                 }
             )
@@ -445,7 +449,7 @@ def _retained_metadata(
                         "source": "inferred",
                         "command": (
                             "agent-fork session claude-parent delete --session-id "
-                            f"{child} --source inferred --yes"
+                            f"{quoted_child} --source inferred --yes"
                         ),
                     }
                 )
@@ -491,6 +495,11 @@ def _retained_metadata(
                 )
                 + "; store: "
                 + _escape_terminal_text(str(_legacy_index_freshness_path(env))),
+            )
+        if freshness_unreadable:
+            notices += (
+                "could not read Claude parent freshness metadata; freshness "
+                "corroboration for retained records could not be disclosed",
             )
         notices += (
             "these are kept because the forked agent session remains resumable "

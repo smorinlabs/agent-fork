@@ -668,6 +668,51 @@ def test_cleanup_disclosure_escapes_notices_but_not_json(repo_scenario):
     assert b"\x1b" not in human.stdout
 
 
+@pytest.mark.matrix("T-CLN-32")
+def test_cleanup_removal_command_quotes_hostile_session_id(repo_scenario):
+    """A hostile session ID (embedded newline/shell metacharacters) must not
+    let the generated removal command break out of its argument position —
+    it is meant to be copy-pasted and run verbatim."""
+    import shlex
+
+    from agent_fork.lineage import LineageClaim, add_lineage
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "hostile-cmd")
+    hostile_child = "evil\necho PWNED; rm -rf /tmp/x"
+    add_lineage(
+        LineageClaim.create(
+            agent="claude",
+            child_session_id=hostile_child,
+            parent_session_id="parent",
+            worktree=result.creation.path,
+        ),
+        env=world.env,
+    )
+
+    completed = run_cli(
+        ["cleanup", "hostile-cmd", "--dry-run", "-o", "json"],
+        world.env,
+        world.parent_path,
+    )
+    document = json.loads(completed.stdout)
+    commands = document["retained_metadata"]["removal_commands"]
+    matching = [entry for entry in commands if entry["session_id"] == hostile_child]
+    assert matching
+    for entry in matching:
+        # the raw session ID is preserved in the field...
+        assert entry["session_id"] == hostile_child
+        # ...but the assembled command safely quotes it as one shell
+        # argument: parsing the command back with shlex must recover the
+        # hostile string as a single token, not split it into separate
+        # words/commands an unsuspecting user's shell would execute.
+        parsed = shlex.split(entry["command"])
+        assert hostile_child in parsed
+        assert parsed.count("--session-id") == 1
+        session_id_index = parsed.index("--session-id")
+        assert parsed[session_id_index + 1] == hostile_child
+
+
 @pytest.mark.matrix("T-CLN-30")
 def test_cleanup_disclosure_reports_legacy_only_freshness_location(repo_scenario):
     """A freshness entry that lives only at the legacy XDG_CACHE_HOME path
@@ -732,9 +777,9 @@ def test_cleanup_disclosure_degrades_neutrally_on_invalid_freshness_store(
     repo_scenario,
 ):
     """A structurally invalid freshness-index file (not the JSON shape this
-    store expects) must degrade cleanup's disclosure to the neutral empty
-    metadata plus its own notice, never propagate a crash, and never
-    silently report partial/misleading metadata."""
+    store expects) must degrade only the freshness half of disclosure to the
+    neutral empty shape plus its own notice, never propagate a crash, and
+    never suppress an unrelated, independently-readable lineage claim."""
     from agent_fork.lineage_inference_store import index_freshness_path
     from conftest import run_cli
 
@@ -749,11 +794,54 @@ def test_cleanup_disclosure_degrades_neutrally_on_invalid_freshness_store(
         world.parent_path,
     )
     document = json.loads(completed.stdout)
-    assert document["retained_metadata"] == {
-        "lineage_claims": [],
-        "inferred_records": [],
-        "freshness_entries": [],
-        "removal_commands": [],
-    }
+    metadata = document["retained_metadata"]
+    # the fork's own baseline lineage claim is independently readable and
+    # must still be disclosed; only freshness is a fault here
+    assert metadata["lineage_claims"] == ["33333333-3333-3333-3333-333333333333"]
+    assert metadata["inferred_records"] == []
+    assert metadata["freshness_entries"] == []
     assert any("could not read" in notice for notice in document["notices"])
     assert result.creation.path.exists()  # dry-run: nothing actually removed
+
+
+@pytest.mark.matrix("T-CLN-33")
+def test_cleanup_freshness_read_failure_does_not_suppress_lineage_disclosure(
+    repo_scenario,
+):
+    """An unrelated failure reading the freshness index must not swallow the
+    disclosure of a real, independently-readable retained lineage claim."""
+    from agent_fork.lineage import LineageClaim, add_lineage
+    from agent_fork.lineage_inference_store import index_freshness_path
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "partial-invalid")
+    child = "44444444-4444-4444-4444-444444444444"
+    add_lineage(
+        LineageClaim.create(
+            agent="claude",
+            child_session_id=child,
+            parent_session_id="parent",
+            worktree=result.creation.path,
+        ),
+        env=world.env,
+    )
+    state_path = index_freshness_path(world.env)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(["not", "a", "dict"]))
+
+    completed = run_cli(
+        ["cleanup", "partial-invalid", "--dry-run", "-o", "json"],
+        world.env,
+        world.parent_path,
+    )
+    document = json.loads(completed.stdout)
+    metadata = document["retained_metadata"]
+    # the fork itself registers its own baseline claim; ours must appear
+    # alongside it, not be crowded out by it or by the freshness fault
+    assert child in metadata["lineage_claims"]
+    assert metadata["freshness_entries"] == []
+    assert any(
+        entry["session_id"] == child and entry["source"] == "planned"
+        for entry in metadata["removal_commands"]
+    )
+    assert any("could not read" in notice for notice in document["notices"])

@@ -630,6 +630,19 @@ def test_sweep_cache_bounded_entry_scan_does_not_prelist(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cli_mod.os, "scandir", _CountingScandir)
 
+    # The pre-fix bug materialized the whole directory via `Path.iterdir()`
+    # (a different primitive `os.scandir` instrumentation above cannot see)
+    # before ever enforcing the bound. No legacy v2 root exists in this
+    # scenario, so a correct implementation calls `Path.iterdir()` zero
+    # times here; any call proves eager materialization is back.
+    def _forbidden_iterdir(self):
+        raise AssertionError(
+            f"Path.iterdir() called on {self} -- the bounded scan must use "
+            "os.scandir with an early stop, never list-then-slice"
+        )
+
+    monkeypatch.setattr(Path, "iterdir", _forbidden_iterdir)
+
     work = Work()
     sweep_cache(env, set(), work)
 
@@ -758,6 +771,40 @@ def test_sweep_cache_marker_symlink_never_followed(tmp_path):
 
     assert outside.read_text() == "do not touch"
     assert work.cache_prune_failures >= 1
+
+
+@pytest.mark.matrix("T-CPI-70")
+def test_sweep_cache_marker_fifo_never_blocks(tmp_path):
+    """A `.sweep` marker replaced with a named pipe must never make the
+    sweep hang waiting for a reader that will never arrive. Bounded in a
+    subprocess so a regression fails the test instead of hanging the suite.
+    """
+    import os
+    import subprocess
+    import sys
+
+    env = _world(tmp_path)
+    v3 = Path(env["XDG_CACHE_HOME"]) / "agent-fork" / "claude-lineage-index-v3"
+    v3.mkdir(parents=True)
+    os.mkfifo(v3 / ".sweep")
+
+    script = (
+        "import os\n"
+        "from agent_fork.claude_lineage_inference import sweep_cache, Work\n"
+        f"env = {env!r}\n"
+        "work = Work()\n"
+        "sweep_cache(env, set(), work)\n"
+        "print('cache_prune_failures', work.cache_prune_failures)\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0, completed.stderr
+    reported = int(completed.stdout.strip().rsplit(" ", 1)[-1])
+    assert reported >= 1
 
 
 @pytest.mark.matrix("T-CPI-49")

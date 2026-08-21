@@ -867,9 +867,22 @@ def main(argv: list[str] | None = None) -> int:
                             print("Claude parent delete cancelled", file=sys.stderr)
                             return 2
                     delete_notices = []
+
+                    def _remove_freshness_entry_tolerantly(session_id):
+                        # An advisory, unrelated cache/state fault must never
+                        # block removing the user's own primary record.
+                        try:
+                            return remove_index_freshness(session_id, env=environment)
+                        except ValueError:
+                            delete_notices.append(
+                                "could not confirm freshness-entry removal: the "
+                                "freshness index is unreadable"
+                            )
+                            return False
+
                     if found[0]["source"] == "inferred":
-                        removed_freshness_entry = remove_index_freshness(
-                            args.session_id, env=environment
+                        removed_freshness_entry = _remove_freshness_entry_tolerantly(
+                            args.session_id
                         )
                         remove_inference(args.session_id, env=environment)
                         retained_planned_record = (
@@ -882,8 +895,8 @@ def main(argv: list[str] | None = None) -> int:
                             args.session_id, env=environment
                         )
                         if surviving_inferred is None:
-                            removed_freshness_entry = remove_index_freshness(
-                                args.session_id, env=environment
+                            removed_freshness_entry = (
+                                _remove_freshness_entry_tolerantly(args.session_id)
                             )
                         else:
                             removed_freshness_entry = False

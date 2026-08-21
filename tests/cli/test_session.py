@@ -739,3 +739,53 @@ def test_session_reports_last_known_good_and_freshness_unknown(repo_scenario):
     result2 = run_cli(["session", "-o", "json"], env2, world.parent_path)
     document2 = json.loads(result2.stdout)
     assert document2["parent_inference"]["status"] == "freshness_unknown"
+
+
+@pytest.mark.matrix("T-CLI-46")
+def test_session_escapes_hostile_analyzed_at_on_human_line(repo_scenario):
+    """analyzed_at is store-derived, same trust level as status and
+    parent_session_id on the same `parent inference:` line -- a control
+    character embedded in a stored timestamp must not reach the terminal
+    raw."""
+    from agent_fork.lineage_inference_store import (
+        InferenceRecord,
+        add_inference,
+        update_index_freshness,
+    )
+    from conftest import run_cli
+
+    world = repo_scenario()
+    transcript = world.parent_path / "hostile-child.jsonl"
+    transcript.write_text("{}\n")
+    record = InferenceRecord(
+        "hostile-child",
+        "parent-session",
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00\x1b[31mHOSTILE\x1b[0mZ",
+        (_fingerprint(transcript),),
+        "generation-1",
+        "universe-1",
+    )
+    add_inference(record, env=world.env)
+    update_index_freshness("hostile-child", "universe-1", "generation-1", env=world.env)
+    transcript.write_text("{}\n\n")  # stale -> last_known_good, still displayed
+
+    env = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "hostile-child"}
+
+    result = run_cli(["session"], env, world.parent_path)
+    assert result.returncode == 0
+    assert b"\x1b[31mHOSTILE" not in result.stdout
+    lines = result.stdout.decode().splitlines()
+    parent_inference_line = next(
+        line for line in lines if line.startswith("parent inference:")
+    )
+    assert "HOSTILE" in parent_inference_line  # content preserved, control chars gone
+
+    json_result = run_cli(["session", "-o", "json"], env, world.parent_path)
+    document = json.loads(json_result.stdout)
+    # JSON keeps the raw value -- only the human line escapes it
+    assert document["parent_inference"]["analyzed_at"] == record.analyzed_at

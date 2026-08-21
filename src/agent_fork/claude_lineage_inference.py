@@ -369,9 +369,21 @@ def sweep_cache(env: Mapping[str, str], stems: set[str], work: Work) -> None:
     try:
         # O_NOFOLLOW: if `.sweep` was replaced with a symlink, this fails
         # with ELOOP rather than creating or touching whatever it points to.
-        flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        # O_NONBLOCK: if `.sweep` was replaced with a FIFO, this makes the
+        # open fail immediately with ENXIO instead of blocking forever
+        # waiting for a reader that will never arrive.
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
         fd = os.open(marker, flags, 0o600)
-        os.close(fd)
+        try:
+            if not stat_module.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError("cache sweep marker is not a regular file")
+        finally:
+            os.close(fd)
         os.utime(marker, None, follow_symlinks=False)
     except OSError:
         work.cache_prune_failures += 1

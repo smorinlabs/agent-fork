@@ -294,7 +294,7 @@ def assess_inference(
                 f"{stat.st_size}:{stat.st_mtime_ns}"
             )
             actual = hashlib.sha256(actual_raw.encode()).hexdigest()
-        except OSError:
+        except (OSError, ValueError):
             changed.add(_classify_changed_source(record, raw_path))
             continue
         if actual != expected:

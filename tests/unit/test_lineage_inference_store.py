@@ -9,6 +9,7 @@ from agent_fork.lineage_inference_store import (
     MAX_SOURCE_FINGERPRINTS,
     InferenceRecord,
     _legacy_index_freshness_path,
+    _read_targets,
     add_inference,
     assess_inference,
     find_inference,
@@ -640,6 +641,31 @@ def test_assess_inference_malformed_fingerprint_is_stale_not_a_crash(tmp_path):
     assert result.changed_sources == ("other",)
 
 
+@pytest.mark.matrix("T-CPI-69")
+def test_assess_inference_nul_byte_path_is_stale_not_a_crash(tmp_path):
+    """A fingerprint path containing an embedded NUL byte makes Path.stat()
+    raise ValueError, not OSError -- must still degrade to stale_sources
+    like every other malformed-path case, not escape as an uncaught error."""
+    env = _env(tmp_path)
+    record = InferenceRecord(
+        "child",
+        "parent",
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00Z",
+        ("bad\x00path:deadbeef",),
+        "generation-1",
+        "universe-1",
+    )
+    update_index_freshness("child", "universe-1", "generation-1", env=env)
+    result = assess_inference(record, env=env)
+    assert result.status == "stale_sources"
+    assert result.changed_sources == ("other",)
+
+
 @pytest.mark.matrix("T-CPI-60")
 def test_read_targets_broken_symlink_is_invalid_not_absent(tmp_path):
     env = _env(tmp_path)
@@ -662,6 +688,10 @@ def test_read_targets_broken_symlink_is_invalid_not_absent(tmp_path):
     state_path = index_freshness_path(env)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.symlink_to(state_path.with_name("does-not-exist.json"))
+    # a broken symlink must read as structurally invalid (None), not as an
+    # absent store ({}) -- an absent-store status downstream is coincidence,
+    # not proof, since both would currently resolve to freshness_unknown
+    assert _read_targets(state_path) is None
     assert assess_inference(record, env=env).status == "freshness_unknown"
     state_path.unlink()
 
@@ -670,4 +700,5 @@ def test_read_targets_broken_symlink_is_invalid_not_absent(tmp_path):
     legacy_path = _legacy_index_freshness_path(env)
     legacy_path.parent.mkdir(parents=True, exist_ok=True)
     legacy_path.symlink_to(legacy_path.with_name("also-missing.json"))
+    assert _read_targets(legacy_path) is None
     assert assess_inference(record, env=env).status == "freshness_unknown"

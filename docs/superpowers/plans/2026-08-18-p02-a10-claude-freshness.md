@@ -27,7 +27,7 @@ network access, streaming, plugins, or interactive behavior.
 | 3. Design document | **complete**; revalidated against `origin/main` on 2026-08-20 |
 | 4. Implementation plan and adversarial review, including Codex | **APPROVE-WITH-CHANGES** on 2026-08-20; both required lenses concurred, every required change incorporated; see "Plan-review outcome" below |
 | 5. Test-driven implementation | **complete** on 2026-08-20; 31 new tests, all four repository gates pass; see "Implementation evidence" below |
-| 6. Adversarial implementation review, including Codex | **APPROVE-WITH-CHANGES** on 2026-08-20; both required lenses concurred, all 13 required findings corrected, 16 additional test IDs added; see "Gate-6 findings and corrections" below |
+| 6. Adversarial implementation review, including Codex | Two review rounds completed 2026-08-20, both by the two required lenses (Opus + independent Codex), both returning **APPROVE-WITH-CHANGES**: round 1 found 13 required findings against the fix commit, all corrected (`fc35365`); round 2, a confirmation pass against that fix commit, found 2 new defects introduced by the round-1 fixes plus 3 independently-double-confirmed test-coverage gaps, all corrected in this working tree but **not yet independently re-reviewed** — see "Gate-6 findings and corrections" and "Gate-6 confirmation round" below for full detail and open status |
 
 ## Revalidation against main (2026-08-20)
 
@@ -1425,6 +1425,131 @@ updates:
 | `just check-matrix` | **pass** — 488 rows across 20 groups, one collected item per live row |
 | `just strict-collect` | **pass** — clean collection across every test directory, no unknown markers or import errors |
 | `just clean-install` | **pass** — sdist and wheel built; disposable venv install and smoke check completed |
+
+## Gate-6 confirmation round
+
+The fix commit above (`fc35365`) was itself reviewed a second time by the
+same two independent lenses, against the real diff rather than prose, per
+this repository's standing rule that a phase gate before a mutating sweep
+needs both lenses to concur — the same discipline applied to gate 4's plan
+review, now applied to the corrected implementation. Both again used
+empirical probes and mutation testing, not just reading code, and both again
+returned **APPROVE-WITH-CHANGES**: this is expected convergence, not a sign
+of a runaway process — each round found fewer and smaller defects than the
+last.
+
+Three findings were independently confirmed by both lenses, the highest-
+confidence class:
+
+- `T-CPI-60` (the broken-symlink-is-invalid test) asserted only the
+  downstream `assess_inference` status, which is `freshness_unknown` whether
+  the symlink is correctly rejected or incorrectly treated as absent — the
+  test could not distinguish the fix from the bug it was meant to prove.
+  Fixed by asserting `_read_targets(path) is None` directly at both
+  locations; confirmed to fail when the `is_symlink()`-before-`exists()`
+  ordering is reverted.
+- `retained_planned_record: true` had zero regression coverage — the only
+  existing delete test covers the case with no surviving planned claim,
+  where `false` is correct either way. Added `T-CLI-44`: a child holding
+  both a planned claim and an inferred record, deleted via `--source
+  inferred`, asserting the field is `true` and that a follow-up `list`
+  confirms the claim survives; confirmed to fail when the computation is
+  reverted to a hardcoded `False`.
+- The per-target freshness-write-failure notice fix had zero regression
+  coverage — the existing single-target test cannot distinguish a per-target
+  delta check from the original shared-counter bug, since with one target
+  they are mathematically identical. Added `T-CLI-45`: two independently
+  recordable transcript pairs in one `--all --record-all` run, only the
+  first target's `update_index_freshness` call failing; confirmed both that
+  only the first target's document carries the notice under the fix, and
+  that reverting the delta check back to a raw nonzero check makes both
+  targets carry it (the exact false-positive the original fix addressed).
+
+Two genuinely new defects were caught — introduced by the gate-6 fix pass
+itself, which is exactly the risk a confirmation round exists to catch:
+
+- **Command injection in cleanup's generated removal commands** (`cleanup.py`).
+  The `retained_metadata.removal_commands[].command` string interpolated the
+  raw `session_id` directly; a hostile or corrupted session ID containing a
+  newline or shell metacharacters could make the suggested copy-paste command
+  execute something other than what it displays. Fixed with `shlex.quote()`
+  around the identifier in the command string only — the JSON `session_id`
+  field itself stays raw, per the existing raw-JSON/escaped-human split.
+  `T-CLN-32` embeds an actual hostile identifier and round-trips the command
+  through `shlex.split()` to confirm it parses back as one argument.
+- **The cache-sweep marker's symlink-safe open could block indefinitely on a
+  FIFO** (`claude_lineage_inference.py`). `O_NOFOLLOW` correctly refuses a
+  symlinked `.sweep` marker, but opening a named pipe `O_WRONLY` without
+  `O_NONBLOCK` blocks forever waiting for a reader that will never arrive,
+  hanging the whole invocation. Fixed by adding `O_NONBLOCK` (so a FIFO open
+  fails immediately with `ENXIO`) and an `fstat()`-based regular-file check
+  after opening, rejecting anything else as a fault. `T-CPI-70` places a real
+  FIFO at the marker path and bounds the sweep call in a subprocess with a
+  timeout, so a regression fails the test instead of hanging the suite —
+  confirmed to actually hang (subprocess killed after the timeout) against
+  the pre-fix code.
+
+One structural defect this round's fix pass introduced in the process of
+fixing another: `_retained_metadata`'s original degrade-on-invalid-freshness
+path returned the same neutral shape regardless of whether a *real,
+independently-readable* lineage claim existed for the target — an unrelated
+fault in one store suppressed disclosure of information from a completely
+different, healthy store. Fixed by nulling only the freshness-specific parts
+of the disclosure on a freshness-read failure, never the whole result;
+`T-CLN-33` and the corrected `T-CLN-31` (which uses `_forked`'s own baseline
+lineage claim, previously masked by this exact bug) both cover it.
+
+Two smaller items from the confirmation round, both cheap and folded in:
+`assess_inference`'s per-file fingerprint loop had narrowed its caught
+exceptions from `(OSError, ValueError)` to `OSError` during an earlier fix,
+so a fingerprint path containing a NUL byte (which makes `Path.stat()` raise
+`ValueError`, not `OSError`) now escaped uncaught instead of degrading to
+`stale_sources` like every other malformed-path case — restored, covered by
+`T-CPI-69`. And `session claude-parent delete` had no fault tolerance around
+`remove_index_freshness()` at all — a corrupted freshness index at the
+target's own location made the *entire* delete fail with a generic
+`runtime_error`, meaning a user could not remove their own primary record
+because an unrelated advisory cache file was unreadable, contradicting the
+"an advisory store must never block a real operation" posture already
+applied to `cleanup`. Fixed by catching the `ValueError`, reporting
+`removed_freshness_entry: false` with an explanatory notice, and still
+removing the primary record; `T-CLI-47` confirms the delete still succeeds
+and the record is genuinely gone.
+
+**One item from the confirmation round's fix list was judged impractical and
+is honestly left uncovered rather than forced.** The interactive delete
+confirmation prompt's consent text (added during the first gate-6 pass, item
+8 above) has no test in this round: proving its exact content requires a
+PTY harness with *both* stdin and stderr attached to a terminal
+simultaneously (the delete action's prompt-eligibility gate checks both),
+and this codebase's existing `pty_run` test helper attaches only one file
+descriptor to a pty at a time. Building genuine dual-TTY test infrastructure
+for one line of prompt text was judged disproportionate; the prompt's
+substantive behavior (that some form of consent is required, and that
+`--yes`/`--no-input` control it) is already covered elsewhere, and the
+production code itself was directly verified by hand.
+
+Six new test IDs were added during this confirmation round beyond the 47
+from the two gate-6 passes combined: `T-CLN-32`, `T-CLN-33`, `T-CPI-69`,
+`T-CPI-70`, and `T-CLI-44` through `T-CLI-47` (8 total — `T-CLI-45`/`46`/`47`
+plus `T-CLI-44`). Total new A10 test IDs across all three implementation
+passes: 55. `TEST-MATRIX.md` now asserts 496 total rows (488 + 8 net new).
+
+Repository gates after the confirmation round's corrections:
+
+| Gate | Result |
+|---|---|
+| `just all` | **pass** — Ruff format, Ruff lint, `ty`, version sync, 566 tests passed, 1 skipped, 9 deselected |
+| `just check-matrix` | **pass** — silent, 496 rows across 20 groups |
+| `just strict-collect` | **pass** — clean collection across every test directory |
+| `just clean-install` | **pass** — sdist and wheel built; disposable venv install completed |
+
+Every finding from both confirmation-round reviews is addressed. No file
+outside the 13 findings' scope was touched, and no pre-existing passing
+assertion was weakened — `T-CLN-31`'s assertion changed from "empty
+`retained_metadata`" to "the fork's own real claim is disclosed, only
+freshness is empty," which is a strengthening (it now proves the fault is
+scoped correctly) not a relaxation.
 
 ## Non-goals
 

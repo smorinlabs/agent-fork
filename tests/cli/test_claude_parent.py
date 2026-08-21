@@ -561,6 +561,58 @@ def test_delete_reports_additive_fields_and_removes_freshness(repo_scenario):
     assert "child-b" in freshness_document["targets"]
 
 
+@pytest.mark.matrix("T-CLI-44")
+def test_inferred_delete_reports_surviving_planned_claim(repo_scenario):
+    """A child holding BOTH a planned claim and an inferred record, deleted
+    via --source inferred, must report retained_planned_record as true, and
+    the planned claim must genuinely still be listed afterward."""
+    from agent_fork.lineage import LineageClaim, add_lineage
+    from agent_fork.lineage_inference_store import add_inference, update_index_freshness
+    from conftest import run_cli
+
+    world = repo_scenario()
+    add_lineage(
+        LineageClaim.create(
+            agent="claude",
+            child_session_id="child-both",
+            parent_session_id="parent",
+        ),
+        env=world.env,
+    )
+    add_inference(_inferred_record("child-both"), env=world.env)
+    update_index_freshness("child-both", "universe-1", "generation-1", env=world.env)
+
+    deleted = run_cli(
+        [
+            "session",
+            "claude-parent",
+            "delete",
+            "--session-id",
+            "child-both",
+            "--source",
+            "inferred",
+            "--yes",
+            "-o",
+            "json",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    document = json.loads(deleted.stdout)
+    assert document["deleted"] is True
+    assert document["removed_record"] == "inferred"
+    assert document["retained_planned_record"] is True
+
+    listed = run_cli(
+        ["session", "claude-parent", "list", "-o", "json"], world.env, world.parent_path
+    )
+    records = json.loads(listed.stdout)
+    assert any(
+        r["child_session_id"] == "child-both" and r["source"] == "planned"
+        for r in records
+    )
+
+
 @pytest.mark.matrix("T-CLI-39")
 def test_delete_removes_freshness_before_record_and_tolerates_mid_delete_failure(
     repo_scenario, monkeypatch
@@ -626,6 +678,50 @@ def test_delete_removes_freshness_before_record_and_tolerates_mid_delete_failure
     result = inspect_session(env, cwd=world.parent_path)
     assert result.parent_inference.status == "freshness_unknown"
     assert result.parent_session is None
+
+
+@pytest.mark.matrix("T-CLI-47")
+def test_delete_tolerates_corrupted_freshness_index(repo_scenario):
+    """An advisory, unrelated fault -- a corrupted freshness index -- must
+    never block the user from removing their own primary record. The
+    primary record is still removed and the command still succeeds; only
+    the freshness-removal confirmation degrades to 'could not confirm'."""
+    from agent_fork.lineage_inference_store import (
+        add_inference,
+        find_inference,
+        index_freshness_path,
+    )
+    from conftest import run_cli
+
+    world = repo_scenario()
+    add_inference(_inferred_record("child-corrupt"), env=world.env)
+    state_path = index_freshness_path(world.env)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(["not", "a", "dict"]))
+
+    completed = run_cli(
+        [
+            "session",
+            "claude-parent",
+            "delete",
+            "--session-id",
+            "child-corrupt",
+            "--source",
+            "inferred",
+            "--yes",
+            "-o",
+            "json",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 0
+    document = json.loads(completed.stdout)
+    assert document["deleted"] is True
+    assert document["removed_freshness_entry"] is False
+    assert any("could not confirm" in notice for notice in document["notices"])
+    # the primary record is genuinely gone, corrupted freshness index or not
+    assert find_inference("child-corrupt", env=world.env) is None
 
 
 def _patch_limits(monkeypatch, **overrides):
@@ -890,3 +986,121 @@ def test_freshness_write_failure_notice_composed_at_cli_layer(
     assert preview_document["recorded"] is False
     assert preview_document["work"]["freshness_write_failures"] == 1
     assert preview_document["notices"] == []
+
+
+@pytest.mark.matrix("T-CLI-45")
+def test_freshness_write_failure_notice_is_per_target_not_batch_wide(
+    repo_scenario, monkeypatch, capsys
+):
+    """A single Work object is shared across every target in one --all run.
+    The freshness-write-failure notice must reflect whether THIS target's
+    write failed, not whether the corpus-wide counter is merely nonzero --
+    otherwise one early target's failure produces a false-positive notice
+    on every later, genuinely-successful target."""
+    import json as json_module
+
+    import agent_fork.lineage_inference_store as store
+    from agent_fork.cli import main
+
+    world = repo_scenario()
+    root = world.parent_path / ".claude"
+    project = root / "projects" / "-repo"
+    project.mkdir(parents=True)
+
+    def _write_pair(prefix, parent, child):
+        uuids = [f"{prefix}-0000-4000-8000-{i:012d}" for i in range(1, 5)]
+        for session, extra in ((parent, []), (child, [uuids[3]])):
+            rows = []
+            for index, uid in enumerate(uuids[:3]):
+                rows.append(
+                    {
+                        "sessionId": session,
+                        "uuid": uid,
+                        "parentUuid": uuids[index - 1] if index else None,
+                        "type": "user" if index == 1 else "assistant",
+                        "timestamp": f"2026-01-01T00:00:0{index}Z",
+                    }
+                )
+            if extra:
+                rows.append(
+                    {
+                        "sessionId": session,
+                        "uuid": extra[0],
+                        "parentUuid": uuids[2],
+                        "type": "user",
+                        "timestamp": "2026-01-01T00:00:03Z",
+                    }
+                )
+            (project / f"{session}.jsonl").write_text(
+                "".join(json_module.dumps(row) + "\n" for row in rows)
+            )
+
+    parent_a = "2a000000-0000-4000-8000-000000000001"
+    child_a = "2a000000-0000-4000-8000-000000000002"
+    parent_b = "2b000000-0000-4000-8000-000000000001"
+    child_b = "2b000000-0000-4000-8000-000000000002"
+    _write_pair("1a000000", parent_a, child_a)
+    _write_pair("1b000000", parent_b, child_b)
+    (root / "history.jsonl").write_text(
+        "".join(
+            json_module.dumps({"sessionId": sid, "timestamp": ts}) + "\n"
+            for sid, ts in (
+                (parent_a, 1000),
+                (child_a, 2000),
+                (parent_b, 1000),
+                (child_b, 2000),
+            )
+        )
+    )
+    env = {
+        **world.env,
+        "CLAUDE_CONFIG_DIR": str(root),
+        "XDG_CACHE_HOME": str(world.parent_path / "cache"),
+    }
+
+    real_update = store.update_index_freshness
+
+    def flaky_update(child_session_id, *args, **kwargs):
+        # fail only for child_a's own write, regardless of processing
+        # order across the four targets (two parents, two children) --
+        # only the children are ever recordable here, so pinning the
+        # failure to one specific recordable child keeps this test
+        # independent of corpus discovery/iteration order
+        if child_session_id == child_a:
+            raise OSError("injected freshness write failure for child_a")
+        return real_update(child_session_id, *args, **kwargs)
+
+    monkeypatch.setattr(store, "update_index_freshness", flaky_update)
+    monkeypatch.setattr("os.environ", env)
+
+    code = main(
+        ["session", "claude-parent", "infer", "--all", "--record-all", "-o", "json"]
+    )
+    # the two parent transcripts are never recordable (their only candidate
+    # is their own younger child, so neither has an eligible older
+    # candidate) -- that alone makes this batch a partial-record failure,
+    # independent of anything this test is actually proving about the
+    # children's freshness-write notices
+    assert code == 3
+    captured = capsys.readouterr()
+    document = json_module.loads(captured.err)
+    results = document["error"]["details"]["analysis"]["results"]
+    recorded_children = [r for r in results if r["session_id"] in (child_a, child_b)]
+    assert len(recorded_children) == 2
+    assert all(r["recorded"] is True for r in recorded_children)
+
+    with_notice = [
+        r
+        for r in recorded_children
+        if any("freshness_unknown" in n for n in r["notices"])
+    ]
+    without_notice = [
+        r
+        for r in recorded_children
+        if not any("freshness_unknown" in n for n in r["notices"])
+    ]
+    # exactly one target's write genuinely failed -- exactly one target's
+    # document may carry the notice, never both (the shared-counter bug
+    # would put it on both once the first target's write failed)
+    assert len(with_notice) == 1
+    assert len(without_notice) == 1
