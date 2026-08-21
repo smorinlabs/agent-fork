@@ -271,6 +271,24 @@ def _parser() -> argparse.ArgumentParser:
         description="List registered forks in deterministic creation order.",
     )
     output_options(listing, default=None)
+    pruning = commands.add_parser(
+        "prune",
+        allow_abbrev=False,
+        help="Remove registry records that are gone or cannot identify their fork",
+        description=(
+            "Clear registry records whose worktree no longer exists, and "
+            "records written before agent-fork recorded which repository a "
+            "fork belongs to, which can no longer identify one. Only the "
+            "registry is changed; no worktree or branch is touched."
+        ),
+    )
+    pruning.add_argument(
+        "--dry-run", action="store_true", help="Show what would be removed"
+    )
+    pruning.add_argument(
+        "--yes", action="store_true", help="Confirm removal non-interactively"
+    )
+    output_options(pruning, default=None)
     cleanup = commands.add_parser(
         "cleanup",
         allow_abbrev=False,
@@ -1311,6 +1329,40 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 state = "exists" if transcript.exists else "missing"
                 print(f"transcript: {terminal_text(transcript.path)} ({state})")
+            return 0
+        if args.command == "prune":
+            from agent_fork.prune import apply_prune, plan_prune, render
+
+            machine = args.json or args.output == "json"
+            plan = plan_prune(env=environment)
+            if args.dry_run:
+                if machine:
+                    from agent_fork.output import json_line
+
+                    print(json_line({"pruned": False, **plan.document()}))
+                else:
+                    for line in render(plan, dry_run=True):
+                        print(line)
+                return 0
+            if plan.missing and not args.yes:
+                names = ", ".join(entry.name for entry in plan.missing)
+                print(
+                    f"Remove {len(plan.missing)} registry record(s) ({names})? [y/N] ",
+                    end="",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                if sys.stdin.readline().strip().lower() not in {"y", "yes"}:
+                    print("prune cancelled", file=sys.stderr)
+                    return 2
+            applied = apply_prune(plan, env=environment)
+            if machine:
+                from agent_fork.output import json_line
+
+                print(json_line({"pruned": True, **applied.document()}))
+            else:
+                for line in render(applied, dry_run=False):
+                    print(line)
             return 0
         if args.command == "cleanup":
             from agent_fork.cleanup import cleanup, resolve_cleanup_target

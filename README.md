@@ -245,6 +245,7 @@ than starting a new one.
 | `agent-fork session [validate]` | Inspect session evidence, construct its native fork and resume commands, or assert expected identity and lineage |
 | `agent-fork list` | List forks created by `agent-fork` |
 | `agent-fork cleanup <name\|branch\|worktree> --yes` | Remove a registered fork |
+| `agent-fork prune [--dry-run] --yes` | Remove registry records that are gone or unusable; never touches a worktree |
 | `agent-fork doctor` | Diagnose Git, agent, config, and XDG readiness |
 | `agent-fork config view\|get\|set\|validate` | Inspect or update configuration |
 | `agent-fork completion bash\|zsh\|fish` | Generate a shell completion script |
@@ -256,7 +257,28 @@ Global options: `-V/--version`, `-v/--verbose`, `-q/--quiet`, `--debug`, and
 `-o/--output {text,json}` and default to `text`; `--json` is an alias for
 `-o json`.
 
-`cleanup` is registry-scoped unless `--force` is used. It always inspects the
+`cleanup` acts only on a fork the invoking repository actually has. A registry
+record names a candidate; the repository's live worktree list decides whether
+that record still describes reality. A record whose worktree and branch are not
+a live pair here is refused with `cleanup_registry_stale`, whether it belongs to
+a different repository or to a fork that has since been removed — and `--force`
+does not override that refusal, because it is the only evidence that the
+worktree still belongs to the repository its record names. If several records
+claim one target, `cleanup` refuses with `cleanup_registry_ambiguous` rather
+than choosing.
+
+Two consequences are worth knowing. **Run `cleanup <name>` from inside the
+repository**: a fork name is resolved against the invoking repository, so the
+same name may legitimately exist in several repositories and outside a
+repository there is nothing to resolve against. And **a record left behind by a
+worktree you deleted yourself is cleared with `agent-fork prune`**, which
+changes only the registry — it never removes a worktree or a branch. `prune`
+removes a record when nothing is at its recorded path, and when the record
+predates the repository field and so cannot identify its fork; a path now occupied
+by something else is reported and kept, because that may be another
+repository's live worktree.
+
+`cleanup` always inspects the
 target for uncommitted changes and commits that are not reachable from a remote.
 Without the matching override, it refuses and lists up to 10 at-risk paths or
 commits before reporting how many additional entries were omitted. Untracked
@@ -520,6 +542,29 @@ Configuration is TOML, discovered per the XDG/project precedence documented in
 `--config PATH` replaces discovery entirely. State — the fork registry backing
 `list` and `cleanup` — lives under `$XDG_STATE_HOME/agent-fork`.
 
+The registry is one file per user account, shared by every repository, and each
+record names the repository it belongs to. Records written by agent-fork 1.2
+and earlier predate that field. They are read and preserved, not rejected, and no
+repository is inferred for them: the only path such a record carries is where
+its worktree was when the record was written, which is not evidence about what
+is there now.
+
+Such a record **authorizes nothing**. It still appears in `list`, but
+`cleanup <name>` refuses it, and forking will not fill in its repository —
+matching a live worktree is not proof, because two repositories can hold the
+same path on the same branch name, which the `central` worktree layout makes
+ordinary since it keys on a repository's basename alone.
+
+The forks themselves are unaffected. To finish an older fork:
+
+```bash
+agent-fork prune                                  # clears the unusable records
+agent-fork cleanup /path/to/the/worktree --force  # removes the fork itself
+```
+
+`prune` never touches a worktree, so the order does not matter. Note that once
+agent-fork 1.3 writes the registry, earlier versions will not read it.
+
 | `[fork]` key | Default | Environment variable | Notes |
 |---|---|---|---|
 | `with_state` | `true` | — | Carry staged, unstaged, and untracked files |
@@ -629,7 +674,7 @@ cleanup guard refusals use the cleanup schema shown above.
 | 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy` |
 | 2 | Usage error or required prompt disabled | `config_error` |
 | 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown`, `claude_parent_incomplete_analysis` |
-| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable` |
+| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable`, `conflict_fork_registered`, `cleanup_registry_stale`, `cleanup_registry_ambiguous` |
 | 130 / 143 | Interrupted by SIGINT / SIGTERM | — |
 
 Exit 4 remains reserved because this local tool has no authentication failure

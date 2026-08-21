@@ -403,6 +403,29 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-11 | no temporary file survives a successful atomic write | baseline | U | live | REQ-41 |
 | T-REG-12 | temporary file is removed when serialization fails mid-write | baseline | U | live | REQ-41 |
 | T-REG-13 | `fsync=False` still writes the document and still applies owner-only mode — the disposable-cache path | baseline | U | live | REQ-41 |
+| T-REG-14 | same fork name created in two repositories under one registry → both records survive; neither clobbers the other | baseline | F | live | REQ-41 (A3); A3 repro 1 |
+| T-REG-15 | `cleanup <name>` from a repository that has no such fork → `cleanup_registry_stale`, the other repository's worktree is never targeted or deleted and no removal plan names it, registry unchanged | baseline | F | live | REQ-31 (A3); A3 repro 2 |
+| T-REG-16 | auto-named forks in two repositories on the same branch and day derive one name → both records survive | baseline | F | live | REQ-41 (A3); A3 repro 3 |
+| T-REG-17 | after an auto-name collision, `cleanup` plans against the invoking repository's own worktree, never the other's | baseline | F | live | REQ-31 (A3); A3 repro 4 |
+| T-REG-18 | staleness — worktree removed by hand → `cleanup` refuses with `cleanup_registry_stale` and keeps the record, instead of failing on a raw Git error against the missing path | baseline | F | live | REQ-31 (A3); overlaps A7 |
+| T-REG-19 | staleness — recorded path is live but on a different branch → the pair does not match, `cleanup` refuses | baseline | F | live | REQ-31 (A3) |
+| T-REG-20 | `prune` removes records whose worktree path does not exist and leaves live ones; `--dry-run` writes nothing | baseline | F | live | REQ-31 (A3); absorbs A7's prune |
+| T-REG-21 | `prune` keeps and reports a record whose path another repository's live worktree now occupies | baseline | F | live | REQ-31 (A3) |
+| T-REG-22 | `prune` on a healthy registry reports nothing to remove and changes nothing | baseline | F | live | REQ-31 (A3) |
+| T-REG-23 | a v1 record carrying no repository authorizes nothing — cleanup by name refuses, the worktree is untouched, and `prune` clears the record without touching disk | baseline | F | live | REQ-41 (A3); migration; gate-6 r3 |
+| T-REG-24 | forking does **not** backfill a repository onto a v1 record; matching a live pair is not proof of ownership, so the record stays null while the file rewrites as v2 | baseline | F | live | REQ-41 (A3); migration; gate-6 r3 |
+| T-REG-25 | path reuse on the same branch by another repository → cleanup refuses; that repository's worktree and branch both survive. Anchors the destructive commands to the invoking repository, not the record's stored path | baseline | F | live | REQ-31 (A3); gate-6 P0 |
+| T-REG-26 | `--force` does not override the stale refusal — it extends targeting and overrides dirty/unpushed only, never ownership | baseline | F | live | REQ-31 (A3); gate-6 P0 |
+| T-REG-27 | a registered fork is cleanable by absolute path from outside any repository; an explicit path is fresh input and anchors the repository | baseline | F | live | REQ-31 (A3); gate-6 P1 |
+| T-REG-28 | `prune` reports path reuse as displaced even when the occupying worktree carries the same branch name | baseline | F | live | REQ-31a (A3); gate-6 P2 |
+| T-REG-29 | a record naming another repository cannot authorize deletion even when invoked from the repository that now holds its path and branch — the stored repository vetoes, though it never authorizes | baseline | F | live | REQ-31 (A3); gate-6 r2 P0 |
+| T-REG-30 | `--force` extends targeting without skipping confirmation — a listed path whose directory another repository now occupies is refused, not deleted | baseline | F | live | REQ-31 (A3); gate-6 r3 |
+| T-REG-31 | forking a name whose live fork is already registered refuses with `conflict_fork_registered` rather than displacing the record and orphaning its worktree | baseline | F | live | REQ-41 (A3); gate-6 r6 |
+| T-REG-32 | `prune` clears a v1 record without touching its worktree, after which the now-unregistered fork is removable by explicit path with `--force` | baseline | F | live | REQ-31a (A3); gate-6 r4 |
+| T-REG-33 | forking replaces a record whose worktree is gone: it describes nothing, so replacing it orphans nothing | baseline | F | live | REQ-41 (A3); gate-6 r6 |
+| T-REG-34 | the same-name conflict is refused at preflight — before any worktree, include copy, or setup hook has run, since a rollback cannot reverse a hook's side effects | baseline | F | live | REQ-41 (A3); refuse-when-live review |
+| T-REG-35 | `prune` removes only the records the user was shown; one that becomes prunable after the prompt is left for the next run | baseline | F | live | REQ-31a (A3); PR #64 review |
+| T-REG-36 | `prune` escapes registry-sourced name, branch, and path before rendering them to a terminal | baseline | F | live | REQ-31a (A3); PR #64 review |
 
 ---
 
