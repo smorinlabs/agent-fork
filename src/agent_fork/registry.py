@@ -130,44 +130,60 @@ def is_live(entry: RegistryEntry, live: LivePairs) -> bool:
 def add_entry(
     entry: RegistryEntry,
     *,
+    live: LivePairs = frozenset(),
     env: Mapping[str, str] | None = None,
     timeout: float = DEFAULT_LOCK_TIMEOUT,
-) -> list[RegistryEntry]:
-    """Record a fork, replacing only records this repository provably owns.
+) -> None:
+    """Record a fork, refusing rather than displacing a live one.
 
-    A same-named record is replaced when it carries this repository's
-    identity, and otherwise left alone. Nothing here consults live worktrees:
-    a record that merely stores a matching path and branch has not shown it
-    belongs here, because two repositories can hold that same pair.
+    A record with this repository's identity and this name is replaced only
+    when its worktree is **gone**, which orphans nothing. When that worktree
+    is still there, the fork refuses: replacing the record would leave real
+    work on disk with nothing pointing at it — A3's own fault, silent
+    clobbering, surviving inside a single repository after scoping fixed it
+    between them.
 
-    Returns the records this call displaced, so a caller that has to undo the
-    fork can put them back rather than leaving the user's earlier fork
-    unregistered.
+    `live` is used here to *refuse*, never to authorize, which is why a stale
+    reading is safe: it can only make this refusal fire when it need not, and
+    can never suppress it. Nothing is displaced, so nothing needs restoring
+    if the caller later has to undo the fork.
+
+    A record carrying no repository is never touched: matching a live worktree
+    does not show it belongs here, since two repositories can hold one path on
+    one branch name — ordinary under the `central` worktree layout, which keys
+    on a repository's basename alone.
     """
     path = registry_path(env)
-    displaced: list[RegistryEntry] = []
     with registry_lock(path, timeout=timeout):
         kept: list[RegistryEntry] = []
         for item in _decode(path):
-            same_repository = (
-                item.repository is not None
+            same_fork = (
+                item.name == entry.name
+                and item.repository is not None
                 and entry.repository is not None
                 and item.repository == entry.repository
             )
-            if item.name == entry.name and same_repository:
-                displaced.append(item)
+            if same_fork:
+                # A record naming the same worktree and branch as the fork
+                # being recorded describes this very slot, not a second fork.
+                # Its liveness is the *new* worktree, which the caller just
+                # created, so refusing here would block every re-fork of a
+                # name whose worktree was removed outside agent-fork.
+                same_slot = (
+                    item.worktree == entry.worktree and item.branch == entry.branch
+                )
+                if not same_slot and is_live(item, live):
+                    raise PreconditionError(
+                        "conflict_fork_registered",
+                        f"fork {item.name!r} is already registered for this "
+                        f"repository at {item.worktree}; remove it first, or "
+                        "choose another name",
+                    )
+                # Its worktree is gone, so the record describes nothing.
                 continue
-            # A record carrying no repository is not backfilled and is not
-            # replaced (owner decision 2026-08-20). Matching a live worktree
-            # does not show the record belongs to this repository: two
-            # repositories can hold the same path on the same branch name,
-            # which the `central` worktree layout makes ordinary because it
-            # keys on a repository's basename alone. Writing an identity on
-            # that evidence would manufacture the ownership it cannot prove.
             kept.append(item)
         kept.append(entry)
         _atomic_write(path, kept)
-    return displaced
 
 
 def require_single(token: tuple[object, ...], *, env: Mapping[str, str] | None) -> None:
@@ -202,67 +218,6 @@ def remove_entry(
     """Compare-and-swap removal for callers not already holding the lock."""
     with registry_lock(registry_path(env), timeout=timeout):
         remove_locked(token, env=env)
-
-
-def undo_add(
-    inserted: RegistryEntry,
-    displaced: list[RegistryEntry],
-    *,
-    env: Mapping[str, str] | None = None,
-    timeout: float = DEFAULT_LOCK_TIMEOUT,
-) -> None:
-    """Reverse one `add_entry` in a single locked step.
-
-    Removes the record identified by `token` and puts back exactly the records
-    that call displaced. Deliberately does not reuse the replacement rule:
-    re-adding through `add_entry` would apply it a second time and could
-    delete a record another process registered in the meantime. Records added
-    concurrently under other names are preserved untouched.
-
-    Absence of the inserted record has two very different causes, and they are
-    distinguished by whether a *successor* exists — another record with the
-    same repository and name:
-
-    - **Superseded.** Another fork took the name while this one was failing.
-      That record is the live one now, and putting back what this call
-      displaced would leave two records under one name, making a later cleanup
-      ambiguous rather than repairing anything. Do nothing.
-    - **Cleaned up.** Someone removed the fork this call inserted. No
-      successor holds the name, so the record this call displaced is still the
-      right one to restore, and skipping it would silently unregister a
-      worktree that still exists.
-    """
-    path = registry_path(env)
-    token = inserted.token()
-    with registry_lock(path, timeout=timeout):
-        entries = _decode(path)
-        if not any(item.token() == token for item in entries):
-            superseded = any(
-                item.name == inserted.name
-                and item.repository is not None
-                and item.repository == inserted.repository
-                for item in entries
-            )
-            if superseded:
-                return
-        remaining = [item for item in entries if item.token() != token]
-        present = {item.token() for item in remaining}
-        # Only records whose worktree is still on disk. Rollbacks cascade: a
-        # successor that later fails carries *this* call's record in its own
-        # displaced list, and restoring it would resurrect a fork whose
-        # worktree that rollback already deleted — a record pointing at
-        # nothing, which is what `prune` exists to remove. One residual case
-        # is accepted rather than solved: if a successor takes the name and
-        # then also fails, the record this call displaced is not recovered,
-        # because the successor never knew about it. Its worktree survives,
-        # unregistered and removable by path. `prune` cannot bring the record
-        # back.
-        remaining.extend(
-            item
-            for item in displaced
-            if item.token() not in present and Path(item.worktree).exists()
-        )
-        _atomic_write(path, remaining)
 
 
 def find_candidates(

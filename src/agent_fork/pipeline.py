@@ -23,10 +23,11 @@ from agent_fork.include import copy_worktree_includes, run_setup_hook
 from agent_fork.lineage import LineageClaim, add_lineage
 from agent_fork.materialize import materialize
 from agent_fork.models import RegistryEntry
-from agent_fork.registry import add_entry, undo_add
+from agent_fork.registry import add_entry, remove_entry
 from agent_fork.repository import (
     WorktreeCreation,
     create_worktree_at_anchor,
+    live_worktree_pairs,
     validate_fork_guards,
 )
 from agent_fork.rollback import run_with_rollback
@@ -160,7 +161,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             mode="agent" if resolved_agent is not None else "git-only",
             repository=creation.common_dir,
         )
-        displaced = add_entry(entry, env=env)
+        add_entry(entry, live=live_worktree_pairs(request.parent, env=env), env=env)
         if (
             resolved_agent is not None
             and resolved_agent.agent == "claude"
@@ -179,14 +180,15 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                     env=env,
                 )
             except Exception:
-                # Undo this call's registry write in one locked step: remove
-                # the record just written and put back exactly what it
-                # displaced, so a failed fork does not leave the user's earlier
-                # fork unregistered. Compensation is best-effort by design —
-                # whatever goes wrong here, the failure that triggered it is
-                # the one worth reporting, so nothing is allowed to mask it.
+                # Remove exactly the record this call wrote. Nothing else is
+                # needed: `add_entry` refuses rather than displacing a live
+                # fork, so there is no earlier record to put back. Removal is
+                # a compare-and-swap, so a record already taken by a cleanup
+                # or replaced by a later fork is left alone. Compensation is
+                # best-effort by design — whatever goes wrong here, the
+                # failure that triggered it is the one worth reporting.
                 with suppress(Exception):
-                    undo_add(entry, displaced, env=env)
+                    remove_entry(entry.token(), env=env)
                 raise
         return included.copied, hook_notices
 

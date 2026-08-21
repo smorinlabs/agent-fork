@@ -202,126 +202,73 @@ def test_force_targeting_confirms_the_path_before_deleting_it(repo_scenario):
 
 
 @pytest.mark.matrix("T-REG-31")
-def test_undo_add_does_not_resurrect_after_another_writer_supersedes(repo_scenario):
-    """A failed fork's compensation must not fight a later successful one."""
-    from agent_fork.models import RegistryEntry
-    from agent_fork.registry import add_entry, read_registry, undo_add
+def test_forking_a_live_name_refuses_instead_of_orphaning_it(repo_scenario):
+    """Replacing a live record would leave its worktree with nothing naming it.
 
-    world = repo_scenario()
-    repository = str(world.parent_path / ".git")
-
-    def record(name, suffix):
-        return RegistryEntry.create(
-            name=name,
-            branch=f"fork/{suffix}",
-            worktree=world.parent_path.parent / f"wt-{suffix}",
-            agent=None,
-            repository=repository,
-        )
-
-    original = record("shared", "original")
-    add_entry(original, env=world.env)
-
-    # A fork displaces it, then a second writer supersedes that fork.
-    failing = record("shared", "failing")
-    displaced = add_entry(failing, env=world.env)
-    assert [item.token() for item in displaced] == [original.token()]
-    winner = record("shared", "winner")
-    add_entry(winner, env=world.env)
-
-    # Only now does the first fork fail and try to undo itself.
-    undo_add(failing, displaced, env=world.env)
-
-    names = [(item.name, item.branch) for item in read_registry(env=world.env)]
-    assert names == [("shared", "fork/winner")], (
-        f"compensation resurrected a superseded record: {names}"
-    )
-
-
-@pytest.mark.matrix("T-REG-34")
-def test_cascading_rollback_does_not_resurrect_a_failed_fork(repo_scenario):
-    """O displaced by F, F displaced by W, then both F and W roll back.
-
-    W's displaced list names F, so a naive restore would put back a record
-    for a worktree W's own rollback already deleted.
+    The guards do not catch this: an explicit branch and destination differ
+    from the first fork's, so the collision only surfaces at the registry.
     """
-    from agent_fork.models import RegistryEntry
-    from agent_fork.registry import add_entry, read_registry, undo_add
+    from pathlib import Path
+
+    from conftest import run_cli
 
     world = repo_scenario()
-    repository = str(world.parent_path / ".git")
-    root = world.parent_path.parent
+    first = _fork(world.env, world.parent_path, "twice")
+    assert first.returncode == 0
+    original = _worktree_of(first.stdout)
 
-    def record(suffix, *, on_disk):
-        worktree = root / f"wt-{suffix}"
-        if on_disk:
-            worktree.mkdir(exist_ok=True)
-        return RegistryEntry.create(
-            name="shared",
-            branch=f"fork/{suffix}",
-            worktree=worktree,
-            agent=None,
-            repository=repository,
-        )
-
-    original = record("original", on_disk=True)
-    add_entry(original, env=world.env)
-    failing = record("failing", on_disk=False)  # its rollback removed it
-    displaced_by_failing = add_entry(failing, env=world.env)
-    winner = record("winner", on_disk=True)
-    displaced_by_winner = add_entry(winner, env=world.env)
-
-    undo_add(failing, displaced_by_failing, env=world.env)
-    undo_add(winner, displaced_by_winner, env=world.env)
-
-    names = [(item.name, item.branch) for item in read_registry(env=world.env)]
-    assert ("shared", "fork/failing") not in names, (
-        f"a record was restored for a worktree that no longer exists: {names}"
+    second = run_cli(
+        [
+            "fork",
+            "twice",
+            "--no-agent",
+            "--branch",
+            "fork/twice-again",
+            "--worktree-name",
+            "twice-again",
+        ],
+        world.env,
+        world.parent_path,
     )
+    assert second.returncode == 5, second.stdout
+    assert b"conflict_fork_registered" in second.stderr, second.stderr
+
+    rows = _rows(world.env)
+    assert len(rows) == 1 and rows[0]["worktree"] == original, (
+        f"the first fork's record must survive: {rows}"
+    )
+    assert Path(original).exists()
 
 
 @pytest.mark.matrix("T-REG-33")
-def test_undo_add_restores_when_cleanup_removed_the_record(repo_scenario):
-    """Absence is not supersession: with no successor, the original returns.
-
-    A concurrent cleanup can remove the record a failing fork inserted. No
-    other record then holds the name, so what that fork displaced is still the
-    right record — dropping it would silently unregister a live worktree.
-    """
-    from agent_fork.models import RegistryEntry
-    from agent_fork.registry import add_entry, read_registry, remove_entry, undo_add
-
+def test_forking_replaces_a_record_whose_worktree_is_gone(repo_scenario):
+    """A record describing nothing is replaced freely: it orphans nothing."""
     world = repo_scenario()
-    repository = str(world.parent_path / ".git")
+    created = _fork(world.env, world.parent_path, "again")
+    assert created.returncode == 0
+    worktree = _worktree_of(created.stdout)
 
-    def record(name, suffix):
-        worktree = world.parent_path.parent / f"wt-{suffix}"
-        # The worktree must exist: restoration deliberately skips a record
-        # whose directory is gone, so a record with no directory would make
-        # this test pass for the wrong reason.
-        worktree.mkdir(exist_ok=True)
-        return RegistryEntry.create(
-            name=name,
-            branch=f"fork/{suffix}",
-            worktree=worktree,
-            agent=None,
-            repository=repository,
-        )
-
-    original = record("shared", "original")
-    add_entry(original, env=world.env)
-    failing = record("shared", "failing")
-    displaced = add_entry(failing, env=world.env)
-
-    # Someone cleans up the fork that is about to fail. No successor exists.
-    remove_entry(failing.token(), env=world.env)
-
-    undo_add(failing, displaced, env=world.env)
-
-    names = [(item.name, item.branch) for item in read_registry(env=world.env)]
-    assert names == [("shared", "fork/original")], (
-        f"the displaced record was not restored: {names}"
+    # Remove the fork the way a user would outside agent-fork, branch and all.
+    shutil.rmtree(worktree)
+    subprocess.run(
+        ["git", "worktree", "prune"],
+        cwd=world.parent_path,
+        env=world.env,
+        check=True,
+        capture_output=True,
     )
+    subprocess.run(
+        ["git", "branch", "-D", _branch_of(created.stdout)],
+        cwd=world.parent_path,
+        env=world.env,
+        check=True,
+        capture_output=True,
+    )
+
+    again = _fork(world.env, world.parent_path, "again")
+    assert again.returncode == 0, again.stderr
+    rows = _rows(world.env)
+    assert len(rows) == 1, f"the dead record should have been replaced: {rows}"
 
 
 @pytest.mark.matrix("T-REG-26")

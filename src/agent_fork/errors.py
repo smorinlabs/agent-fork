@@ -46,6 +46,9 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
     "cleanup_target_is_cwd": ErrorSpec(5, "cleanup target contains the invoking cwd"),
     "cleanup_dirty_worktree": ErrorSpec(5, "cleanup target has uncommitted changes"),
     "cleanup_unpushed_commits": ErrorSpec(5, "cleanup target has unpushed commits"),
+    "conflict_fork_registered": ErrorSpec(
+        5, "a live fork of this name is already registered for this repository"
+    ),
     "cleanup_registry_stale": ErrorSpec(
         5, "registry record does not match this repository's live worktrees"
     ),
