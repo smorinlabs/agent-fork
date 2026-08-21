@@ -102,6 +102,15 @@ def test_setup_hook_keys_round_trip_through_the_config_cli(repo_scenario):
         assert viewed.returncode == 0, viewed.stderr.decode()
         assert viewed.stdout == expected
 
+    # `config view` builds its document independently of `config get` — a
+    # configured value taking effect while `view` still omitted it went
+    # unnoticed until CodeRabbit's review of PR #65.
+    document = run_cli(["config", "view"], world.env, world.parent_path)
+    assert document.returncode == 0, document.stderr.decode()
+    view_text = document.stdout.decode()
+    assert "setup_hook_policy = any" in view_text
+    assert "setup_hook_timeout = 45" in view_text
+
 
 @pytest.mark.matrix("T-CFG-39")
 def test_invalid_setup_hook_values_are_rejected_at_validate_time(repo_scenario):
@@ -145,14 +154,21 @@ def test_invalid_setup_hook_values_are_rejected_at_validate_time(repo_scenario):
     # reject the same values on its own — through A11's `validate_values()`
     # registry, whose `ConfigFinding.render()` names the key, the offending
     # value, the allowed forms, and the winning source.
-    with pytest.raises(ConfigError, match="greater than zero"):
+    with pytest.raises(ConfigError) as rejected_timeout:
         resolve_config(flags={"setup_hook_timeout": 0})
+    timeout_message = str(rejected_timeout.value)
+    assert "greater than zero" in timeout_message
+    # CodeRabbit, PR #65: resolve_config() never recorded provenance for
+    # these two fields, so an invalid flag-set value rendered "(from
+    # default)" instead of naming the flag that actually supplied it.
+    assert "(from flag)" in timeout_message
     with pytest.raises(ConfigError) as rejected_policy:
         resolve_config(flags={"setup_hook_policy": "nonsense"})
     policy_message = str(rejected_policy.value)
     assert "fork.setup_hook_policy" in policy_message
     assert "'nonsense'" in policy_message
     assert "allowed: tracked, any, off" in policy_message
+    assert "(from flag)" in policy_message
 
     flagged = run_cli(
         ["fork", "bad-timeout", "--dry-run", "--no-agent", "--setup-hook-timeout", "0"],

@@ -1580,6 +1580,8 @@ def main(argv: list[str] | None = None) -> int:
                     "verify": resolved.verify,
                     "copy": resolved.copy,
                     "output": resolved.output,
+                    "setup_hook_policy": resolved.setup_hook_policy,
+                    "setup_hook_timeout": resolved.setup_hook_timeout,
                     "agents": {
                         "claude": {"extra_args": list(resolved.claude_extra_args)},
                         "codex": {

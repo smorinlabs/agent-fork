@@ -431,8 +431,10 @@ def resolve_config(
             copy = source.copy
         if source.setup_hook_policy is not None:
             setup_hook_policy = source.setup_hook_policy
+            provenance["setup_hook_policy"] = label
         if source.setup_hook_timeout is not None:
             setup_hook_timeout = source.setup_hook_timeout
+            provenance["setup_hook_timeout"] = label
         if source.output is not None:
             output = source.output
             provenance["output"] = (

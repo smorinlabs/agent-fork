@@ -139,7 +139,9 @@ def _setup_hook_check(
         )
         if policy == "any":
             return DoctorCheck(
-                name, True, f"{detail} (allowed to run under policy=any)"
+                name,
+                True,
+                f"{detail} (allowed to run under policy=any, timeout={timeout}s)",
             )
         return DoctorCheck(
             name,
@@ -151,7 +153,8 @@ def _setup_hook_check(
         return DoctorCheck(
             name,
             True,
-            f"{SETUP_HOOK_RELATIVE_PATH} {reason} (allowed to run under policy=any)",
+            f"{SETUP_HOOK_RELATIVE_PATH} {reason} (allowed to run under "
+            f"policy=any, timeout={timeout}s)",
         )
     return DoctorCheck(
         name,

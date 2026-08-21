@@ -1594,6 +1594,9 @@ def test_doctor_reports_and_can_fail_on_the_repository_setup_hook(repo_scenario)
     _, checks = _doctor_checks(allowed)
     assert checks[name]["ok"] is True
     assert "policy=any" in checks[name]["detail"]
+    # CodeRabbit, PR #65: the hook actually runs under `any`, same as the
+    # eligible case above, but the detail used to omit the timeout bound.
+    assert "timeout=300s" in checks[name]["detail"]
 
     config_path.write_text('[fork]\nsetup_hook_policy = "off"\n')
     off = run_cli(["doctor", "--json"], modified_env, modified.parent_path)
@@ -1647,6 +1650,7 @@ def test_doctor_names_the_read_failure_for_an_unchecked_hook(
     assert allowed.ok is True
     assert "provenance could not be checked: HEAD could not be read" in allowed.detail
     assert "allowed to run under policy=any" in allowed.detail
+    assert "timeout=300s" in allowed.detail
 
 
 @pytest.mark.requires_process_group_signals
