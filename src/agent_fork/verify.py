@@ -100,7 +100,19 @@ def verify_fork(
     ):
         failures.append("worktree-list")
 
-    status_args = ["status", "--porcelain=v1", "-z", "--untracked-files=all"]
+    # `--ignore-submodules=dirty` suppresses submodule *working-tree* state,
+    # which a fork does not carry — `git worktree add` never initializes
+    # submodules, so the child cannot reproduce the parent's ` M <path>`. It
+    # still reports commit-level gitlink differences, so a submodule advance
+    # staged in the parent, which does travel in the staged patch, keeps being
+    # compared. `=all` would hide that too (A6a).
+    status_args = [
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--ignore-submodules=dirty",
+    ]
     if with_ignored:
         status_args.append("--ignored")
     child_status = run_git(creation.path, status_args, env=env).stdout

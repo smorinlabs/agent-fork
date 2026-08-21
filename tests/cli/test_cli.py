@@ -1147,27 +1147,27 @@ def test_incomplete_dry_run_refuses_before_any_mutation(repo_scenario):
         pytest.param(
             '[fork]\nworktree_location = "{bogus}/x"\n',
             "unknown placeholder",
-            id="T-CLI-36",
-            marks=pytest.mark.matrix("T-CLI-36"),
+            id="T-CLI-39",
+            marks=pytest.mark.matrix("T-CLI-39"),
         ),
         pytest.param(
             '[fork]\nworktree_location = "{session-id}/w"\n',
             "not supported",
-            id="T-CLI-37",
-            marks=pytest.mark.matrix("T-CLI-37"),
+            id="T-CLI-40",
+            marks=pytest.mark.matrix("T-CLI-40"),
         ),
         pytest.param(
             '[fork]\nbranch_prefix = "-bad/"\n',
             "must not begin with -",
-            id="T-CLI-38",
-            marks=pytest.mark.matrix("T-CLI-38"),
+            id="T-CLI-41",
+            marks=pytest.mark.matrix("T-CLI-41"),
         ),
     ],
 )
 def test_invalid_config_rejected_identically_by_validate_and_fork(
     repo_scenario, config_toml, expected_fragment
 ):
-    """T-CLI-36..38 — the same invalid input is rejected identically by
+    """T-CLI-39..41 — the same invalid input is rejected identically by
     `config validate`, `fork --dry-run`, and real `fork` — no
     validate-says-yes-then-fork-fails divergence (outcome 1)."""
     from conftest import run_cli
@@ -1206,9 +1206,9 @@ def test_invalid_config_rejected_identically_by_validate_and_fork(
     assert real_fork.stderr == dry_run.stderr
 
 
-@pytest.mark.matrix("T-CLI-39")
+@pytest.mark.matrix("T-CLI-42")
 def test_invalid_config_real_fork_creates_no_artifact(repo_scenario):
-    """T-CLI-39 — the real-fork refusal case creates no branch, worktree,
+    """T-CLI-42 — the real-fork refusal case creates no branch, worktree,
     registry, lineage, or cache artifact — the choke point refuses before
     any mutation, not merely before printing success."""
     from conftest import run_cli
@@ -1240,9 +1240,9 @@ def test_invalid_config_real_fork_creates_no_artifact(repo_scenario):
     assert _fork_state(world, environment, destination) == before
 
 
-@pytest.mark.matrix("T-CLI-40")
+@pytest.mark.matrix("T-CLI-43")
 def test_doctor_reports_every_finding_joined_on_one_line(repo_scenario):
-    """T-CLI-40 — `doctor` reports every semantic finding for a
+    """T-CLI-43 — `doctor` reports every semantic finding for a
     multi-bad-key configuration, joined onto one line (F11 — not newlines,
     so `doctor`'s one-check-per-line renderer and the JSON `detail` field
     both stay well-formed), and exits 0 for a valid configuration."""
@@ -1273,9 +1273,9 @@ def test_doctor_reports_every_finding_joined_on_one_line(repo_scenario):
     assert b"FAIL config validity" not in valid.stdout
 
 
-@pytest.mark.matrix("T-CLI-41")
+@pytest.mark.matrix("T-CLI-44")
 def test_config_view_honors_valid_agent_fork_output_env(repo_scenario):
-    """T-CLI-41 — `config view` honors a *valid* `AGENT_FORK_OUTPUT=json`
+    """T-CLI-44 — `config view` honors a *valid* `AGENT_FORK_OUTPUT=json`
     with no explicit flag, closing the "validates it, then ignores it" gap
     found at Gate 4 (F8) alongside the invalid-value rejection already
     covered by T-CLI-32."""
@@ -1289,9 +1289,9 @@ def test_config_view_honors_valid_agent_fork_output_env(repo_scenario):
     assert document["output"] == "json"
 
 
-@pytest.mark.matrix("T-CLI-42")
+@pytest.mark.matrix("T-CLI-45")
 def test_boundary_spanning_branch_prefix_caught_only_at_fork_time(repo_scenario):
-    """T-CLI-42 — T11h's fork-time `check-ref-format` guard on the *derived*
+    """T-CLI-45 — T11h's fork-time `check-ref-format` guard on the *derived*
     branch is required, not optional hardening (F7): a `branch_prefix`
     ending `.loc` composed with a name starting `k` produces the component
     `foo.lock`, illegal only once the two are joined — no prefix-only or
@@ -1332,9 +1332,9 @@ def test_boundary_spanning_branch_prefix_caught_only_at_fork_time(repo_scenario)
     assert b"foo.lock" in real_fork.stderr
 
 
-@pytest.mark.matrix("T-CLI-43")
+@pytest.mark.matrix("T-CLI-46")
 def test_output_format_preserved_across_a_later_unrelated_error(repo_scenario):
-    """T-CLI-43 — a valid, explicitly-resolved `AGENT_FORK_OUTPUT=json`
+    """T-CLI-46 — a valid, explicitly-resolved `AGENT_FORK_OUTPUT=json`
     keeps rendering errors as JSON even when the error that actually fires
     comes from a *different*, unrelated invalid key (F16/Gate-6 M1) — the
     output-format decision must survive past the point it was made, not only
@@ -1371,14 +1371,14 @@ def test_output_format_preserved_across_a_later_unrelated_error(repo_scenario):
     assert "unknown placeholder" in document["error"]["message"]
 
 
-@pytest.mark.matrix("T-CLI-44")
+@pytest.mark.matrix("T-CLI-47")
 def test_explicit_output_flag_beats_a_valid_agent_fork_output_on_error_too(
     repo_scenario,
 ):
-    """T-CLI-44 — an explicit `-o text` still wins over a *valid*
+    """T-CLI-47 — an explicit `-o text` still wins over a *valid*
     `AGENT_FORK_OUTPUT=json` on an error path, including when the error
     comes from a key unrelated to output (Gate-6 second-pass regression:
-    the T-CLI-43 environment fallback must not override an explicit flag
+    the T-CLI-46 environment fallback must not override an explicit flag
     that says otherwise)."""
     from conftest import run_cli
 
@@ -1416,11 +1416,11 @@ def test_explicit_output_flag_beats_a_valid_agent_fork_output_on_error_too(
     assert "invalid_branch" in fork_completed.stderr.decode()
 
 
-@pytest.mark.matrix("T-CLI-45")
+@pytest.mark.matrix("T-CLI-48")
 def test_doctor_honors_valid_output_env_on_an_unrelated_config_failure(
     repo_scenario,
 ):
-    """T-CLI-45 — Gate-6 second-pass finding: `doctor`'s own except-branch
+    """T-CLI-48 — Gate-6 second-pass finding: `doctor`'s own except-branch
     fell back straight to `"text"` without consulting a valid
     `AGENT_FORK_OUTPUT`, so a JSON consumer got unparseable text from
     `doctor` precisely when the config was broken by an unrelated key —
