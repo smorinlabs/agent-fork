@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 496 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 513 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -163,6 +163,11 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-19 | A2 guard — `GIT_CONFIG_GLOBAL` file pointers stay honoured; sanitization must not silently unseal configuration | baseline | F | live | A2 design doc §C1 |
 | T-GRD-20 | A2 guard — repository-local configuration still applies; sanitization targets inline injection only | baseline | F | live | A2 design doc §C2 |
 | T-GRD-21 | A2 — `GIT_CONFIG_PARAMETERS`, Git's second inline-injection channel, is stripped too; stripping only the `GIT_CONFIG_COUNT` triple left it open | baseline | F | live | PR #36 review; A2 design doc |
+| T-GRD-22 | A6a — a submodule checked out at a commit the parent's index does not record is refused before any mutation (`submodule_unrepresentable`, exit 5); conditional on submodules not being carried, so A6b gates it rather than deleting it | baseline | F | live | A6 design doc §Matrix 1 cell `c` |
+| T-GRD-23 | A6a — the refusal is gated on carrying state, so `--no-with-state` (the remedy the error recommends) is not itself refused | baseline | F | live | A6 design doc §Split |
+| T-GRD-24 | A6a gate-6 — a removed submodule directory is an ordinary `deleted file mode 160000` deletion that transports, so the guard must not refuse it; `--diff-filter=M` is what distinguishes it from an unrepresentable modified gitlink | baseline | F | live | A6 gate-6 finding 1 |
+| T-GRD-25 | A6a gate-6 — a conflicted gitlink reports as unmerged, not modified, so it is excluded by `--diff-filter=M`, and the mid-operation refusal that names the user's real state wins | baseline | F | live | A6 gate-6 finding 3 |
+| T-GRD-26 | A6a gate-6 pass 2 — a deleted submodule checkout forks end to end through the console script, not merely past the guard | baseline | F | live | A6 gate-6 pass-2 L2 |
 
 ---
 
@@ -280,6 +285,10 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-23 | A2 transport — `diff.external` replaces the diff engine repository-wide; transport must be immune | baseline | F | live | A2 design doc §T5 |
 | T-MAT-24 | A2 transport — the committed/staged/working-tree split survives transport while a diff driver is active (the reason patches exist rather than file copies) | baseline | F | live | REQ-21; A2 design doc |
 | T-MAT-25 | A2 audit — reported staged/unstaged counts match the carried inventory for a staged rename; porcelain rename detection reported one path where transport carries both endpoints | baseline | F | live | A2 design doc §T9 |
+| T-MAT-26 | A6a — the materialize notice names the submodule state that was not carried instead of claiming `submodules copied opaquely` over an empty directory | baseline | F | live | A6 design doc §Matrix 1 correction 5 |
+| T-MAT-27 | A6a gate-6 — a submodule sitting at its recorded commit produces no loss notice; the notice reports only paths whose state the filter suppresses | baseline | F | live | A6 gate-6 finding 4 |
+| T-MAT-28 | A6a gate-6 pass 2 — a submodule both staged at a new commit and dirty inside reports its loss; the comparison is per status code (`MM` vs `M `), not per path membership | baseline | F | live | A6 gate-6 pass-2 M1 |
+| T-MAT-29 | A6a gate-6 pass 2 — a porcelain rename source record cannot fabricate a path that masks a genuinely dirty submodule | baseline | F | live | A6 gate-6 pass-2 M2 |
 
 ---
 
@@ -326,6 +335,11 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 | T-VER-32 | A1 negative (h) — a path carried by the child but absent from the parent is caught by the child's own inventory, under `status.showUntrackedFiles=no` which blinds the porcelain rung | baseline | F | live | A1 gate-6 review finding 1 |
 | T-VER-33 | A1 negative (i) — a hostile filename (ESC, newline) is escaped in both the human message and `error.details.failed_checks`, machine output stays encodable, and exactly one check is marked primary | baseline | F | live | A1 gate-6 review finding 4 |
 | T-VER-34 | A1 negative (j) — the pipeline hands `materialize()` the inventory it resolved before worktree creation, so transport cannot fall back to re-enumerating afterwards | baseline | F | live | A1 gate-6 re-review blocker 1 |
+| T-VER-35 | A6a — a submodule with an edited tracked file no longer fails `exact-copy-status` and `content-match`; the fork verifies instead of rolling back | baseline | F | live | A6 design doc §Matrix 1 cell `a` |
+| T-VER-36 | A6a — a submodule dirtied only by untracked content forks; distinct from T-VER-35 because plain `git diff` does not list it, so it failed the porcelain rung alone | baseline | F | live | A6 design doc §Matrix 1 cell `b` |
+| T-VER-37 | A6a — the exemption is scoped to submodules: an ordinary modified file alongside a dirty submodule is still transported and still verified | baseline | F | live | A6 design doc §Matrix 1 cell `f` |
+| T-VER-38 | A6a positive guard — a submodule advance staged in the parent keeps being compared, which is why the filter is `--ignore-submodules=dirty` and not `=all` | baseline | F | live | A6 design doc §Matrix 1 cell `d` |
+| T-VER-39 | A6a positive guard — a clean submodule gitlink is unaffected by the filter | baseline | F | live | A6 design doc §Matrix 1 cell `e` |
 
 ---
 
@@ -544,18 +558,21 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-33 | every option argparse declares for each subcommand reaches the completion vocabulary — the parity invariant that replaces hand-maintained option lists | baseline | U | live | REQ-10 |
 | T-CLI-34 | every subcommand argparse declares reaches the completion vocabulary | baseline | U | live | REQ-10 |
 | T-CLI-35 | completion output choices are exactly those the parser accepts, so a removed alias cannot linger in completions | baseline | U | live | P02 A13(b); REQ-10 |
-| T-CLI-36 | human and JSON session output report `last_known_good` and `freshness_unknown` parent inference, with the exact rerun notice, the `parent inference:` line immediately after `lineage:`, and no corpus discovery, cache write, or freshness write | freshness=A10 | C | live | P02 A10; REQ-32 |
-| T-CLI-37 | `delete --source inferred` reports every additive field and removes the freshness entry; `delete --source planned` with a surviving inferred record retains the freshness entry and says so | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
-| T-CLI-38 | exceeding a whole-corpus limit (`max_files`) under `--current`, `--session-id`, `--all`, and `--record` exits 3 as `claude_parent_incomplete_analysis` with one JSON error and no spool, inference, freshness, or registry write | freshness=A10 | C | live | P02 A10; REQ-17; REQ-18; R6.1 |
-| T-CLI-39 | `delete --source inferred` removes the freshness entry before the record; a fault injected after the freshness removal leaves the record readable as `freshness_unknown`, never `current` | freshness=A10 | C | live | P02 A10; REQ-32 |
-| T-CLI-40 | a per-target limit (`max_candidates`) tripped on one of several `--all` targets yields that target's own typed incomplete-analysis document inside the bulk output while an unaffected target completes its own analysis with no error and no "incomplete" status, and the bulk spool closes cleanly with a valid summary | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
-| T-CLI-43 | an already-expired shared `max_seconds` deadline under `--all` reports `scope: "corpus"` (not `"target"`) for every affected target, since it is one shared clock, and the batch still exits cleanly with a valid summary | freshness=A10 | C | live | P02 A10; REQ-17; REQ-48 |
-| T-CLI-41 | a freshness-index write failure increments `work.freshness_write_failures`; the CLI appends the rerun notice only on a `--record` run that actually recorded, never on a preview run | freshness=A10 | C | live | P02 A10; REQ-17 |
-| T-CLI-42 | a per-target limit (`max_candidates`) breaching inside `infer_one()` for a single, non-`--all` target still surfaces the typed `claude_parent_incomplete_analysis` code end to end, not a generic not-recordable/unavailable class | freshness=A10 | C | live | P02 A10; REQ-17; REQ-48 |
-| T-CLI-44 | `delete --source inferred` on a child holding both a planned claim and an inferred record reports `retained_planned_record: true`, and a follow-up `list` confirms the planned claim genuinely still exists | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
-| T-CLI-45 | the freshness-write-failure notice reflects only whether THIS target's write failed under `--all --record-all`, not whether the corpus-wide counter is merely nonzero: two independently recordable targets, only the first's write fails, only the first's document carries the notice | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
-| T-CLI-46 | `analyzed_at` on the human `parent inference:` line is escaped through `terminal_text` like its neighbors on the same line; JSON output keeps the raw value | freshness=A10 | C | live | P02 A10 gate-6; REQ-17 |
-| T-CLI-47 | a corrupted freshness index at the target's location does not block `delete`: the primary record is still removed and the command still exits 0, with `removed_freshness_entry: false` and a "could not confirm" notice | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
+| T-CLI-36 | A6a gate-6 — the console script forwards `--no-with-state` to the submodule guard, so the refusal and its remedy are proven through the real CLI rather than a direct call | baseline | F | live | A6 gate-6 finding 5 |
+| T-CLI-37 | A6a gate-6 — dry-run counts and notices describe the fork that will actually happen: a dirty submodule previews as zero unstaged paths and carries a loss notice | baseline | F | live | A6 gate-6 finding 2 |
+| T-CLI-38 | A6a gate-6 — `submodule_unrepresentable` appears in the README row for its own exit status, parsed from the table rather than searched for anywhere in the file | baseline | F | live | A6 gate-6 finding 7, narrowed in pass 2 |
+| T-CLI-39 | human and JSON session output report `last_known_good` and `freshness_unknown` parent inference, with the exact rerun notice, the `parent inference:` line immediately after `lineage:`, and no corpus discovery, cache write, or freshness write | freshness=A10 | C | live | P02 A10; REQ-32 |
+| T-CLI-40 | `delete --source inferred` reports every additive field and removes the freshness entry; `delete --source planned` with a surviving inferred record retains the freshness entry and says so | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLI-41 | exceeding a whole-corpus limit (`max_files`) under `--current`, `--session-id`, `--all`, and `--record` exits 3 as `claude_parent_incomplete_analysis` with one JSON error and no spool, inference, freshness, or registry write | freshness=A10 | C | live | P02 A10; REQ-17; REQ-18; R6.1 |
+| T-CLI-42 | `delete --source inferred` removes the freshness entry before the record; a fault injected after the freshness removal leaves the record readable as `freshness_unknown`, never `current` | freshness=A10 | C | live | P02 A10; REQ-32 |
+| T-CLI-43 | a per-target limit (`max_candidates`) tripped on one of several `--all` targets yields that target's own typed incomplete-analysis document inside the bulk output while an unaffected target completes its own analysis with no error and no "incomplete" status, and the bulk spool closes cleanly with a valid summary | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLI-44 | an already-expired shared `max_seconds` deadline under `--all` reports `scope: "corpus"` (not `"target"`) for every affected target, since it is one shared clock, and the batch still exits cleanly with a valid summary | freshness=A10 | C | live | P02 A10; REQ-17; REQ-48 |
+| T-CLI-45 | a freshness-index write failure increments `work.freshness_write_failures`; the CLI appends the rerun notice only on a `--record` run that actually recorded, never on a preview run | freshness=A10 | C | live | P02 A10; REQ-17 |
+| T-CLI-46 | a per-target limit (`max_candidates`) breaching inside `infer_one()` for a single, non-`--all` target still surfaces the typed `claude_parent_incomplete_analysis` code end to end, not a generic not-recordable/unavailable class | freshness=A10 | C | live | P02 A10; REQ-17; REQ-48 |
+| T-CLI-47 | `delete --source inferred` on a child holding both a planned claim and an inferred record reports `retained_planned_record: true`, and a follow-up `list` confirms the planned claim genuinely still exists | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
+| T-CLI-48 | the freshness-write-failure notice reflects only whether THIS target's write failed under `--all --record-all`, not whether the corpus-wide counter is merely nonzero: two independently recordable targets, only the first's write fails, only the first's document carries the notice | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
+| T-CLI-49 | `analyzed_at` on the human `parent inference:` line is escaped through `terminal_text` like its neighbors on the same line; JSON output keeps the raw value | freshness=A10 | C | live | P02 A10 gate-6; REQ-17 |
+| T-CLI-50 | a corrupted freshness index at the target's location does not block `delete`: the primary record is still removed and the command still exits 0, with `removed_freshness_entry: false` and a "could not confirm" notice | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
 
 ---
 

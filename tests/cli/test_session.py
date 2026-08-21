@@ -667,7 +667,7 @@ def _fingerprint(path: Path) -> str:
     return f"{path}:{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
-@pytest.mark.matrix("T-CLI-36")
+@pytest.mark.matrix("T-CLI-39")
 def test_session_reports_last_known_good_and_freshness_unknown(repo_scenario):
     from agent_fork.lineage_inference_store import (
         InferenceRecord,
@@ -741,7 +741,7 @@ def test_session_reports_last_known_good_and_freshness_unknown(repo_scenario):
     assert document2["parent_inference"]["status"] == "freshness_unknown"
 
 
-@pytest.mark.matrix("T-CLI-46")
+@pytest.mark.matrix("T-CLI-49")
 def test_session_escapes_hostile_analyzed_at_on_human_line(repo_scenario):
     """analyzed_at is store-derived, same trust level as status and
     parent_session_id on the same `parent inference:` line -- a control

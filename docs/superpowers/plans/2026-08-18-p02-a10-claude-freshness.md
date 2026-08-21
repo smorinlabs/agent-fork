@@ -889,7 +889,7 @@ Step 8 depends on everything.
 
 Every production change follows a demonstrated failing test. This plan allocates
 **31 new test IDs**: `T-CPI-40` through `T-CPI-57` (18), `T-SES-48` through
-`T-SES-50` (3), `T-CLI-36` through `T-CLI-41` (6), and `T-CLN-25` through
+`T-SES-50` (3), `T-CLI-39` through `T-CLI-45` (6), and `T-CLN-25` through
 `T-CLN-28` (4). Each range starts at the first free ID for its prefix as of the
 2026-08-20 revalidation against `origin/main` (commit `46201c1`) and is
 contiguous with no gaps. Add each ID to `docs/testing/TEST-MATRIX.md` with tier
@@ -992,9 +992,9 @@ Add:
 
 | Test ID | File | Required proof |
 |---|---|---|
-| `T-CLI-36` | `tests/cli/test_session.py` | Human and JSON session output for `last_known_good` and `freshness_unknown`, including the exact notice and the rerun command, with no corpus discovery, no cache write, and no freshness write during `session`. The human `parent inference:` line appears immediately after the `lineage:` line and before every `notice:` line, asserted by output line order. |
-| `T-CLI-37` | `tests/cli/test_claude_parent.py` | `delete --source inferred` reports every additive field and actually removes the freshness entry; `delete --source planned` with a surviving inferred record retains the freshness entry and says so. |
-| `T-CLI-39` | `tests/cli/test_claude_parent.py` | Deletion ordering and its fault tolerance. `delete --source inferred` calls `remove_index_freshness` **before** `remove_inference`, proved by recorded call order. With `remove_inference` monkeypatched to raise after the freshness removal committed, the surviving state is the inference record with no freshness entry, and a following `session` reports that record as `parent_inference.status == "freshness_unknown"` with `parent_session` still null — never as `current`. |
+| `T-CLI-39` | `tests/cli/test_session.py` | Human and JSON session output for `last_known_good` and `freshness_unknown`, including the exact notice and the rerun command, with no corpus discovery, no cache write, and no freshness write during `session`. The human `parent inference:` line appears immediately after the `lineage:` line and before every `notice:` line, asserted by output line order. |
+| `T-CLI-40` | `tests/cli/test_claude_parent.py` | `delete --source inferred` reports every additive field and actually removes the freshness entry; `delete --source planned` with a surviving inferred record retains the freshness entry and says so. |
+| `T-CLI-42` | `tests/cli/test_claude_parent.py` | Deletion ordering and its fault tolerance. `delete --source inferred` calls `remove_index_freshness` **before** `remove_inference`, proved by recorded call order. With `remove_inference` monkeypatched to raise after the freshness removal committed, the surviving state is the inference record with no freshness entry, and a following `session` reports that record as `parent_inference.status == "freshness_unknown"` with `parent_session` still null — never as `current`. |
 
 In `cli.py`: add the `parent_inference` human-output line immediately after the
 `lineage:` line and before the `notice:` loop, escaping every store-derived
@@ -1020,7 +1020,7 @@ Add to `tests/cli/test_claude_parent.py`:
 
 | Test ID | Required proof |
 |---|---|
-| `T-CLI-41` | With the freshness index unwritable, `infer --current --record` succeeds, records the inference, and emits the freshness-write-failure notice in its analysis document; the same run **without** `--record` records nothing and emits **no** such notice, while `work.freshness_write_failures` is non-zero in both. Proves the notice is composed at the CLI layer, where recording is decided. |
+| `T-CLI-45` | With the freshness index unwritable, `infer --current --record` succeeds, records the inference, and emits the freshness-write-failure notice in its analysis document; the same run **without** `--record` records nothing and emits **no** such notice, while `work.freshness_write_failures` is non-zero in both. Proves the notice is composed at the CLI layer, where recording is decided. |
 
 In `claude_lineage_inference.py` (section 4): move `_cache_root()` to
 `claude-lineage-index-v3`; flatten the shard filename to `{path.stem}.json`;
@@ -1042,9 +1042,9 @@ Add:
 | Test ID | File | Required proof |
 |---|---|---|
 | `T-CPI-48` | `tests/unit/test_claude_parent_inference.py` | Each of `max_files`, `max_entries`, `max_total_bytes`, and `max_candidates` raises `CorpusLimitError` with exact `limit`, `allowed`, `observed`, and `scope` — `corpus` for the first three, `target` for `max_candidates`. |
-| `T-CPI-57` | `tests/unit/test_claude_parent_inference.py` | With `max_seconds` driven to expiry, `infer_one` raises `TimeoutError` at its deadline guard, and the CLI-boundary mapping function turns that exception into the structured shape with `limit.name == "max_seconds"`, `scope == "target"`, and the configured `allowed` value. Covers the limit R6 lists but that no existing or previously planned test exercised, and asserts the mapping explicitly because `TimeoutError` derives from `OSError` and is therefore never caught by a `CorpusLimitError` clause. Its end-to-end behavior under `--all` is `T-CLI-40`. |
-| `T-CLI-38` | `tests/cli/test_claude_parent.py` | Exceeding a **whole-corpus** limit (`max_files`) with `infer --current`, `--session-id`, `--all`, and `--record` exits 3 with `claude_parent_incomplete_analysis`, emits one JSON error on stderr and nothing on stdout, opens no bulk spool, and writes no inference, freshness, or registry state. |
-| `T-CLI-40` | `tests/cli/test_claude_parent.py` | Per-target limits under `--all`. With `max_candidates` and then `max_seconds` tripped on one target of several, under `--json` and with `--record-all`: the run exits 3; the failing target's own typed incomplete-analysis document appears in the bulk output with `scope == "target"` and not as an untyped `"unavailable"` document; that target is not recorded; every other target is processed and recorded normally; and the spool is closed cleanly. Also asserts the same single-target shape for `--current`. |
+| `T-CPI-57` | `tests/unit/test_claude_parent_inference.py` | With `max_seconds` driven to expiry, `infer_one` raises `TimeoutError` at its deadline guard, and the CLI-boundary mapping function turns that exception into the structured shape with `limit.name == "max_seconds"`, `scope == "target"`, and the configured `allowed` value. Covers the limit R6 lists but that no existing or previously planned test exercised, and asserts the mapping explicitly because `TimeoutError` derives from `OSError` and is therefore never caught by a `CorpusLimitError` clause. Its end-to-end behavior under `--all` is `T-CLI-43`. |
+| `T-CLI-41` | `tests/cli/test_claude_parent.py` | Exceeding a **whole-corpus** limit (`max_files`) with `infer --current`, `--session-id`, `--all`, and `--record` exits 3 with `claude_parent_incomplete_analysis`, emits one JSON error on stderr and nothing on stdout, opens no bulk spool, and writes no inference, freshness, or registry state. |
+| `T-CLI-43` | `tests/cli/test_claude_parent.py` | Per-target limits under `--all`. With `max_candidates` and then `max_seconds` tripped on one target of several, under `--json` and with `--record-all`: the run exits 3; the failing target's own typed incomplete-analysis document appears in the bulk output with `scope == "target"` and not as an untyped `"unavailable"` document; that target is not recorded; every other target is processed and recorded normally; and the spool is closed cleanly. Also asserts the same single-target shape for `--current`. |
 
 In `claude_lineage_inference.py` (section 7): add `class CorpusLimitError(ValueError)`;
 raise it at the five bare-`ValueError` limit sites — four in `discover()`
@@ -1128,8 +1128,8 @@ by this design or introduced by A10; route unrelated findings under P02 Gate
 - `CONFORMANCE.md`: one CLI Standard review-history row; refresh affected
   requirement evidence. No new waiver is expected.
 - `docs/testing/TEST-MATRIX.md`: all **31** new IDs — 18 `T-CPI-40` through
-  `T-CPI-57`, 3 `T-SES-48` through `T-SES-50`, 6 `T-CLI-36` through
-  `T-CLI-41`, and 4 `T-CLN-25` through `T-CLN-28` — one implementation per
+  `T-CPI-57`, 3 `T-SES-48` through `T-SES-50`, 6 `T-CLI-39` through
+  `T-CLI-45`, and 4 `T-CLN-25` through `T-CLN-28` — one implementation per
   live row, and the asserted row-count line refreshed from 413 to **444**
   (413 + 31) only after every row exists.
 
@@ -1227,13 +1227,13 @@ step's RED run failed for the missing name or behavior the step introduces
 unrelated reason, before its GREEN change landed.
 
 One planned test was written after its production code rather than before it:
-`T-CLI-41` (the freshness-write-failure notice at the CLI layer). Step 5's
+`T-CLI-45` (the freshness-write-failure notice at the CLI layer). Step 5's
 GREEN change added the `work.freshness_write_failures` counter and its test
 coverage (`T-CPI-49`) correctly test-first, but the CLI-layer notice-append
 half of that same step — explicitly specified in the plan's step 5 prose —
 was skipped in the first pass and only caught during the step-8 completeness
 sweep before matrix/documentation work, not by a human reviewer. The gap was
-closed by writing `T-CLI-41` and confirming it failed for the right reason
+closed by writing `T-CLI-45` and confirming it failed for the right reason
 (the notice was simply absent) before adding the four-line notice-append in
 `cli.py`. Recorded here rather than smoothed over, since the discipline this
 document exists to enforce is exactly "watch it fail before you trust it
@@ -1244,7 +1244,7 @@ worked example for a per-target limit under `--all` did not anticipate that
 `BulkSpool.append()` routes every document through `compact_result()`
 (`bulk_output.py`), a strict field-projection function that silently drops
 any key outside its fixed set. The typed `limit` object this design adds to
-an incomplete-analysis document was being dropped on the bulk path — `T-CLI-40`
+an incomplete-analysis document was being dropped on the bulk path — `T-CLI-43`
 caught this immediately (the per-target document showed
 `relationship.status: "incomplete"` with no `limit` key, indistinguishable
 from the corpus's own pre-existing `work.corpus_incomplete` status). Fixed by adding an
@@ -1355,8 +1355,8 @@ confirmation before its GREEN change:
     not-recordable/unavailable classes instead of
     `claude_parent_incomplete_analysis`. Fixed by tracking whether the
     failure was specifically a limit breach and raising the typed error
-    class when it was (`T-CLI-38` extended to cover this end to end; a
-    dedicated `T-CLI-42` added because the original `max_files` scenario is a
+    class when it was (`T-CLI-41` extended to cover this end to end; a
+    dedicated `T-CLI-46` added because the original `max_files` scenario is a
     *whole-corpus* limit that never touched this code path in the first
     place — the bug was specifically in the *per-target* `max_candidates`
     routing for a single-target invocation).
@@ -1367,14 +1367,14 @@ confirmation before its GREEN change:
     `--all` run reports "this target ran out of time" when the corpus-wide
     clock actually expired, possibly before that target was even reached.
     Changed the reported scope to `"corpus"`, leaving `max_candidates`
-    correctly at `"target"` (`T-CPI-57` updated; `T-CLI-43` added for the
+    correctly at `"target"` (`T-CPI-57` updated; `T-CLI-44` added for the
     `--all` case).
 12. **`TEST-MATRIX.md`'s asserted total was wrong** (`413 + 31 = 444`, not
     recounted per the header's own instruction). Corrected to the actual
     count after every new row, including the sixteen added during this
     gate-6 pass.
 13. **Eight tests had gaps between what they asserted and what their matrix
-    row claimed**: `T-CLI-38` asserted only exit code and non-recording for
+    row claimed**: `T-CLI-41` asserted only exit code and non-recording for
     one invocation shape, despite the new stable error code having zero
     coverage anywhere in the suite — rewritten to assert the code, empty
     stdout, and one JSON error object across `--session-id`, `--record`,
@@ -1389,29 +1389,29 @@ confirmation before its GREEN change:
     `isinstance(..., dict)` after a pop that empties the dict, which passes
     even if the pop never ran — now asserts the real value is `{}`.
     `T-SES-49` claimed all seven statuses but never exercised `unreadable` —
-    added. `T-CLI-40` claimed `max_seconds` coverage it didn't have and
+    added. `T-CLI-43` claimed `max_seconds` coverage it didn't have and
     checked only that an unaffected target's status "wasn't incomplete"
     rather than confirming what actually happened to it — split into
-    `T-CLI-40` (strengthened `max_candidates` case) and the new `T-CLI-43`
+    `T-CLI-43` (strengthened `max_candidates` case) and the new `T-CLI-44`
     (`max_seconds`, since that scenario has no plausible "unaffected target"
     given the shared-clock finding above). `T-CLN-25` claimed exact store
     paths and exact removal commands without asserting them — now does.
 
 One item from the merged review findings was corrected in scope rather than
 implemented as literally specified: finding 10's fix instruction named
-`T-CLI-38` as the vehicle for proving the single-target routing fix, but
-`T-CLI-38`'s existing `max_files` scenario is a whole-corpus limit that
+`T-CLI-41` as the vehicle for proving the single-target routing fix, but
+`T-CLI-41`'s existing `max_files` scenario is a whole-corpus limit that
 already routed correctly before this pass — it never exercised the bug.
-`T-CLI-38` was still strengthened as instructed (real error-code assertion,
-`--current`/`--all` coverage), and a separate `T-CLI-42` was added
+`T-CLI-41` was still strengthened as instructed (real error-code assertion,
+`--current`/`--all` coverage), and a separate `T-CLI-46` was added
 specifically for the per-target `max_candidates` case, which is what
 actually exercises finding 10's fix. Confirmed by temporarily reverting the
-`cli.py` fix and observing `T-CLI-42` fail for the exact predicted reason
+`cli.py` fix and observing `T-CLI-46` fail for the exact predicted reason
 before restoring it — see the sixteen new IDs below for the equivalent
 proof pattern applied throughout.
 
 Sixteen new test IDs were added during this gate-6 pass, beyond the original
-31: `T-CPI-58` through `T-CPI-68` (11), `T-CLI-42` and `T-CLI-43` (2), and
+31: `T-CPI-58` through `T-CPI-68` (11), `T-CLI-46` and `T-CLI-44` (2), and
 `T-CLN-29` through `T-CLN-31` (3). Total new A10 test IDs: 47. `TEST-MATRIX.md`
 now asserts 488 total rows (472 pre-existing + 16 net new to this branch,
 matching the review's own independently recomputed pre-fix count of 472).
@@ -1450,7 +1450,7 @@ confidence class:
   ordering is reverted.
 - `retained_planned_record: true` had zero regression coverage — the only
   existing delete test covers the case with no surviving planned claim,
-  where `false` is correct either way. Added `T-CLI-44`: a child holding
+  where `false` is correct either way. Added `T-CLI-47`: a child holding
   both a planned claim and an inferred record, deleted via `--source
   inferred`, asserting the field is `true` and that a follow-up `list`
   confirms the claim survives; confirmed to fail when the computation is
@@ -1458,7 +1458,7 @@ confidence class:
 - The per-target freshness-write-failure notice fix had zero regression
   coverage — the existing single-target test cannot distinguish a per-target
   delta check from the original shared-counter bug, since with one target
-  they are mathematically identical. Added `T-CLI-45`: two independently
+  they are mathematically identical. Added `T-CLI-48`: two independently
   recordable transcript pairs in one `--all --record-all` run, only the
   first target's `update_index_freshness` call failing; confirmed both that
   only the first target's document carries the notice under the fix, and
@@ -1513,7 +1513,7 @@ because an unrelated advisory cache file was unreadable, contradicting the
 "an advisory store must never block a real operation" posture already
 applied to `cleanup`. Fixed by catching the `ValueError`, reporting
 `removed_freshness_entry: false` with an explanatory notice, and still
-removing the primary record; `T-CLI-47` confirms the delete still succeeds
+removing the primary record; `T-CLI-50` confirms the delete still succeeds
 and the record is genuinely gone.
 
 **One item from the confirmation round's fix list was judged impractical and
@@ -1531,8 +1531,8 @@ production code itself was directly verified by hand.
 
 Six new test IDs were added during this confirmation round beyond the 47
 from the two gate-6 passes combined: `T-CLN-32`, `T-CLN-33`, `T-CPI-69`,
-`T-CPI-70`, and `T-CLI-44` through `T-CLI-47` (8 total — `T-CLI-45`/`46`/`47`
-plus `T-CLI-44`). Total new A10 test IDs across all three implementation
+`T-CPI-70`, and `T-CLI-47` through `T-CLI-50` (8 total — `T-CLI-48`/`46`/`47`
+plus `T-CLI-47`). Total new A10 test IDs across all three implementation
 passes: 55. `TEST-MATRIX.md` now asserts 496 total rows (488 + 8 net new).
 
 Repository gates after the confirmation round's corrections:
@@ -1571,6 +1571,30 @@ matching the design of the fix exactly. `T-CPI-60`'s corrected assertion
 confirmed to be the discriminating check both reviews required. `git status`
 was clean of untracked files both before and after this commit. Gate 6 is
 therefore complete.
+
+## Merge with origin/main before PR
+
+Between gate 6's close and opening the pull request, `origin/main` advanced
+14 commits, including P02 item A6a (dirty submodules), whose own gate-6 pass
+had independently claimed `T-CLI-36`, `T-CLI-37`, and `T-CLI-38` — the exact
+same three IDs this design's own gate-5 implementation had claimed, from the
+same pre-A6a starting point, entirely by coincidence of concurrent work. Per
+`TEST-MATRIX.md`'s own convention ("Row IDs never renumbered"), A6a's IDs are
+authoritative once landed on `origin/main`; this design's colliding rows were
+renumbered instead. All twelve of this design's `T-CLI-36`..`T-CLI-47` rows
+shifted to `T-CLI-39`..`T-CLI-50` (a fixed +3, preserving relative order) —
+in `docs/testing/TEST-MATRIX.md`, `tests/cli/test_session.py`, and
+`tests/cli/test_claude_parent.py` — via a two-phase rename to avoid any
+overlap between old and new numbers during the substitution. No other group
+this design touched (`T-CPI`, `T-SES`, `T-CLN`) collided; `origin/main`'s own
+highest IDs in those groups (`T-CPI-39`, `T-SES-47`, `T-CLN-24`) sit below
+where this design's ranges start. `TEST-MATRIX.md`'s total-rows line was
+recounted directly (`grep -c "^| T-"`) rather than computed by addition,
+since two independent lines of work had each advanced it since this design's
+own last count. All four repository gates were re-run clean after the merge:
+`just all` (583 passed, 1 skipped, 9 deselected — the rise from 566 is A6a's
+own tests, now included), `check-matrix`, `strict-collect`, and
+`clean-install`.
 
 ## Non-goals
 

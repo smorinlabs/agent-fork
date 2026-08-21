@@ -35,6 +35,9 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
         3, "Claude transcript corpus exceeded a bounded analysis limit"
     ),
     "cleanup_target_unknown": ErrorSpec(3, "cleanup target is not registered or found"),
+    "submodule_unrepresentable": ErrorSpec(
+        5, "submodule checkout differs from the commit recorded in the index"
+    ),
     "conflict_branch_exists": ErrorSpec(5, "fork branch already exists"),
     "conflict_branch_worktree": ErrorSpec(5, "branch is attached to a worktree"),
     "conflict_worktree_path": ErrorSpec(5, "worktree destination already exists"),

@@ -88,7 +88,7 @@ class CarriedState:
     manifest: tuple[ManifestEntry, ...]
 
 
-def _nul_paths(data: bytes) -> list[str]:
+def nul_paths(data: bytes) -> list[str]:
     return [os.fsdecode(value) for value in data.split(b"\0") if value]
 
 
@@ -121,7 +121,88 @@ def intent_to_add_paths(
         ["diff", "--cached", "--ita-invisible-in-index", "--name-only", "-z"],
         env=env,
     )
-    return sorted(set(_nul_paths(visible.stdout)) - set(_nul_paths(hidden.stdout)))
+    return sorted(set(nul_paths(visible.stdout)) - set(nul_paths(hidden.stdout)))
+
+
+def gitlink_paths(root: Path, *, env: Mapping[str, str] | None = None) -> list[str]:
+    """Every submodule path recorded in the index, as literal strings.
+
+    Mode 160000 is Git's gitlink entry. Callers need the paths to describe what
+    a fork does not carry and to refuse states it cannot represent.
+    """
+    result = run_git(root, ["ls-files", "--stage", "-z"], env=env)
+    paths = [
+        os.fsdecode(record.split(b"\t", 1)[1])
+        for record in result.stdout.split(b"\0")
+        if record.startswith(b"160000 ") and b"\t" in record
+    ]
+    return sorted(paths)
+
+
+def parse_porcelain_status(data: bytes) -> dict[str, str]:
+    """Map each reported path to its two-letter status code.
+
+    Porcelain v1 with ``-z`` emits a rename or copy as **two** records: the
+    entry itself, then a bare source path carrying no status prefix. Slicing a
+    prefix off that second record fabricates a path — for a rename source of
+    ``abcvendor/submodule`` it yields ``vendor/submodule``, which can collide
+    with a real entry. The cursor below skips it, matching the parser in
+    ``cleanup.py``.
+    """
+    records = data.split(b"\0")
+    parsed: dict[str, str] = {}
+    index = 0
+    while index < len(records):
+        record = records[index]
+        if not record:
+            index += 1
+            continue
+        status = record[:2].decode("ascii", errors="replace")
+        parsed[os.fsdecode(record[3:])] = status
+        index += 2 if "R" in status or "C" in status else 1
+    return parsed
+
+
+def suppressed_submodules(
+    root: Path, *, env: Mapping[str, str] | None = None
+) -> list[str]:
+    """Submodule paths whose state `--ignore-submodules=dirty` stops reporting.
+
+    This is what a fork actually leaves behind: submodules Git would call
+    modified on working-tree grounds alone. A submodule sitting at its recorded
+    commit is not in this set, and neither is a commit-level gitlink difference
+    alone, because the filter keeps reporting that and the fork carries it.
+
+    The comparison is per status **code**, not per path. A submodule can be both
+    staged at a new commit and dirty inside, which Git reports as ``MM`` and the
+    filter reduces to ``M ``: the path is present on both sides, so comparing
+    membership alone would miss the working-tree half that is genuinely lost.
+    """
+    gitlinks = set(gitlink_paths(root, env=env))
+    if not gitlinks:
+        return []
+
+    def reported(mode: str) -> dict[str, str]:
+        result = run_git(
+            root,
+            [
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+                f"--ignore-submodules={mode}",
+            ],
+            env=env,
+        )
+        return parse_porcelain_status(result.stdout)
+
+    unfiltered = reported("none")
+    filtered = reported("dirty")
+    return sorted(
+        path
+        for path in gitlinks
+        if path in unfiltered and unfiltered[path] != filtered.get(path)
+    )
 
 
 def collect_inventory(
@@ -146,7 +227,7 @@ def collect_inventory(
         return Inventory()
 
     def listing(arguments: list[str]) -> tuple[str, ...]:
-        return tuple(_nul_paths(run_git(root, arguments, env=env).stdout))
+        return tuple(nul_paths(run_git(root, arguments, env=env).stdout))
 
     ignored: tuple[str, ...] = ()
     if with_ignored:
@@ -155,7 +236,15 @@ def collect_inventory(
         )
     return Inventory(
         staged=listing(["diff", "--cached", "--name-only", "-z", "--no-renames"]),
-        unstaged=listing(["diff", "--name-only", "-z", "--no-renames"]),
+        unstaged=listing(
+            [
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                "--ignore-submodules=dirty",
+            ]
+        ),
         intent_to_add=tuple(intent_to_add_paths(root, env=env)),
         untracked=listing(["ls-files", "--others", "-z", "--exclude-standard"]),
         ignored=ignored,

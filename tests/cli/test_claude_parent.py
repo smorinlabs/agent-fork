@@ -485,7 +485,7 @@ def _fingerprint(path):
     return f"{path}:{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
-@pytest.mark.matrix("T-CLI-37")
+@pytest.mark.matrix("T-CLI-40")
 def test_delete_reports_additive_fields_and_removes_freshness(repo_scenario):
     from agent_fork.lineage import LineageClaim, add_lineage
     from agent_fork.lineage_inference_store import (
@@ -561,7 +561,7 @@ def test_delete_reports_additive_fields_and_removes_freshness(repo_scenario):
     assert "child-b" in freshness_document["targets"]
 
 
-@pytest.mark.matrix("T-CLI-44")
+@pytest.mark.matrix("T-CLI-47")
 def test_inferred_delete_reports_surviving_planned_claim(repo_scenario):
     """A child holding BOTH a planned claim and an inferred record, deleted
     via --source inferred, must report retained_planned_record as true, and
@@ -613,7 +613,7 @@ def test_inferred_delete_reports_surviving_planned_claim(repo_scenario):
     )
 
 
-@pytest.mark.matrix("T-CLI-39")
+@pytest.mark.matrix("T-CLI-42")
 def test_delete_removes_freshness_before_record_and_tolerates_mid_delete_failure(
     repo_scenario, monkeypatch
 ):
@@ -680,7 +680,7 @@ def test_delete_removes_freshness_before_record_and_tolerates_mid_delete_failure
     assert result.parent_session is None
 
 
-@pytest.mark.matrix("T-CLI-47")
+@pytest.mark.matrix("T-CLI-50")
 def test_delete_tolerates_corrupted_freshness_index(repo_scenario):
     """An advisory, unrelated fault -- a corrupted freshness index -- must
     never block the user from removing their own primary record. The
@@ -735,7 +735,7 @@ def _patch_limits(monkeypatch, **overrides):
     monkeypatch.setattr(inference_module, "ClaudeLineageCorpus", limited_corpus)
 
 
-@pytest.mark.matrix("T-CLI-38")
+@pytest.mark.matrix("T-CLI-41")
 def test_whole_corpus_limit_exits_incomplete_analysis(repo_scenario, monkeypatch):
     import io
     import json as json_module
@@ -776,7 +776,7 @@ def test_whole_corpus_limit_exits_incomplete_analysis(repo_scenario, monkeypatch
     assert not inference_path(env).exists()
 
 
-@pytest.mark.matrix("T-CLI-42")
+@pytest.mark.matrix("T-CLI-46")
 def test_single_target_per_target_limit_exits_incomplete_analysis(
     repo_scenario, monkeypatch
 ):
@@ -821,7 +821,7 @@ def test_single_target_per_target_limit_exits_incomplete_analysis(
     assert not inference_path(env).exists()
 
 
-@pytest.mark.matrix("T-CLI-40")
+@pytest.mark.matrix("T-CLI-43")
 def test_per_target_limit_under_all_does_not_void_batch(
     repo_scenario, monkeypatch, capsys
 ):
@@ -880,7 +880,7 @@ def test_per_target_limit_under_all_does_not_void_batch(
     assert find_inference(child, env=env) is None
 
 
-@pytest.mark.matrix("T-CLI-43")
+@pytest.mark.matrix("T-CLI-44")
 def test_max_seconds_under_all_reports_corpus_scope_and_exits_cleanly(
     repo_scenario, monkeypatch, capsys
 ):
@@ -928,7 +928,7 @@ def test_max_seconds_under_all_reports_corpus_scope_and_exits_cleanly(
         assert result["recorded"] is False
 
 
-@pytest.mark.matrix("T-CLI-41")
+@pytest.mark.matrix("T-CLI-45")
 def test_freshness_write_failure_notice_composed_at_cli_layer(
     repo_scenario, monkeypatch
 ):
@@ -988,7 +988,7 @@ def test_freshness_write_failure_notice_composed_at_cli_layer(
     assert preview_document["notices"] == []
 
 
-@pytest.mark.matrix("T-CLI-45")
+@pytest.mark.matrix("T-CLI-48")
 def test_freshness_write_failure_notice_is_per_target_not_batch_wide(
     repo_scenario, monkeypatch, capsys
 ):
