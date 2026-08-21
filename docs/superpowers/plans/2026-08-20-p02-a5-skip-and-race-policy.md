@@ -239,6 +239,32 @@ mutated during `copy2` can land torn with nothing detecting it. This race
 exists today; the guard neither creates nor closes it. Closing it would need a
 per-copy stability bracket, which is out of A5's narrowed scope.
 
+### Known limits, accepted by the owner
+
+Both are recorded so an implementer does not mistake them for oversights, and
+so a future reader knows they were seen and priced.
+
+**1. Ancestor permission and rename races defeat the sentinel.** Accepted
+2026-08-20. A pre-existing unreadable file and a mid-fork ancestor permission
+change produce an identical runtime signature: `lstat` succeeds, the later
+`open` returns `EACCES`. Distinguishing them needs descriptor-based traversal
+or a sentinel on every ancestor. The consequence when it occurs is a
+**misattributed skip, not a silent omission** — the run still warns and names
+the path, which matches the requirement that an unreadable file be skipped and
+named. Triggering it requires a directory's permissions to change and change
+back inside the fork's roughly one-second window. Closing it properly is
+`#28`'s root-confined descriptor traversal.
+
+**2. `.worktreeinclude` copying is unbracketed.** Accepted 2026-08-20. Include
+copies run after all verification and resolve their own paths, so a file that
+becomes unreadable after selection is skipped as though it had always been
+unreadable, and a file mutated during `copy2` can land torn with nothing
+detecting it. This race exists today; the readability guard neither creates
+nor closes it.
+
+Neither limit is introduced by A5. Both are pre-existing behaviours that A5
+declines to fix, and both fail toward a warning rather than toward silence.
+
 ### Dropped from A5 by the narrowing
 
 | Dropped | Why | Where it goes |
@@ -467,11 +493,11 @@ registry write still enters rollback.
 | # | Finding | Class | Resolution |
 |---|---|---|---|
 | 1 | The `#28` paragraph still routed non-absence `lstat` errors into the skip path, contradicting the preconditions added in the same commit, and the register did not mirror the new rules. | refinement | **Fixed.** The `#28` paragraph now defers to the preconditions as the normative statement, and the register mirrors all three plus the sentinel and error codes. |
-| 2 | **NEW.** The sentinel is target-only, so an **ancestor** race defeats it: `lstat` on `d/file` succeeds, `d` becomes mode 000 before the separate open, the read fails and the entry is skipped, `d` is restored before verification, and every one of the six target fields is unchanged. The child omits a file that was readable at both boundaries. Renaming `d` away and back is the analogous path-identity race. | **new defect** | **Open — owner decision.** See below. |
+| 2 | **NEW.** The sentinel is target-only, so an **ancestor** race defeats it: `lstat` on `d/file` succeeds, `d` becomes mode 000 before the separate open, the read fails and the entry is skipped, `d` is restored before verification, and every one of the six target fields is unchanged. The child omits a file that was readable at both boundaries. Renaming `d` away and back is the analogous path-identity race. | **new defect** | **Accepted as a known limit** by the owner, 2026-08-20. See "Known limits". |
 | 3 | The deletion precondition had no detector: `Inventory` keeps staged and unstaged paths name-only and discards status, so a staged `git rm --cached old` with an unreadable untracked `old` is invisible to absence-based detection. | refinement | **Fixed.** Explicit `--diff-filter=D` deletion facet, frozen alongside the inventory. |
 | 4 | `entry_unreadable` had no `details` schema and neither new code was added to the published `README.md` catalog, so an implementation could pass the catalog tests while exposing blocking paths only in an unstable message. | refinement | **Fixed.** Separate schema specified, including byte-wise ordered `deletion_blockers`; both codes published. |
 
-#### The open question from finding 2
+#### Why finding 2 was accepted rather than fixed
 
 A pre-existing unreadable file and an ancestor-permission race produce an
 **identical runtime signature**: `lstat` succeeds, the later open returns
