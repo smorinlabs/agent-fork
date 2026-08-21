@@ -636,6 +636,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         verification={"enabled": config.verify, "passed": config.verify},
         command=result.launch.command,
         notices=tuple(notices),
+        skipped=result.skipped,
     )
     print(presented.render(output_kind))
     for notice in notices:

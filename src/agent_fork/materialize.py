@@ -103,6 +103,24 @@ def submodule_loss_notices(
     return (f"submodule working-tree changes are not carried: {listed}",)
 
 
+def _skip_notices(skipped: tuple[object, ...]) -> tuple[str, ...]:
+    """One notice per skipped entry, naming it.
+
+    A count alone is not enough: the requirement is that the run says exactly
+    which entries were not carried, so the user can judge whether the omission
+    matters (P02 A5).
+    """
+
+    def key(record: object) -> bytes:
+        return str(getattr(record, "path", record)).encode("utf-8", "surrogateescape")
+
+    return tuple(
+        "skipped entry, not carried: "
+        + escape_terminal_text(str(getattr(record, "path", record)))
+        for record in sorted(skipped, key=key)
+    )
+
+
 def materialize(
     parent: Path,
     child: Path,
@@ -110,6 +128,7 @@ def materialize(
     with_state: bool = True,
     with_ignored: bool = False,
     inventory: Inventory | None = None,
+    skipped: tuple[object, ...] = (),
     env: Mapping[str, str] | None = None,
 ) -> MaterializeResult:
     """Transport staged → ITA/unstaged → untracked → optional ignored state.
@@ -185,13 +204,14 @@ def materialize(
         unstaged = run_git(parent, unstaged_args, env=env).stdout
         unstaged_applied = _apply_patch(child, unstaged, [], env=env)
 
-        untracked = list(inventory.untracked)
+        skipped_paths = {getattr(record, "path", record) for record in skipped}
+        untracked = [p for p in inventory.untracked if p not in skipped_paths]
         for path in untracked:
             _copy_entry(parent, child, path)
 
         ignored: list[str] = []
         if with_ignored:
-            ignored = list(inventory.ignored)
+            ignored = [p for p in inventory.ignored if p not in skipped_paths]
             untracked_set = set(untracked)
             for path in ignored:
                 if path not in untracked_set:
@@ -205,5 +225,5 @@ def materialize(
         copied_untracked=len(untracked),
         copied_ignored=len(ignored),
         intent_to_add=tuple(ita_paths),
-        notices=submodule_loss_notices(parent, env=env),
+        notices=submodule_loss_notices(parent, env=env) + _skip_notices(skipped),
     )

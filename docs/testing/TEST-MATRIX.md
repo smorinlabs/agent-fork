@@ -310,6 +310,8 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-29 | A6a gate-6 pass 2 — a porcelain rename source record cannot fabricate a path that masks a genuinely dirty submodule | baseline | F | live | A6 gate-6 pass-2 M2 |
 | T-MAT-33 | A5 — a tracked, modified file whose content cannot be read raises the typed `entry_unreadable` naming the path, never a raw `runtime_error`; tracked paths never skip | baseline | F | live | P02 A5 design; REQ-21 |
 | T-MAT-34 | A5 — an `lstat` failing with anything other than ENOENT/ENOTDIR raises `entry_unreadable` rather than reporting kind `absent`, so an unreadable path cannot masquerade as a legitimate deletion | baseline | F | live | P02 A5 design; issue #59 |
+| T-MAT-30 | A5 — an unreadable untracked entry is skipped and named, the fork succeeds at exit 0, and every other carried path still arrives | baseline | F | live | P02 A5 design; REQ-21 |
+| T-MAT-35 | A5 — a carried deletion refuses an otherwise valid skip; `entry_unreadable` names the blocking path, since `mv old new` splits into an unstaged deletion and an untracked add | baseline | F | live | P02 A5 design; gate-1 pass 4 |
 
 ---
 

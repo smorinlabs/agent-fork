@@ -51,6 +51,7 @@ class ForkOutput:
     verification: dict[str, bool]
     command: str
     notices: tuple[str, ...] = ()
+    skipped: tuple[dict[str, str], ...] = ()
     parent_session_name: str | None = None
 
     def document(self) -> dict[str, object]:
@@ -69,6 +70,7 @@ class ForkOutput:
             "verification": self.verification,
             "command": self.command,
             "notices": list(self.notices),
+            "skipped": [dict(entry) for entry in self.skipped],
         }
         if self.agent is not None:
             result["agent"] = self.agent

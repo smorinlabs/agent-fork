@@ -73,6 +73,7 @@ def verify_fork(
     with_ignored: bool = False,
     parent_status_before: bytes,
     parent_state_before: CarriedState | None = None,
+    skipped: tuple[object, ...] = (),
     env: Mapping[str, str] | None = None,
 ) -> None:
     """Run the complete base ladder and topology-dependent assertions.
@@ -115,6 +116,19 @@ def verify_fork(
     ]
     if with_ignored:
         status_args.append("--ignored")
+    # A skipped entry is in the parent and absent from the child by design, so
+    # an unfiltered comparison would fail every skipping fork. Excluded at the
+    # query boundary rather than by post-processing porcelain, following A6a's
+    # shape, with `literal` magic so a filename containing pathspec characters
+    # cannot act as a pattern. The `parent-untouched` bracket below is
+    # deliberately NOT filtered: it compares the parent against itself, where a
+    # skipped path appears identically on both sides, and filtering it would
+    # hide a real mid-fork transition (P02 A5).
+    if skipped:
+        status_args.extend(["--", "."])
+        status_args.extend(
+            ":(exclude,literal)" + str(getattr(r, "path", r)) for r in skipped
+        )
     child_status = run_git(creation.path, status_args, env=env).stdout
     if with_state:
         parent_status = run_git(creation.parent_path, status_args, env=env).stdout
