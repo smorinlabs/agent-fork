@@ -22,13 +22,14 @@ XDG_RELATIVE_PATH = Path("agent-fork/agent-fork_config.toml")
 _FORK_KEYS = {
     "with_state",
     "with_ignored",
+    "with_submodules",
     "branch_prefix",
     "worktree_location",
     "agent_mode",
     "verify",
     "copy",
 }
-_BOOL_KEYS = {"with_state", "with_ignored", "verify", "copy"}
+_BOOL_KEYS = {"with_state", "with_ignored", "with_submodules", "verify", "copy"}
 
 
 class ConfigError(AgentForkError, ValueError):
@@ -75,6 +76,7 @@ def resolve_config(
 
     with_state = True
     with_ignored = False
+    with_submodules = True
     branch_prefix = DEFAULT_BRANCH_PREFIX
     worktree_location = DEFAULT_WORKTREE_LOCATION
     worktree_location_explicit = False
@@ -92,10 +94,17 @@ def resolve_config(
             with_state = source.with_state
             if not source.with_state:
                 with_ignored = False
+                with_submodules = False
         if source.with_ignored is not None:
             with_ignored = source.with_ignored
             if source.with_ignored:
                 with_state = True
+        if source.with_submodules is not None:
+            with_submodules = source.with_submodules
+            # Deliberately asymmetric with with_ignored: with_submodules must
+            # not silently re-enable state transport (A6 design doc, "Flag").
+            # --no-with-state stays authoritative even if a later source sets
+            # with_submodules=True.
         if source.branch_prefix is not None:
             branch_prefix = source.branch_prefix.strip() or DEFAULT_BRANCH_PREFIX
         if source.worktree_location is not None:
@@ -126,6 +135,7 @@ def resolve_config(
     return ResolvedConfig(
         with_state=with_state,
         with_ignored=with_ignored,
+        with_submodules=with_submodules and with_state,
         branch_prefix=branch_prefix,
         worktree_location=worktree_location,
         worktree_location_explicit=worktree_location_explicit,

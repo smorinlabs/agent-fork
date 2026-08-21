@@ -164,6 +164,12 @@ def _parser() -> argparse.ArgumentParser:
         help="Also carry ignored files (default: disabled)",
     )
     fork.add_argument(
+        "--with-submodules",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Carry submodule working-tree state identically (default: enabled)",
+    )
+    fork.add_argument(
         "--verify",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -394,6 +400,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         for key, value in {
             "with_state": args.with_state,
             "with_ignored": args.with_ignored,
+            "with_submodules": args.with_submodules,
             "verify": args.verify,
             "copy": args.copy,
             "output": "json" if args.json else args.output,
@@ -581,6 +588,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             agent=context,
             with_state=config.with_state,
             with_ignored=config.with_ignored,
+            with_submodules=config.with_submodules,
             verify=config.verify,
             force=args.force,
             extra_args=extra_args,
@@ -604,6 +612,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         anchor_commit=result.creation.anchor,
         with_state=config.with_state,
         with_ignored=config.with_ignored,
+        with_submodules=config.with_submodules,
         verification={"enabled": config.verify, "passed": config.verify},
         command=result.launch.command,
         notices=tuple(notices),
@@ -1196,6 +1205,7 @@ def main(argv: list[str] | None = None) -> int:
                 document = {
                     "with_state": resolved.with_state,
                     "with_ignored": resolved.with_ignored,
+                    "with_submodules": resolved.with_submodules,
                     "branch_prefix": resolved.branch_prefix,
                     "worktree_location": resolved.worktree_location,
                     "agent_mode": resolved.agent_mode,

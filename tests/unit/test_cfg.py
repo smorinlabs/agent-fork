@@ -254,3 +254,100 @@ def test_codex_session_name_resolution_config_and_flag_precedence(repo_scenario)
         ).codex_session_name_resolution
         is True
     )
+
+
+@pytest.mark.matrix("T-CFG-24")
+def test_with_submodules_unset_defaults_true(repo_scenario):
+    """A6b step 3 — with_submodules unset resolves to True (owner decision)."""
+    from agent_fork.config import resolve_config
+
+    assert resolve_config().with_submodules is True
+
+
+@pytest.mark.matrix("T-CFG-25")
+def test_no_with_state_forces_with_submodules_false_regardless_of_order(
+    repo_scenario,
+):
+    """A6b step 3 — --no-with-state implies no submodule carry.
+
+    Mirrors the existing with_state/with_ignored coupling (T-CFG-01..03), and
+    is tested against *every* explicit and configured with_submodules value,
+    per the implementation plan's own requirement — an implicit rule that only
+    held for one ordering would be worse than no rule.
+    """
+    from agent_fork.config import resolve_config
+
+    # with_submodules explicit True, with_state False in the SAME source.
+    assert (
+        resolve_config(
+            sources=({"with_state": False, "with_submodules": True},)
+        ).with_submodules
+        is False
+    )
+    # with_state False first, with_submodules True in a LATER, higher-precedence
+    # source -- with_submodules must not silently re-enable state transport.
+    assert (
+        resolve_config(
+            sources=({"with_state": False},), flags={"with_submodules": True}
+        ).with_submodules
+        is False
+    )
+    # with_submodules True first, with_state False arriving later still wins.
+    assert (
+        resolve_config(
+            sources=({"with_submodules": True},), flags={"with_state": False}
+        ).with_submodules
+        is False
+    )
+    # with_submodules explicitly False plus with_state False: still False,
+    # for the ordinary reason (both agree), not just the implication.
+    assert (
+        resolve_config(
+            sources=({"with_state": False, "with_submodules": False},)
+        ).with_submodules
+        is False
+    )
+
+
+@pytest.mark.matrix("T-CFG-26")
+def test_with_submodules_true_does_not_imply_with_state(repo_scenario):
+    """A6b step 3 — the coupling is deliberately one-directional.
+
+    `--with-ignored` implies `--with-state` (T-CFG-03); `--with-submodules`
+    must NOT — the design doc calls this out explicitly, because silently
+    re-enabling state transport from a flag about submodules would be a
+    surprising side effect on unrelated state.
+    """
+    from agent_fork.config import resolve_config
+
+    resolved = resolve_config(sources=({"with_state": False, "with_submodules": True},))
+    assert resolved.with_state is False
+    assert resolved.with_submodules is False  # still forced off by with_state
+
+
+@pytest.mark.matrix("T-CFG-27")
+def test_with_submodules_flag_wins_over_config_source(repo_scenario):
+    """A6b step 3 — explicit flags outrank configured sources, same as with_state."""
+    from agent_fork.config import resolve_config
+
+    resolved = resolve_config(
+        sources=({"with_submodules": False},), flags={"with_submodules": True}
+    )
+    assert resolved.with_submodules is True
+
+
+@pytest.mark.matrix("T-CFG-28")
+def test_with_submodules_round_trips_through_config_file(repo_scenario):
+    """A6b step 3 — `[fork] with_submodules` loads like the other bools."""
+    from agent_fork.config import ConfigError, load_config, resolve_config
+
+    world = repo_scenario()
+    path = world.parent_path / "agent-fork_config.toml"
+    path.write_text("[fork]\nwith_submodules = false\n")
+    loaded = load_config(path)
+    assert resolve_config(sources=(loaded,)).with_submodules is False
+
+    bad = world.parent_path / "bad.toml"
+    bad.write_text('[fork]\nwith_submodules = "yes"\n')
+    with pytest.raises(ConfigError, match="must be boolean"):
+        load_config(bad)

@@ -50,6 +50,11 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 | T-CFG-21 | shared XDG resolver returns the base itself when no trailing segments are given | baseline | U | live | REQ-41 |
 | T-CFG-22 | an empty XDG value counts as unset per the specification, so state never resolves relative to the current working directory | baseline | U | live | REQ-41 |
 | T-CFG-23 | an empty `HOME` counts as unset too — `env.get("HOME", "~")` returns the empty string when the variable is set but empty, so the default never applies | baseline | U | live | REQ-41 |
+| T-CFG-24 | A6b step 3 — `with_submodules` unset resolves to `True` (owner decision 2026-08-17) | baseline | U | live | A6 design doc §Flag |
+| T-CFG-25 | A6b step 3 — `--no-with-state` forces `with_submodules=False` regardless of ordering, tested against every explicit and configured value | baseline | U | live | A6 design doc, implementation plan step 3 |
+| T-CFG-26 | A6b step 3 — `with_submodules=True` does not imply `with_state=True`; the coupling is deliberately one-directional, unlike `with_ignored` | baseline | U | live | A6 design doc §Flag |
+| T-CFG-27 | A6b step 3 — an explicit `with_submodules` flag outranks a configured source, matching `with_state`'s precedence | baseline | U | live | A6 design doc, implementation plan step 3 |
+| T-CFG-28 | A6b step 3 — `[fork] with_submodules` round-trips through a config file and validates as boolean | baseline | U | live | A6 design doc, implementation plan step 3 |
 
 ---
 

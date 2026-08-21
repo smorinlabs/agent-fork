@@ -41,6 +41,7 @@ class ForkRequest:
     agent: AgentContext | None
     with_state: bool = True
     with_ignored: bool = False
+    with_submodules: bool = True
     verify: bool = True
     force: bool = False
     extra_args: tuple[str, ...] = ()

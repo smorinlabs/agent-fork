@@ -25,6 +25,7 @@ def test_renamed_codex_identity_is_additive_in_json():
         anchor_commit="a" * 40,
         with_state=False,
         with_ignored=False,
+        with_submodules=False,
         verification={"enabled": True, "passed": True},
         command=f"codex fork {PARENT} -C /tmp/child",
         notices=("resolved Codex session name 'hello'",),
@@ -367,7 +368,11 @@ def test_json_success_object_carries_req17_minimum_fields(repo_scenario):
     assert set(document["fork"]) >= {"branch", "worktree", "anchor_commit", "mode"}
     assert document["fork"]["branch"] == "fork/schema"
     assert Path(document["fork"]["worktree"]).is_dir()
-    assert document["fork"]["mode"] == {"with_state": True, "with_ignored": False}
+    assert document["fork"]["mode"] == {
+        "with_state": True,
+        "with_ignored": False,
+        "with_submodules": True,
+    }
     assert document["verification"] == {"enabled": True, "passed": True}
     assert document["command"].endswith("--fork-session -n schema")
     assert document["notices"] == []
