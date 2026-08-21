@@ -127,61 +127,84 @@ def is_live(entry: RegistryEntry, live: LivePairs) -> bool:
     return (str(Path(entry.worktree).resolve()), entry.branch) in live
 
 
+def occupied_fork(
+    name: str,
+    repository: Path | str,
+    *,
+    env: Mapping[str, str] | None = None,
+    entries: list[RegistryEntry] | None = None,
+) -> RegistryEntry | None:
+    """A record of this repository and name whose worktree is still on disk.
+
+    Existence of the directory, not a Git probe, is the test. That is
+    deliberate on three counts. It needs no subprocess, so it is cheap enough
+    to evaluate inside the registry lock, which is what closes the window in
+    which two forks of one name could each miss the other. It cannot produce a
+    false negative for a worktree that is merely detached, on an unavailable
+    mount, or switched to another branch — all cases a probe reports as "not
+    live", and all cases where real work is sitting in that directory. And it
+    errs toward refusing: a path occupied by something unrelated refuses too,
+    which costs the user a rename and costs nobody their work.
+
+    A record with no repository is never a match: it cannot show it belongs
+    here, since two repositories can hold one path under one name.
+    """
+    records = _decode(registry_path(env)) if entries is None else entries
+    for item in records:
+        if (
+            item.name == name
+            and item.repository is not None
+            and item.repository == str(repository)
+            and Path(item.worktree).exists()
+        ):
+            return item
+    return None
+
+
 def add_entry(
     entry: RegistryEntry,
     *,
-    live: LivePairs = frozenset(),
     env: Mapping[str, str] | None = None,
     timeout: float = DEFAULT_LOCK_TIMEOUT,
 ) -> None:
-    """Record a fork, refusing rather than displacing a live one.
+    """Record a fork, refusing rather than displacing one that still exists.
 
-    A record with this repository's identity and this name is replaced only
-    when its worktree is **gone**, which orphans nothing. When that worktree
-    is still there, the fork refuses: replacing the record would leave real
-    work on disk with nothing pointing at it — A3's own fault, silent
-    clobbering, surviving inside a single repository after scoping fixed it
-    between them.
+    A record of this repository and name is replaced only when its worktree is
+    **gone**, which orphans nothing. When that directory is still there the
+    fork refuses: replacing the record would leave real work on disk with
+    nothing naming it — A3's own fault, silent clobbering, surviving inside a
+    single repository after scoping fixed it between them.
 
-    `live` is used here to *refuse*, never to authorize, which is why a stale
-    reading is safe: it can only make this refusal fire when it need not, and
-    can never suppress it. Nothing is displaced, so nothing needs restoring
-    if the caller later has to undo the fork.
-
-    A record carrying no repository is never touched: matching a live worktree
-    does not show it belongs here, since two repositories can hold one path on
-    one branch name — ordinary under the `central` worktree layout, which keys
-    on a repository's basename alone.
+    Callers should refuse earlier, at preflight, so nothing has been created
+    when a conflict is reported. This check exists because preflight cannot be
+    the last word: another fork can register between it and here. Evaluating
+    it under the lock is what makes that window closed rather than narrow.
     """
     path = registry_path(env)
     with registry_lock(path, timeout=timeout):
-        kept: list[RegistryEntry] = []
-        for item in _decode(path):
-            same_fork = (
+        entries = _decode(path)
+        occupied = occupied_fork(entry.name, entry.repository or "", entries=entries)
+        # A record naming the same worktree and branch as the entry being
+        # written describes this very slot, not a second fork — the directory
+        # it points at is the one the caller just created.
+        if occupied is not None and (
+            occupied.worktree != entry.worktree or occupied.branch != entry.branch
+        ):
+            raise PreconditionError(
+                "conflict_fork_registered",
+                f"fork {entry.name!r} is already registered for this repository "
+                f"at {occupied.worktree}; remove it first, or choose another name",
+            )
+        kept = [
+            item
+            for item in entries
+            if not (
                 item.name == entry.name
                 and item.repository is not None
                 and entry.repository is not None
                 and item.repository == entry.repository
             )
-            if same_fork:
-                # A record naming the same worktree and branch as the fork
-                # being recorded describes this very slot, not a second fork.
-                # Its liveness is the *new* worktree, which the caller just
-                # created, so refusing here would block every re-fork of a
-                # name whose worktree was removed outside agent-fork.
-                same_slot = (
-                    item.worktree == entry.worktree and item.branch == entry.branch
-                )
-                if not same_slot and is_live(item, live):
-                    raise PreconditionError(
-                        "conflict_fork_registered",
-                        f"fork {item.name!r} is already registered for this "
-                        f"repository at {item.worktree}; remove it first, or "
-                        "choose another name",
-                    )
-                # Its worktree is gone, so the record describes nothing.
-                continue
-            kept.append(item)
+        ]
         kept.append(entry)
         _atomic_write(path, kept)
 

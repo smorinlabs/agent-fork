@@ -18,16 +18,16 @@ from agent_fork.agents import (
     preflight_git,
 )
 from agent_fork.content import capture_state, collect_inventory
+from agent_fork.errors import PreconditionError
 from agent_fork.git import run_git
 from agent_fork.include import copy_worktree_includes, run_setup_hook
 from agent_fork.lineage import LineageClaim, add_lineage
 from agent_fork.materialize import materialize
 from agent_fork.models import RegistryEntry
-from agent_fork.registry import add_entry, remove_entry
+from agent_fork.registry import add_entry, occupied_fork, remove_entry
 from agent_fork.repository import (
     WorktreeCreation,
     create_worktree_at_anchor,
-    live_worktree_pairs,
     validate_fork_guards,
 )
 from agent_fork.rollback import run_with_rollback
@@ -94,13 +94,25 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
     if agent_check is not None:
         notices.extend(agent_check.notices)
     resolved_agent = agent_check.context if agent_check is not None else request.agent
-    validate_fork_guards(
+    info = validate_fork_guards(
         request.parent,
         request.branch,
         request.destination,
         with_state=request.with_state,
         env=env,
     )
+    # Refuse a name this repository already has a fork of, here — before any
+    # worktree, include copy, or setup hook has run. `add_entry` checks again
+    # under the registry lock, because another fork can register in between,
+    # but by then the hook has already had its side effects, which a rollback
+    # cannot reverse. A refusal the user can act on has to come first.
+    occupied = occupied_fork(request.name, info.common_dir, env=env)
+    if occupied is not None:
+        raise PreconditionError(
+            "conflict_fork_registered",
+            f"fork {request.name!r} is already registered for this repository "
+            f"at {occupied.worktree}; remove it first, or choose another name",
+        )
     planned_child_id = (
         request.child_session_id or str(uuid.uuid4())
         if resolved_agent is not None and resolved_agent.agent == "claude"
@@ -167,7 +179,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             mode="agent" if resolved_agent is not None else "git-only",
             repository=creation.common_dir,
         )
-        add_entry(entry, live=live_worktree_pairs(request.parent, env=env), env=env)
+        add_entry(entry, env=env)
         if (
             resolved_agent is not None
             and resolved_agent.agent == "claude"

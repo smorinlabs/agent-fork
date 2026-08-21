@@ -242,7 +242,14 @@ def test_forking_a_live_name_refuses_instead_of_orphaning_it(repo_scenario):
 
 @pytest.mark.matrix("T-REG-33")
 def test_forking_replaces_a_record_whose_worktree_is_gone(repo_scenario):
-    """A record describing nothing is replaced freely: it orphans nothing."""
+    """A record describing nothing is replaced freely: it orphans nothing.
+
+    The replacement uses a *different* branch and destination from the dead
+    record, so this exercises general dead-record replacement rather than the
+    same-slot path a same-path re-fork would take.
+    """
+    from conftest import run_cli
+
     world = repo_scenario()
     created = _fork(world.env, world.parent_path, "again")
     assert created.returncode == 0
@@ -265,10 +272,67 @@ def test_forking_replaces_a_record_whose_worktree_is_gone(repo_scenario):
         capture_output=True,
     )
 
-    again = _fork(world.env, world.parent_path, "again")
+    again = run_cli(
+        [
+            "fork",
+            "again",
+            "--no-agent",
+            "--branch",
+            "fork/again-elsewhere",
+            "--worktree-name",
+            "again-elsewhere",
+        ],
+        world.env,
+        world.parent_path,
+    )
     assert again.returncode == 0, again.stderr
     rows = _rows(world.env)
     assert len(rows) == 1, f"the dead record should have been replaced: {rows}"
+    assert rows[0]["branch"] == "fork/again-elsewhere"
+
+
+@pytest.mark.matrix("T-REG-35")
+def test_the_conflict_refusal_runs_before_the_setup_hook(repo_scenario):
+    """A refusal must arrive before anything with side effects has happened.
+
+    The setup hook is arbitrary user code; rollback removes the worktree and
+    branch it created but cannot reverse what the hook did outside them. So a
+    conflict has to be detected at preflight, not after the hook has run.
+    """
+
+    from conftest import run_cli
+
+    world = repo_scenario()
+    assert _fork(world.env, world.parent_path, "hooked").returncode == 0
+
+    # The hook lives in the parent as untracked state, is carried into the
+    # child by the fork, and runs there — so it only executes if the fork gets
+    # far enough to copy and run it.
+    marker = world.parent_path.parent / "hook-ran"
+    hook = world.parent_path / ".agent-fork" / "worktree-setup.sh"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(f'#!/bin/sh\necho ran > "{marker}"\n')
+    hook.chmod(0o755)
+
+    second = run_cli(
+        [
+            "fork",
+            "hooked",
+            "--no-agent",
+            "--branch",
+            "fork/hooked-again",
+            "--worktree-name",
+            "hooked-again",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    assert second.returncode == 5, second.stdout
+    assert b"conflict_fork_registered" in second.stderr, second.stderr
+    assert not marker.exists(), "the setup hook ran before the conflict was refused"
+    assert not (world.parent_path.parent / "hooked-again").exists(), (
+        "a worktree was created before the conflict was refused"
+    )
 
 
 @pytest.mark.matrix("T-REG-26")
