@@ -240,7 +240,7 @@ cause a redundant row, never a wrong deletion:
 | Linked worktrees | Correct by construction — all share one common directory |
 | Submodules | Correct; a submodule is its own repository with its own branch namespace |
 | Bare repositories | Works if the helper reads the common directory directly; requiring `--show-toplevel` would regress bare support (`repository.py:105-115`) |
-| Moved repositories | Stored value goes stale, and nothing repairs it: the record stops matching and `prune` clears it |
+| Moved repositories | Stored value goes stale and nothing repairs it. The record stops matching; `prune` keeps it if the old path now holds another repository's worktree, and reports it |
 | Mount aliases, case-aliased paths | Residual weakness; `Path.resolve()` handles symlinks, not every mount-level alias |
 | `GIT_DIR` / `GIT_COMMON_DIR` in the environment | **Empirically refuted as a threat, not deferred.** See the A2 note below |
 
@@ -331,11 +331,15 @@ that used the path first. Writing an identity on that evidence manufactures
 the ownership it cannot prove.
 
 **What a user with pre-upgrade records does.** By name, cleanup refuses and
-names `prune`. By explicit path it works — a path the user typed is fresh
-input, and a null row vetoes nothing, so the target reaches confirmed
-discovery with the dirty and unpushed guards intact and no `--force` needed.
-`prune` then clears the records; it never touches a worktree, so either order
-is safe. Removing backfill also removed `add_entry`'s `live` parameter: with
+names `prune`. Recovery is two steps: `prune` clears the inert records, after which the
+worktree is genuinely unregistered and `cleanup <path> --force` removes it.
+`prune` never touches a worktree.
+
+**Open, and the last thing this item owes:** `--force` carries two
+authorities — extend targeting beyond registered forks, and waive the dirty
+and unpushed guards — so that recovery waives the guards as a side effect.
+Before A3 a pre-v2 fork was cleanable by name with both guards active, so
+this is a regression A3 introduced. Recorded rather than papered over. Removing backfill also removed `add_entry`'s `live` parameter: with
 no backfill, its replacement rule is purely `(repository, name)`.
 
 Two consequences are documented rather than engineered around: rows already
@@ -528,8 +532,8 @@ Call sites that must change together:
     worktree replaced by a different worktree of the same repository on a
     different branch;
   - non-dry-run cleanup from repoE cannot touch repoF;
-  - a pre-upgrade (null-identity) fork whose worktree exists is cleaned **by
-    name, without `--force`, with the dirty and unpushed guards intact**;
+  - a pre-upgrade (null-identity) fork refuses by name, naming `prune`, and is
+    removed by path after `prune` clears the record;
   - a null record authorizes nothing, gains no identity from forking, and is
     cleared by `prune` without its worktree being touched;
   - fork-time replacement removes a same-name row only when the predicate
@@ -559,8 +563,9 @@ liveness. New `T-REG` rows in `docs/testing/TEST-MATRIX.md` under G-REG.
 case.
 
 **Gate 6 exit criteria.** `just all` green; the four repros pass as tests;
-every row of the staleness matrix refuses; the pre-upgrade-fork cleanup works
-without `--force`; the fork-time replacement and lineage-failure test passes;
+every row of the staleness matrix refuses; the pre-upgrade-fork recovery works
+as two steps, `prune` then `cleanup <path> --force`; the fork-time replacement
+and lineage-failure test passes;
 public `list` and `cleanup` payloads match their literal fixtures with
 `repository` absent, and raw v2 rows carry it.
 

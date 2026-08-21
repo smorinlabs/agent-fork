@@ -376,7 +376,7 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-17 | after an auto-name collision, `cleanup` plans against the invoking repository's own worktree, never the other's | baseline | F | live | REQ-31 (A3); A3 repro 4 |
 | T-REG-18 | staleness — worktree removed by hand → `cleanup` refuses with `cleanup_registry_stale` and keeps the record, instead of failing on a raw Git error against the missing path | baseline | F | live | REQ-31 (A3); overlaps A7 |
 | T-REG-19 | staleness — recorded path is live but on a different branch → the pair does not match, `cleanup` refuses | baseline | F | live | REQ-31 (A3) |
-| T-REG-20 | `prune` removes only records whose worktree path does not exist; `--dry-run` writes nothing | baseline | F | live | REQ-31 (A3); absorbs A7's prune |
+| T-REG-20 | `prune` removes records whose worktree path does not exist and leaves live ones; `--dry-run` writes nothing | baseline | F | live | REQ-31 (A3); absorbs A7's prune |
 | T-REG-21 | `prune` keeps and reports a record whose path another repository's live worktree now occupies | baseline | F | live | REQ-31 (A3) |
 | T-REG-22 | `prune` on a healthy registry reports nothing to remove and changes nothing | baseline | F | live | REQ-31 (A3) |
 | T-REG-23 | a v1 record carrying no repository authorizes nothing — cleanup by name refuses, the worktree is untouched, and `prune` clears the record without touching disk | baseline | F | live | REQ-41 (A3); migration; gate-6 r3 |

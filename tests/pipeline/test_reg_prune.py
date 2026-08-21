@@ -205,7 +205,11 @@ def test_v1_record_authorizes_nothing_and_prune_clears_it(repo_scenario):
         world.env,
         world.parent_path,
     )
-    assert ungated.returncode != 0, ungated.stdout
+    # The exact refusal, not merely a non-zero exit: Git supplies its own
+    # failures, so a loose assertion here would pass even if resolution
+    # wrongly reached the destructive commands.
+    assert ungated.returncode == 3, ungated.stdout
+    assert b"cleanup_target_unknown" in ungated.stderr, ungated.stderr
     assert Path(worktree).exists()
 
     # The documented recovery: prune clears the inert record, after which the

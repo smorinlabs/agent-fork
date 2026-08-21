@@ -255,7 +255,8 @@ def undo_add(
         # is accepted rather than solved: if a successor takes the name and
         # then also fails, the record this call displaced is not recovered,
         # because the successor never knew about it. Its worktree survives,
-        # unregistered, and `prune` plus a fresh fork restores order.
+        # unregistered and removable by path. `prune` cannot bring the record
+        # back.
         remaining.extend(
             item
             for item in displaced

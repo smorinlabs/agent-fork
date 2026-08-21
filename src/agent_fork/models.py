@@ -111,10 +111,12 @@ class RegistryEntry:
     def token(self) -> tuple[object, ...]:
         """Identity for compare-and-swap removal.
 
-        Built from persisted fields only, never from `repository`, which a
-        backfill may fill in between the moment a record is selected and the
-        moment it is removed. `agent` is carried as-is rather than coerced to a
-        string, so a recorded absence stays distinct from an empty name.
+        Built from persisted fields only, never from `repository`. That field
+        is derived rather than intrinsic, so keeping it out means a record
+        stays recognisable to a caller holding a token even if the field's
+        meaning or population changes. `agent` is carried as-is rather than
+        coerced to a string, so a recorded absence stays distinct from an
+        empty name.
         """
         return (
             self.name,

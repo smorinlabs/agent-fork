@@ -256,11 +256,12 @@ def _parser() -> argparse.ArgumentParser:
     pruning = commands.add_parser(
         "prune",
         allow_abbrev=False,
-        help="Remove registry records whose worktree no longer exists",
+        help="Remove registry records that are gone or cannot identify their fork",
         description=(
-            "Clear registry records left behind by worktrees removed outside "
-            "agent-fork. Only the registry is changed; no worktree or branch "
-            "is touched."
+            "Clear registry records whose worktree no longer exists, and "
+            "records written before agent-fork recorded which repository a "
+            "fork belongs to, which can no longer identify one. Only the "
+            "registry is changed; no worktree or branch is touched."
         ),
     )
     pruning.add_argument(
