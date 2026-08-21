@@ -33,7 +33,7 @@ plugins, and no interactive behavior.
 | 3. Design document | **this document** |
 | 4. Implementation plan and adversarial review, including Codex | pending |
 | 5. Test-driven implementation | pending |
-| 6. Adversarial implementation review, including Codex | pending |
+| 6. Adversarial implementation review, including Codex | **CONFIRMED-WITH-CORRECTIONS** on 2026-08-20 — two independent lenses (Claude, Codex) found corroborating defects in the shipped implementation; all are fixed, with five new matrix rows. See "Gate-6 corrections" |
 
 ---
 
@@ -1131,3 +1131,29 @@ header gate table above).
 
 **Conclusion.** No design change. Renumber `T-CLI` a second time before
 Step 1; the four other prefixes need no further change.
+
+---
+
+## Gate-6 corrections (2026-08-20)
+
+Two independent adversarial reviews of the shipped implementation — one Claude,
+one Codex — found corroborating defects. All are fixed on this branch. The
+table is the record of what changed *after* Step 5, so a later reader does not
+have to diff the branch to find out which parts of this document describe the
+plan and which describe the product.
+
+| # | Defect | Correction | Rows |
+|---|---|---|---|
+| 1 | Reaping decided from the leader's exit status, not the group. Timeout path: a hook that backgrounded a process and exited was reported `timed_out: true` after 121 s, and the post-reap drain was unbounded. Interrupt path: `signal_process_group()` returned before `killpg` when the leader had already exited, so a surviving group member ignoring SIGTERM never got SIGKILL | `_signal_hook_group()` (unconditional `killpg`), group-emptiness probing in `_reap()`, and `_collect_output()`'s two separate bounds; `descendants_cleared` reports what is left. "Execution and reaping" and "Known limits" above are rewritten to match | `T-INC-17`, `T-RBK-10` |
+| 2 | An interrupt between `Popen()` and the `_ACTIVE` registration leaked the process group | Spawn and registration moved inside the reap-protected region, registration in a `finally` | covered by 1's rows |
+| 3 | `main()`'s interrupt boundary chose JSON-versus-human from the raw arguments, not the resolved output mode | `_fork_cli()` publishes the resolved mode; `_machine()` prefers it. Note for the record: `output` is not a `[fork]` config key — `AGENT_FORK_OUTPUT` is the whole non-flag route | `T-CLI-54` |
+| 4 | Axis C1's human-mode tail echo was never implemented — `stdout_tail`/`stderr_tail` appeared nowhere in `cli.py` | Echoed to stderr for failed, timed-out, and `--debug`, reusing the already-bounded, already-escaped fields | `T-OUT-26`, `T-OUT-27` |
+| 5 | `CONFORMANCE.md` overclaimed machine-mode stderr purity: the hook's skip and failure notices still land there as plain text | Claim corrected, not the behavior — the notice path is A13(a) / `P02-T13ABF`, out of scope and deliberately preserved | `T-OUT-24` extended |
+
+Three nitpicks were taken as well: a digits-only pre-check on
+`setup_hook_timeout` (`int("1_000")` silently became 1000), a fallback so a
+reason-less eligibility cannot render the literal `None` in dry-run text, and
+`T-INC-14`'s missing exact-bound case (output of exactly 4096 bytes), which
+passed as written.
+
+Matrix rows move from 532 to 537.

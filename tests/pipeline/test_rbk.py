@@ -317,7 +317,7 @@ def test_terminating_the_hook_group_reaches_survivors_after_the_leader_exits(tmp
     script = tmp_path / "hook.sh"
     script.write_text(
         "#!/bin/sh\n"
-        f"sh -c 'trap \"\" TERM; printf \"%s\" \"$$\" > \"{recorded}\"; "
+        f'sh -c \'trap "" TERM; printf "%s" "$$" > "{recorded}"; '
         "sleep 120' &\n"
         "exit 0\n"
     )

@@ -364,7 +364,7 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 | T-RBK-07 | interrupted Git cleanup observes an already-exited process before a redundant process-group signal, preserving the original interruption instead of masking it with macOS `EPERM` | baseline | U | live | REQ-22; macOS process-group regression |
 | T-RBK-08 | A12 Gate-1 fact 6 — SIGINT while the setup hook runs → exit 130, clean rollback, and no surviving process from the hook's group (its backgrounded grandchild is not reparented to PID 1) | baseline | F | live | REQ-22; P02 A12 |
 | T-RBK-09 | A12 Gate-1 fact 6 — SIGTERM while the setup hook runs → exit 143, with the same rollback and process-group reaping guarantees | baseline | F | live | REQ-22; P02 A12 |
-| T-RBK-10 | A12 gate-6 — `terminate_active_setup_hook()` signals the hook's process group even after its leader has exited, so a SIGTERM-ignoring group member is still SIGKILLed instead of being skipped | baseline | U | live | REQ-22; P02 A12 gate-6 |
+| T-RBK-10 | A12 gate-6 — `terminate_active_setup_hook()` signals the hook's process group even after its leader has exited, so a SIGTERM-ignoring group member is still SIGKILLed instead of being skipped | baseline | F | live | REQ-22; P02 A12 gate-6 |
 
 ---
 
