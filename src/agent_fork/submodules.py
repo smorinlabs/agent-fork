@@ -17,7 +17,7 @@ recursive snapshot".
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +29,7 @@ from agent_fork.content import (
     gitlink_paths,
 )
 from agent_fork.git import run_git
+from agent_fork.materialize import materialize
 
 
 @dataclass(frozen=True)
@@ -185,3 +186,153 @@ def snapshot_submodules(
     return _snapshot_recursive(
         parent, with_state=with_state, with_ignored=with_ignored, env=env
     )
+
+
+@dataclass(frozen=True)
+class CarryResult:
+    """What one `carry_submodules` call actually did, recursively flattened."""
+
+    carried: tuple[str, ...]
+    skipped: tuple[str, ...]
+    notices: tuple[str, ...]
+
+
+def _carry_one(
+    parent: Path,
+    child: Path,
+    plan: SubmoduleSnapshot,
+    *,
+    with_state: bool,
+    with_ignored: bool,
+    config_pins: Sequence[tuple[str, str]],
+    env: Mapping[str, str] | None,
+) -> tuple[list[str], list[str], list[str]]:
+    """Carry one submodule per the recipe, then recurse into its own nested plan.
+
+    Steps below are numbered to match the design doc's "recipe, per gitlink,
+    depth-first" (step 0, name/path resolution, already happened at snapshot
+    time — the frozen ``plan`` already carries both).
+    """
+    carried: list[str] = []
+    skipped: list[str] = []
+    notices: list[str] = []
+
+    # Step 1 — skip what the parent left cold.
+    if not plan.initialized:
+        skipped.append(plan.path)
+        return carried, skipped, notices
+
+    child_checkout = child / plan.path
+    literal_path = f":(literal){plan.path}"
+
+    # Step 2 — initialize from the parent's own checkout, never the remote.
+    # protocol.file.allow and the URL override are command-scoped pins, never
+    # ambient; the URL is keyed by name, never path (step 0). --checkout is
+    # required so submodule.<name>.update=none cannot make this silently no-op.
+    run_git(
+        child,
+        ["submodule", "update", "--init", "--checkout", "--", literal_path],
+        env=env,
+        config_pins=(
+            ("protocol.file.allow", "always"),
+            (f"submodule.{plan.name}.url", str(parent / plan.path)),
+            *config_pins,
+        ),
+    )
+    if not (child_checkout / ".git").exists():
+        raise RuntimeError(
+            f"submodule {plan.path!r} did not initialize; "
+            "submodule.<name>.update policy may have blocked --checkout"
+        )
+
+    # Step 3 — restore only the child's own remote.origin.url. Never
+    # `git submodule sync`: the child is a linked worktree sharing .git/config
+    # with the parent, so top-level sync would corrupt the parent's config.
+    if plan.remote_url is not None:
+        run_git(
+            child_checkout,
+            ["config", "remote.origin.url", plan.remote_url],
+            env=env,
+            config_pins=config_pins,
+        )
+
+    # Step 4 — match the checked-out commit. This is what makes an unstaged
+    # gitlink advance (cell `c`) representable at all.
+    if plan.head is not None:
+        run_git(
+            child_checkout,
+            ["checkout", "--detach", plan.head],
+            env=env,
+            config_pins=config_pins,
+        )
+
+    # Step 5 — reuse transport through the config_pins seam, not verbatim.
+    materialize(
+        parent / plan.path,
+        child_checkout,
+        with_state=with_state,
+        with_ignored=with_ignored,
+        inventory=plan.inventory,
+        config_pins=config_pins,
+        env=env,
+    )
+    carried.append(plan.path)
+    notices.append(
+        f"submodule carried: {plan.path} "
+        "(only remote.origin.url restored, not fetch refspecs or "
+        f"submodule.{plan.name}.active)"
+    )
+
+    # Step 6 — recurse for nested submodules, carrying the frozen plan for
+    # that depth. The outer submodule's own checkout becomes the "parent" and
+    # "child" for its own nested submodules.
+    for nested_plan in plan.nested:
+        nested_carried, nested_skipped, nested_notices = _carry_one(
+            parent / plan.path,
+            child_checkout,
+            nested_plan,
+            with_state=with_state,
+            with_ignored=with_ignored,
+            config_pins=config_pins,
+            env=env,
+        )
+        carried.extend(f"{plan.path}/{item}" for item in nested_carried)
+        skipped.extend(f"{plan.path}/{item}" for item in nested_skipped)
+        notices.extend(nested_notices)
+
+    return carried, skipped, notices
+
+
+def carry_submodules(
+    parent: Path,
+    child: Path,
+    plans: tuple[SubmoduleSnapshot, ...],
+    *,
+    with_state: bool,
+    with_ignored: bool = False,
+    config_pins: Sequence[tuple[str, str]] = (),
+    env: Mapping[str, str] | None = None,
+) -> CarryResult:
+    """Carry every submodule in ``plans`` from ``parent`` into ``child``.
+
+    ``plans`` is the frozen snapshot from `snapshot_submodules`, resolved
+    before the worktree existed. ``child`` must already exist as a worktree of
+    ``parent`` — this function does not create it.
+    """
+    carried: list[str] = []
+    skipped: list[str] = []
+    notices: list[str] = []
+    for plan in plans:
+        plan_carried, plan_skipped, plan_notices = _carry_one(
+            parent,
+            child,
+            plan,
+            with_state=with_state,
+            with_ignored=with_ignored,
+            config_pins=config_pins,
+            env=env,
+        )
+        carried.extend(plan_carried)
+        skipped.extend(plan_skipped)
+        notices.extend(plan_notices)
+    return CarryResult(tuple(carried), tuple(skipped), tuple(notices))

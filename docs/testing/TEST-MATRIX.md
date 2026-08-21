@@ -303,6 +303,18 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-36 | A6b step 4 — `with_state=False` snapshots to an empty tuple; nothing to carry, nothing to snapshot | baseline | F | live | A6 design doc §Recursive snapshot |
 | T-MAT-37 | A6b step 4 — a relative `.gitmodules` URL resolves to an absolute value in the snapshot, matching what recipe step 3 needs "before the fork" | baseline | F | live | A6 design doc, gate-4 pass 4 finding 4 |
 | T-MAT-38 | A6b step 4 — an unreachable remote URL is recorded from local config without any network access | baseline | F | live | A6 design doc §Recursive snapshot |
+| T-MAT-39 | A6b step 5 — no submodules to carry when none exist | baseline | F | live | A6 design doc §Recipe |
+| T-MAT-40 | A6b step 5 — cell `a`, a modified submodule initializes offline and both top-level and inner status match the parent exactly | baseline | F | live | A6 design doc §Recipe steps 1-2 |
+| T-MAT-41 | A6b step 5 — cell `c`, an unstaged gitlink advance is represented by checking the child submodule out at the parent's submodule HEAD, not the index gitlink OID | baseline | F | live | A6 design doc §Recipe step 4 |
+| T-MAT-42 | A6b step 5 — carrying never runs `git submodule sync` in the child; a deliberate parent config override survives | baseline | F | live | A6 design doc, gate-4 pass 1 finding 1 |
+| T-MAT-43 | A6b step 5 — only the child's own `remote.origin.url` is restored, matching the parent's resolved value | baseline | F | live | A6 design doc §Recipe step 3 |
+| T-MAT-44 | A6b step 5 — cell `j`, a renamed submodule initializes offline via the name-keyed URL override | baseline | F | live | A6 design doc §Recipe step 0 |
+| T-MAT-45 | A6b step 5 — the offline override engages even against a genuinely unreachable `.gitmodules` remote URL | baseline | F | live | A6 design doc §Recipe step 2 |
+| T-MAT-46 | A6b step 5 — cell `g`, a parent-cold submodule stays cold in the child; nothing is initialized | baseline | F | live | A6 design doc §Recipe step 1 |
+| T-MAT-47 | A6b step 5 — `submodule.<name>.update=none` cannot make init silently no-op, because `--checkout` is always passed | baseline | F | live | A6 design doc, gate-4 pass 1 finding 2 |
+| T-MAT-48 | A6b step 5 — cell `h`, a nested submodule is carried recursively rather than left cold | baseline | F | live | A6 design doc §Recipe step 6 |
+| T-MAT-49 | A6b step 5 — cell `i`, a change staged in the submodule's own index (HEAD unmoved) transports via the reused `materialize` seam | baseline | F | live | A6 design doc §Recipe step 5 |
+| T-MAT-50 | A6b step 5 — the carry notice states the configuration-fidelity limit: only `remote.origin.url` is restored | baseline | F | live | A6 design doc §Recipe step 3 |
 
 ---
 

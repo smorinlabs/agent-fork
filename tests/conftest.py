@@ -187,6 +187,7 @@ def submodule(
     path: str | None = None,
     dirty: str | None = None,
     *,
+    committed: bool = False,
     name: str | None = None,
     nested: bool = False,
     url_kind: str = "local",
@@ -231,6 +232,8 @@ def submodule(
         extra += (("url_kind", url_kind),)
     if update_policy is not None:
         extra += (("update_policy", update_policy),)
+    if committed:
+        extra += (("committed", "1"),)
     return StateSpec("submodule", path or "vendor/submodule", target=dirty, extra=extra)
 
 
@@ -745,7 +748,14 @@ def _apply_states(handle: WorldHandle, states: tuple[StateSpec, ...]) -> None:
                     "inner",
                 )
                 _run_git(handle.env, path, "commit", "-m", "add nested submodule")
-            _dirty_submodule(handle, parent, path, spec.path, spec.target)
+            _dirty_submodule(
+                handle,
+                parent,
+                path,
+                spec.path,
+                spec.target,
+                committed="committed" in extra,
+            )
         elif spec.kind == "worktreeinclude":
             path.write_text(f"{spec.target}\n")
         else:
@@ -758,17 +768,37 @@ def _dirty_submodule(
     path: Path,
     relative: str,
     dirt: str | None,
+    *,
+    committed: bool = False,
 ):
     """Put the submodule at ``path`` into the state named by ``dirt``.
 
     ``_init_plain`` seeds every submodule with `tracked.txt`, so "modified"
     rewrites that file rather than introducing a second fixture filename.
+
+    A bare, clean submodule (``dirt is None``, ``committed=False``)
+    deliberately stays uncommitted — index-only: T-VER-30 and T-MAT-14 pin
+    that gitlink shape, and a fork carries it correctly with no worktree
+    checkout to compare. A6b's own carry tests need a *committed* clean
+    submodule instead — a child worktree anchors at a commit, not the index,
+    so a submodule only staged in the parent is invisible to
+    `git submodule update` in the child; ``committed=True`` closes that gap
+    without disturbing the existing index-only contract.
     """
     if dirt is None:
+        if committed:
+            _run_git(
+                handle.env,
+                parent,
+                "commit",
+                "-m",
+                f"add submodule {relative}",
+                "--",
+                ".gitmodules",
+                f":(literal){relative}",
+            )
         return
     # Commit the gitlink first, so the dirt below is the only state in play.
-    # Clean submodules deliberately stay uncommitted: T-VER-30 and T-MAT-14 pin
-    # the index-only gitlink shape, which a commit would erase.
     # Pathspec-scoped, so a `staged()` element earlier in the same states tuple
     # is not swept into this commit and silently lost.
     _run_git(
