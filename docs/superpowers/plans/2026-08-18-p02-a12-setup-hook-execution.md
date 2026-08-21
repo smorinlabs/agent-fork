@@ -494,10 +494,13 @@ Two deliberate divergences from `git.py:117-127`, both required:
   member* — the kernel reserves the pid as the group id for exactly that long.
   It is **not** safe afterwards: an emptied group's pid is free for the kernel
   to hand to an unrelated process, which is why emptiness latches and no
-  further signal is issued once it has (`T-INC-18`), and why a live leader is
-  answered without a probe at all (`T-INC-21`). Neither makes the
-  check-and-signal pair one atomic step; Known limit 9 states what is left.
-  `git.py` is unchanged, and `T-RBK-07` still pins its behavior.
+  further signal is issued once it has (`T-INC-18`). A live leader does not
+  shortcut the `killpg(pgid, 0)` probe either — round 4 tried that and it was
+  wrong (see the round-5 correction below); `T-INC-21` now pins the probe
+  running unconditionally, live leader or not. The latch and the always-run
+  probe do not make the check-and-signal pair one atomic step; Known limit 9
+  states what is left. `git.py` is unchanged, and `T-RBK-07` still pins its
+  behavior.
 
 Execution path — two bounds, because a pipe outlives its writer's parent:
 
@@ -989,28 +992,45 @@ Stated so no reviewer mistakes them for oversights.
    `descendants_cleared: false` plus a notice reports what was left behind.
    Added 2026-08-20 from the gate-6 review.
 9. **Signalling a process group by pid is not atomic with checking that the pid
-   is still the hook's.** Three rounds of review narrowed this and none closed
-   it. What holds today: while the hook's own leader is unreaped, its pid
-   cannot be recycled — this process is its parent, it is single-threaded, and
-   it issues no `waitpid` between the check and the signal — so
-   `_group_is_empty()` answers "not empty" on a live leader with no probe, and
-   the `killpg` that follows provably reaches the hook's group. While the group
-   holds any member, the kernel keeps the pid reserved as that group's id, so
-   the same holds after the leader is reaped. And once the group has been *seen*
-   empty, the latch retires the pid and no path signals it again (`T-INC-18`).
-   What remains: `process.poll()` reaps the leader and thereby releases its pid,
-   and `_group_is_empty()`'s `killpg(pgid, 0)` probe and the `killpg(pgid,
-   signum)` that acts on its answer are two separate syscalls. If the group
-   empties in that span *and* the kernel recycles the pid *and* the new owner
-   installs it as a process group id — all within a couple of adjacent syscalls
-   — the signal reaches a stranger. Closing it needs a handle that names the
-   process rather than its number: Linux has had `pidfd_open`/
-   `pidfd_send_signal` since kernel 5.3, macOS has no equivalent, and agent-fork
-   supports both and depends only on `platformdirs`. Adding a dependency, or a
-   Linux-only path, buys a narrower race on one platform at the cost of two
-   code paths to reason about, which is the trade round 1 made and round 3 had
-   to undo. Stated rather than claimed shut. Added 2026-08-21 from the gate-6
-   round-4 review.
+   is still the hook's.** Four rounds of review narrowed this; none closed it,
+   and round 4's attempt to narrow it further was itself wrong and was reverted
+   in round 5 (below) rather than shipped. What holds today: `_group_is_empty()`
+   always issues a `killpg(pgid, 0)` probe — including when the leader is still
+   alive — because that probe is the function's only actual source of proof.
+   Round 4 tried skipping it whenever `Popen.poll()` returned `None`, reasoning
+   that a session leader cannot leave its own group, so an unreaped child
+   provably pins its pid. That reasoning missed a second, CPython-documented
+   meaning of `poll() is None`: status unknown because a concurrent `waitpid`
+   already holds the process's internal lock, which a signal handler
+   re-entering this same process during another `communicate()`/`poll()` call
+   can genuinely produce. Treating every `None` as "leader confirmed alive" was
+   therefore a false safety claim, not a narrower race, and round 5 reverted it
+   — `_group_is_empty()` now matches round 3's shape. What remains, honestly:
+   while the group holds any member the kernel keeps its leader's pid reserved
+   as the group id, so the probe's answer is trustworthy; and once the group
+   has been *seen* empty, the latch retires the pid and no path signals it
+   again (`T-INC-18`). Between those two states — after `process.poll()` has
+   reaped the leader and released its pid, and before the probe's answer is
+   acted on — `_group_is_empty()`'s `killpg(pgid, 0)` probe and the eventual
+   `killpg(pgid, signum)` that acts on its answer are two separate syscalls
+   with no atomicity between them. If the group empties in that span *and* the
+   kernel recycles the pid *and* the new owner installs it as a process group
+   id — all within a couple of adjacent syscalls — the signal reaches a
+   stranger. Closing it needs a handle that names the process rather than its
+   number: Linux has had `pidfd_open`/`pidfd_send_signal` since kernel 5.3 for
+   signalling a single process, but process-group scope
+   (`PIDFD_SIGNAL_PROCESS_GROUP`) did not arrive until kernel 6.9, and a pidfd
+   opened against an already-reaped leader answers `ESRCH` regardless — so the
+   5.3 primitive is not by itself a stable handle for the surviving-group case
+   this limit describes. macOS has no equivalent at any kernel version, and
+   agent-fork supports both platforms and depends only on `platformdirs`.
+   Adding a dependency, or a Linux-only path gated to a kernel new enough to
+   carry `PIDFD_SIGNAL_PROCESS_GROUP`, buys a narrower race on one platform at
+   the cost of two code paths to reason about — the trade round 1 made and
+   round 3 had to undo, and round 4 remade in a different, subtler form. Stated
+   rather than claimed shut. Added 2026-08-21 from the gate-6 round-4 review;
+   corrected 2026-08-21 in round 5 after an independent review found round 4's
+   narrowing itself unsound.
 
 ---
 
@@ -1250,6 +1270,35 @@ it goes and then disclosed as Known limit 9 rather than claimed closed.
 | # | Defect | Correction | Rows |
 |---|---|---|---|
 | 1 | The resolve-to-publish window was **not** closed by round 3. `resolve_discovered_config()`, the `output_kind` computation, and the `args._resolved_machine` assignment are three statements, and CPython runs signal handlers between bytecodes, so a signal landing between the return and the assignment still unwound with the mode unpublished and rendered a human error under `AGENT_FORK_OUTPUT=json` | `{SIGINT, SIGTERM}` blocked with `signal.pthread_sigmask` across all three statements in `_fork_cli()`, restored with `SIG_SETMASK` in a `finally` — the same technique round 3 used for the spawn, and simpler here because no child process is involved. A `ConfigError` from resolution still leaves the mode unpublished, which is correct: none exists yet | `T-CLI-56` |
-| 2 | Round 3's emptiness latch stops a *repeated* signal once emptiness has been observed, but the check and the signal are still two syscalls, and `process.poll()` can itself reap the leader and release its pid before the probe even runs | Tightened, then disclosed. `_group_is_empty()` now answers on a live leader without probing at all: a session leader cannot leave its own group, and an unreaped child pins its pid against reuse, so that path is provably safe rather than narrow — and one syscall leaves the polling loop. The reaped-leader path is not closable with primitives portable to Linux and macOS, so it is stated as **Known limit 9** rather than claimed shut, and the reap-ladder section now points at it | `T-INC-21` |
+| 2 | Round 3's emptiness latch stops a *repeated* signal once emptiness has been observed, but the check and the signal are still two syscalls, and `process.poll()` can itself reap the leader and release its pid before the probe even runs | Tried: skip the `killpg(pgid, 0)` probe on a live leader (`Popen.poll() is None`), reasoning that a session leader cannot leave its own group. **Wrong — see round 5: `poll() is None` does not only mean "confirmed alive."** Disclosed as Known limit 9 rather than claimed shut | `T-INC-21` (rewritten in round 5) |
+
+Matrix rows move from 537 to 541.
+
+### Round 5 (2026-08-21)
+
+A third independent Codex pass, checking round 4's item 2 tightening
+specifically, found it introduced a false safety claim rather than a narrower
+race: `Popen.poll()` returning `None` does not only mean "leader confirmed
+still running." CPython also returns `None` when a concurrent `waitpid` call
+already holds the process's internal lock and no status could be observed —
+which a signal handler re-entering this same single-threaded process during
+another `communicate()`/`poll()` call can genuinely trigger. Round 4's
+skip-the-probe optimization treated that "unknown" case as "known alive," so
+it could skip the `killpg(pgid, 0)` probe and go straight to signalling a pid
+that had, in fact, already been reaped and could have been recycled — the
+exact hazard Known limit 9 exists to disclose, now silently reintroduced by
+the code that was supposed to be tightening it.
+
+| # | Defect | Correction | Rows |
+|---|---|---|---|
+| 1 | Round 4's skip-the-probe optimization in `_group_is_empty()` produced a false safety claim: it treated every `Popen.poll() is None` as proof of a live, unreaped leader, when CPython also returns `None` for "status unknown, lock contended," a state a re-entrant signal handler can produce | Reverted `_group_is_empty()` to round 3's shape verbatim: `poll()` is still called first (it is what makes the probe honest against zombies), but the function always follows with the `killpg(pgid, 0)` probe — no shortcut, live leader or not. The probe is the function's only actual source of proof | `T-INC-21` (rewritten to pin the always-probe behavior) |
+| 2 | Known limit 9's text, and the `_signal_hook_group()`/`_group_is_empty()` docstrings, asserted the skipped-probe path was "provably safe" and that a live leader was "answered with no probe at all" | Both corrected to describe the always-probe behavior and the honest residual (the reaped-leader adjacent-syscall race) with no overclaim | — |
+| 3 | Known limit 9 cited `pidfd_open`/`pidfd_send_signal` (Linux 5.3+) as the closing primitive without noting they signal a single process, not a group — `PIDFD_SIGNAL_PROCESS_GROUP` did not arrive until kernel 6.9, and a pidfd on an already-reaped leader answers `ESRCH` regardless | Corrected; the point stands (no primitive here is a stable handle for the surviving-group case on both supported platforms without new complexity), stated precisely rather than approximately | — |
+
+This round removes mechanism rather than adding it — the revert restores code
+an earlier round already reviewed and whose residual (Known limit 9's
+adjacent-syscall race) that round characterized correctly. Matrix rows stay
+at 543; only `T-INC-21`'s row text and matrix-row description changed, no new
+row was added.
 
 Matrix rows move from 541 to 543.

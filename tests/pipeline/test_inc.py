@@ -700,22 +700,24 @@ class _FakeRunningHookProcess(_FakeHookProcess):
 
 
 @pytest.mark.matrix("T-INC-21")
-def test_a_live_leader_is_signalled_without_a_probe(monkeypatch):
-    """T-INC-21 — a live leader answers the emptiness question by itself.
+def test_a_live_leader_is_still_probed_before_being_signalled(monkeypatch):
+    """T-INC-21 — a live leader does not shortcut the emptiness probe.
 
-    `start_new_session=True` makes the hook a session leader, which can neither
-    `setsid()` (it is already a process-group leader) nor `setpgid()` away (a
-    session leader may not change its group), so while it is alive its group
-    holds it. Probing that with `killpg(pgid, 0)` cannot return anything else,
-    and it costs the one thing worth saving here: syscalls between the last
-    confirmation that the pid is ours and the signal that uses it. Skipping it
-    also makes this path provably safe rather than merely narrow — an unreaped
-    child pins its pid, and only this process can reap it.
+    Round 4 tried skipping `killpg(pgid, 0)` whenever `Popen.poll()` returned
+    `None`, reasoning that a session leader cannot leave its own group, so an
+    unreaped child "provably" pins its pid. CPython's own `poll()` documents
+    `None` as covering a second case too: status unknown because a concurrent
+    `waitpid` holds its internal lock — exactly what a signal handler
+    re-entering this process during another `communicate()`/`poll()` call can
+    produce. That case does not prove the leader is still unreaped, so treating
+    every `None` as proof was a false safety claim, not a narrower race. Round
+    5 reverted the shortcut; this test pins the revert so it cannot regress.
 
     Given:  a hook group whose leader is still running
-    Expect: `_group_is_empty()` answers False having issued no `killpg` at all,
-            and the signal that follows is the only one
-    Source: P02 A12 gate-6 round 4; REQ-24
+    Expect: `_group_is_empty()` still issues the `killpg(pgid, 0)` probe (its
+            only actual source of proof) even though the leader is alive, and
+            the signal that follows is a second, separate call
+    Source: P02 A12 gate-6 round 5; REQ-24
     """
     from agent_fork import include
 
@@ -728,7 +730,11 @@ def test_a_live_leader_is_signalled_without_a_probe(monkeypatch):
     group = include._HookGroup(cast(Any, _FakeRunningHookProcess()))
 
     assert include._group_is_empty(group) is False
-    assert calls == []
+    assert calls == [(_FakeHookProcess.pid, 0)]
     include._signal_hook_group(group, signal.SIGTERM)
-    assert calls == [(_FakeHookProcess.pid, int(signal.SIGTERM))]
+    assert calls == [
+        (_FakeHookProcess.pid, 0),
+        (_FakeHookProcess.pid, 0),
+        (_FakeHookProcess.pid, int(signal.SIGTERM)),
+    ]
     assert group.emptied is False
