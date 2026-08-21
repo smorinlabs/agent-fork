@@ -432,9 +432,15 @@ repository-controlled text raw).
 
   | Condition while copying | Default | `--strict` |
   |---|---|---|
-  | File cannot be read | skip, warn, name every skipped path | fail, same warning |
-  | Socket, FIFO, other non-regular type | skip, warn, name every skipped path | fail, same warning |
+  | Untracked or ignored file cannot be read | skip, warn, name every skipped path | fail, same warning |
+  | Untracked or ignored non-regular entry (socket, FIFO) | skip, warn, name every skipped path | fail, same warning |
+  | **Tracked** file cannot be read | fail, with a typed error naming the path | same |
   | Parent changed during the fork | fail and revert, unchanged from today | same |
+
+  Skipping is restricted to untracked and ignored entries (owner, 2026-08-20).
+  A tracked path cannot be skipped safely without rename handling, because
+  `--no-renames` decomposes `old -> new` into unassociated endpoints and
+  excluding only an unreadable `new` would silently drop `old` from the child.
 
   Exit status is 0 when only skips occurred, non-zero under `--strict`. No
   skip is ever triggered by *absence*: `collect_inventory` keeps deletion and

@@ -45,10 +45,15 @@ state and the fork succeeds carrying a warning.
 
 ### The policy, in full
 
+**Skipping applies to untracked and ignored entries only** (owner decision,
+2026-08-20). A path Git tracks is never skipped; see "Why tracked paths do not
+skip" below.
+
 | Condition met while copying | Default | `--strict` |
 |---|---|---|
-| File cannot be read | skip, warn, name every skipped path | fail, with the same warning |
-| Entry is a socket, FIFO, or other non-regular type | skip, warn, name every skipped path | fail, with the same warning |
+| Untracked or ignored file cannot be read | skip, warn, name every skipped path | fail, with the same warning |
+| Untracked or ignored entry is a socket, FIFO, or other non-regular type | skip, warn, name every skipped path | fail, with the same warning |
+| **Tracked** file cannot be read | **fail**, with a typed error naming the path | same |
 | Parent changed during the fork | **fail and revert** — today's behaviour, unchanged | same |
 
 Exit status is 0 when only skips occurred, non-zero under `--strict`.
@@ -72,9 +77,9 @@ skipped set must be threaded through all four.
 | Site | Why the skip must reach it |
 |---|---|
 | Initial `capture_state` | Where an unreadable path is discovered and marked. |
-| Transport in `materialize` | Untracked paths are simply not copied. A tracked path is excluded from the `diff-index` and `diff-files` patches with `:(exclude,literal)`, the pattern A13's T13E established, so the child keeps the last-committed content. |
+| Transport in `materialize` | The skipped path is simply not copied by the untracked or ignored loop. No patch exclusion is needed, because tracked paths never skip. |
 | Verify-phase re-capture | `verify_fork` re-resolves a fresh inventory and re-runs `capture_state` on the parent, which would otherwise re-open the unreadable file and raise at verification time. |
-| `exact-copy-status` | It compares live porcelain, not the inventory, so a skipped untracked path appears in the parent and not the child. Known-skipped paths are filtered from both sides before comparison. This rung requests `--untracked-files=all`, so its paths are already expanded and the collapsed `?? d/` form does not arise. The raw `parent-untouched` bracket is **not** normalized. |
+| `exact-copy-status` | It compares live porcelain, not the inventory, so a skipped path appears in the parent and not the child. Known-skipped paths are filtered from both sides before comparison. This rung requests `--untracked-files=all`, so its paths are already expanded and the collapsed `?? d/` form does not arise. The raw `parent-untouched` bracket is **not** normalized. |
 
 **No skip is ever triggered by absence.** Only a failed read or an
 unsupported entry type marks a path skipped. This is deliberate:
@@ -82,6 +87,24 @@ unsupported entry type marks a path skipped. This is deliberate:
 `_manifest_entry` renders them as kind `absent`, so treating absence as a skip
 condition, or as a failure, would break ordinary deletions. `T-VER-26` guards
 that behaviour and an unstaged deletion forks cleanly today.
+
+### Why tracked paths do not skip
+
+Chosen by the owner on 2026-08-20 after the third review, which showed that
+skipping a tracked path cannot be done safely without rename handling.
+`collect_inventory` resolves with `--no-renames`, so a rename `old -> new`
+becomes an unassociated deletion of `old` plus an addition of `new`. Excluding
+only an unreadable `new` from transport leaves `old`'s deletion eligible, so
+the child would silently lose `old` while the warning named only `new`.
+
+Rather than add rename detection to the transport path, tracked paths are
+excluded from skipping entirely. An unreadable tracked file still fails the
+fork, but with a **typed error naming the path** instead of a raw errno
+string, which is the part of that failure that was genuinely defective.
+
+This also removes work from the fix: no patch exclusion, no rename pairing,
+and the only records that can be filtered from `exact-copy-status` are
+expanded untracked entries.
 
 ### `.worktreeinclude`
 
@@ -285,7 +308,7 @@ route.
 | # | Finding | Resolution |
 |---|---|---|
 | 1 | **High.** The register still specified the superseded policy: copy-time failures, `absent`/`other` failures, and the retry. An implementer following it would ship the opposite behaviour. | **Fixed.** The register's decided direction is rewritten to state the narrowed policy verbatim. |
-| 2 | **High.** Skipping one endpoint of a tracked **rename** does not preserve committed content. `--no-renames` decomposes `old -> new` into unassociated delete and add endpoints, so excluding only an unreadable `new` still lets `old`'s deletion transport. The child loses `old` while the warning names only `new`. | **Open — owner scope decision.** Either handle skips at rename-pair level, or restrict skipping to untracked and ignored entries only. |
+| 2 | **Resolved by owner decision, Option A.** Skipping is restricted to untracked and ignored entries, so no tracked path is ever excluded from transport and the rename decomposition cannot lose an endpoint. The finding as stated: `--no-renames` decomposes `old -> new` into unassociated delete and add endpoints, so excluding only an unreadable `new` still lets `old`'s deletion transport. The child loses `old` while the warning names only `new`. | **Closed.** Owner chose to restrict skipping to untracked and ignored entries. Unreadable tracked files keep failing, with a typed error naming the path. |
 | 3 | Parent changes to an initially skipped path can pass verification. An already-modified tracked file that is unreadable and then atomically replaced by different unreadable bytes is omitted from both normalized and content comparisons, while raw porcelain still reads ` M path`, so `parent-untouched` sees no change. | **Accepted, fix specified.** Record `lstat` metadata — size, mtime, inode — as a sentinel for each skipped path, which requires no read, and fail when the sentinel changes. This keeps "every parent change fails" honest. |
 | 4 | Strict failure has no route to emit the promised warning. Notices accumulate inside `fork()` and render only after it returns successfully; a strict exception reaches the generic handler, which prints only `render_error`. | **Accepted, fix specified.** A typed strict-skip error carries every escaped skipped path in both its human message and its JSON details. Tested at capture time, materialize time, and `.worktreeinclude`, in text and JSON modes. |
 
