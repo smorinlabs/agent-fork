@@ -987,3 +987,57 @@ this planning worktree, which was instructed not to touch
 unchanged. Before Step 1 begins: renumber the five collided test IDs per the
 table above, and separately decide how the TS12 verdict gets a durable
 committed home.
+
+---
+
+## Second reevaluation against `origin/main` (2026-08-20, later same day)
+
+This branch was rebased a second time, onto `origin/main` at `f7b5a98` (up
+from `46201c1` above) — 20 more commits, all of it two more P02 items landing
+in full: `A10` (Claude inferred-parent freshness, PR #63) and `A6`, split
+into `A6a` (dirty submodules, PR #58) and a still-open `A6b`. The rebase
+applied cleanly, zero conflicts.
+
+**The fault surface is still untouched.** Diffing `46201c1..f7b5a98` directly
+by file: `include.py`, `git.py`, `rollback.py`, `config.py`, `doctor.py`, and
+`output.py` — every file this plan's contracts touch — have zero changes.
+`cli.py` grew by roughly 200 lines and `pipeline.py` picked up 8 lines, but
+neither touches what this plan depends on: `pipeline.py`'s change adds a
+`with_state` parameter to `validate_fork_guards()` for A6a's submodule fix,
+nowhere near the `run_setup_hook()` call site; `cli.py`'s top-level
+`except Exception as error:` is still present, still does not catch
+`OperationInterrupted` (a `BaseException` subclass), just at a new line
+(**1413**, was 1229). The REQ-22 130/143 conformance gap this plan closes is
+still real.
+
+**A second test-ID collision, on the IDs the first reevaluation had already
+renumbered to.** `A6a`'s own gate-6 pass independently claimed
+`T-CLI-36/37/38` — confirmed by its merge commit's own message
+(`1f9dcff`, "resolve T-CLI ID collision"), which describes resolving a
+concurrent claim on those same three IDs against `A10`'s branch and shifting
+`A10`'s rows to `T-CLI-39..50`. Those are precisely the IDs this plan's first
+reevaluation reserved for A12 after the previous collision. Checked directly
+against the live matrix:
+
+| Prefix | This plan's current reservation | Now taken by unrelated rows | Actual next-free |
+|---|---|---|---|
+| `T-INC` | 08-16 | — (still free) | **08-16, unchanged** |
+| `T-RBK` | 08-09 | — (still free) | **08-09, unchanged** |
+| `T-CLI` | 36-38 | `T-CLI-36/37/38` (A6a) | **51-53** |
+| `T-OUT` | 24-25 | — (still free) | **24-25, unchanged** |
+| `T-CFG` | 24-26 | — (still free) | **24-26, unchanged** |
+
+Only `T-CLI` moved again; renumber `T-CLI-36/37/38 → 51/52/53` when Step 1
+adds rows. This is the second time in three days that concurrent P02 work has
+claimed IDs this plan reserved — worth the owner knowing this project
+currently has enough parallel worktrees in flight that test-ID reservations
+should be treated as provisional until the moment a PR actually lands, not
+locked in during planning.
+
+**The TS12 provenance gap from the first reevaluation is unchanged.** Still
+absent from `origin/main`; still durably recorded only in this document and
+in the separate `30f5e76` commit on `worktree-p02-a12-ts12-reverify` (see the
+header gate table above).
+
+**Conclusion.** No design change. Renumber `T-CLI` a second time before
+Step 1; the four other prefixes need no further change.
