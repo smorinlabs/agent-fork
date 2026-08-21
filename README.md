@@ -47,6 +47,7 @@ $ agent-fork fork try-redis --dry-run
 branch: create fork/try-redis
 worktree: create /Users/you/code/myapp-fork-try-redis
 files-to-carry: staged=3 unstaged=7 untracked=2 ignored=0
+setup-hook: none
 paste command: cd /Users/you/code/myapp-fork-try-redis && claude --session-id 9b74b9f2-f3d2-4060-b233-0121ac17ed7c --resume c854b79c-16b2-4863-a095-03d35d195ec9 --fork-session -n try-redis
 validation: local-only; no mutation performed
 ```
