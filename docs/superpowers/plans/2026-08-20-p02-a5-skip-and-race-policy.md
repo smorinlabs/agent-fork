@@ -568,9 +568,14 @@ and are never renumbered once written.
 Reassigned 2026-08-20 after merging `main`. A6a, pull request #58, registered
 `T-VER-35..39` and `T-MAT-26` while this plan was being written, and matrix
 convention forbids renumbering an existing row, so this plan's rows moved to
-`T-MAT-30..36` and `T-VER-40..44`. Re-check the next free numbers again
-immediately before writing tests: `main` moved twice during this item, and
-both times it landed in these two groups.
+`T-MAT-30..36` and `T-VER-40..44`.
+
+Re-validated 2026-08-20 after a second merge, which brought in A10, pull
+request #63. `T-MAT`, `T-VER`, `T-INC`, and `T-OUT` were untouched, so those
+rows still stand. `T-CLI` advanced to 50, so this plan's CLI row is
+**`T-CLI-51`**. A10 also had to resolve a `T-CLI` collision of its own, so
+re-check every group's next free number immediately before writing tests
+rather than trusting this note.
 
 ### Step 0 — prerequisites, before any code
 
