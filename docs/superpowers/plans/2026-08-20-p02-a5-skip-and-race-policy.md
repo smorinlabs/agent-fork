@@ -77,8 +77,10 @@ fires is preferable to a `MaterializeError` that destroys a fork.
 
 ### Skipping, and the four sites it must reach
 
-A path that fails to read at capture time is marked skipped and reported at
-the end of the run. Shrinking `Inventory` alone is not enough: the
+A path that fails to read at capture time **and meets all three skip
+preconditions** is marked skipped and reported at the end of the run. A read
+failure alone is not sufficient — see "Skip preconditions", which governs.
+Shrinking `Inventory` alone is not enough: the
 verification contract resolves paths in places that never consult it, so the
 skipped set must be threaded through all four.
 
