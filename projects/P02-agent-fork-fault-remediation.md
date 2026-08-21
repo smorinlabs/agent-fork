@@ -431,9 +431,12 @@ repository-controlled text raw).
   retry. A5 now fixes exactly one defect: *agent-fork must not refuse to work
   because of a single entry it cannot copy.*
 
-  **The copy loop never fails the fork.** It skips what it cannot carry and
-  names it; verification remains the sole arbiter of whether the result is
-  acceptable. Verified by the third gate 1 review: a regular file swapped for
+  **The copy loop never fails the fork on a *qualifying* entry.** It skips
+  what it may skip and names it; verification remains the sole arbiter of
+  whether the result is acceptable. A skip requires all three preconditions —
+  untracked or ignored, successful `lstat`, and no carried deletion — and
+  anything else raises `entry_unreadable`. The design doc's "Skip
+  preconditions" section governs; the table below summarises it. Verified by the third gate 1 review: a regular file swapped for
   a FIFO mid-fork is still caught, because `compare_states` reports the type
   loss, both content rungs fail, and rollback runs.
 

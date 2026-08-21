@@ -32,9 +32,14 @@ or is routed elsewhere.
 
 The rule, stated as behaviour rather than as timing:
 
-> **The copy loop never fails the fork.** An entry it cannot carry is skipped
-> and named. **Verification remains the sole arbiter** of whether the result
-> is acceptable.
+> **The copy loop never fails the fork on a *qualifying* entry.** An entry that
+> meets all three conditions in "Skip preconditions" is skipped and named.
+> **Verification remains the sole arbiter** of whether the result is
+> acceptable.
+>
+> Every other uncarryable entry — a tracked path, a failed `lstat`, or any
+> entry while the fork carries a deletion — raises `entry_unreadable`.
+> "Skip preconditions" governs; this is a summary of it.
 
 This is what dissolves the earlier collision between "skip bad entries" and
 "fail on parent changes". The copy loop is not asked to classify *why* an
@@ -311,7 +316,7 @@ more comfortably than the evidence supports.
 |---|---|---|
 | D1 | Skip is implemented by marking paths and shrinking the carried inventory; skipped paths are listed at the end. Skipping covers pre-existing unreadable entries only. A change in the parent fails the fork. | 2026-08-17, refined 2026-08-20 |
 | D2 | **Superseded 2026-08-20.** Retry is dropped; a parent change fails and reverts, which is today's behaviour. Original decision was retry-once. | 2026-08-20 |
-| D4 | Non-regular entries (socket, FIFO) are skipped with a warning, not treated as a failure. Supersedes the earlier fail-on-swap resolution. | 2026-08-20 |
+| D4 | Non-regular entries (socket, FIFO) are skipped with a warning, not treated as a failure, **subject to the three conditions in "Skip preconditions"**. Supersedes the earlier fail-on-swap resolution. | 2026-08-20 |
 | D5 | `.worktreeinclude` gains the readability guard; its residual post-verification race is accepted as a known limit. | 2026-08-20 |
 | D6 | A5 is narrowed to Option A: only the refuses-to-work defect is fixed. | 2026-08-20 |
 | D3 | Exit 0 with notices by default; a strict flag makes skips fail. | 2026-08-20 |
@@ -422,7 +427,7 @@ Recorded as gaps rather than passes, following the precedent A2 set for
 
 | ID | Finding | Routing |
 |---|---|---|
-| N1 | An unreadable **tracked** file kills the fork identically. Skip semantics for a tracked path: exclude it from the `diff-index` and `diff-files` patches with `:(exclude,literal)`, the pathspec pattern A13's T13E established, so the child keeps the last-committed content and the entry is reported as "modification not carried". Gate 4 must verify that Git can generate a repository-wide patch at all with an unreadable file present. A5's title, "One bad **untracked** filesystem entry", is too narrow: the defect is in `capture_state`, which digests every carried path regardless of tracking state. | **Absorbed into A5.** Same site, same fix. |
+| N1 | An unreadable **tracked** file kills the fork identically. ~~Skip semantics for a tracked path: exclude it from the `diff-index` and `diff-files` patches with `:(exclude,literal)`.~~ **Superseded 2026-08-20 by owner Option A:** tracked paths are never skipped, because a rename's endpoints land in different listings and excluding one would silently drop the other. An unreadable tracked file raises `entry_unreadable`, implemented and guarded by `T-MAT-33`. A5's title, "One bad **untracked** filesystem entry", is too narrow: the defect is in `capture_state`, which digests every carried path regardless of tracking state. | **Absorbed into A5.** Same site, same fix. |
 | N2 | A mode-000 **directory** makes Git blind to its contents, so the fork reports success and the child silently lacks the data, with no notice. Parent `git status` is equally blind, so verification passes. | **Filed as [#59](https://github.com/smorinlabs/agent-fork/issues/59)** on 2026-08-20. The owner's requirement is recorded there: walk the worktree independently of Git, carry what can be carried, warn by default and fail under `--strict`. |
 | N3 | An unreadable file matched by `.worktreeinclude` kills the fork *after* verification, then rolls back. `include.py` skips on unsupported **type** but has no guard for **readability**, so it is not the clean policy exemplar the register claimed. | **Absorbed into A5.** The shared copy primitive must handle both conditions. |
 | N4 | An unreadable directory inside a fork worktree makes `cleanup` fail with an untyped `runtime_error` carrying raw Git output, leaving the worktree and its registry entry behind. | **Filed as [#60](https://github.com/smorinlabs/agent-fork/issues/60)** on 2026-08-20, cross-referenced to A7. |
@@ -575,7 +580,9 @@ scenario rows come only after the plumbing they exercise exists.
 
 ### Row numbering
 
-`T-MAT-30..36`, `T-VER-40..43`, `T-INC-08..09`, `T-OUT-24..25`, `T-CLI-51`.
+`T-MAT-30..38`, `T-VER-40..43`, `T-INC-08..09`, `T-OUT-25..27`, `T-CLI-61`.
+**Refreshed 2026-08-20 after a third merge:** `main` had taken `T-OUT-24` and
+`T-CLI-51..60`. `T-MAT-33` and `T-MAT-34` are already implemented and registered.
 `T-VER-44` was withdrawn: it duplicated existing `T-VER-26`, the deletion
 positive guard, which this item **reuses as its regression anchor** rather
 than restating. Re-check every group's next free number immediately before
@@ -676,11 +683,11 @@ error.
 
 | Row | Asserts |
 |---|---|
-| `T-CLI-51` | `--strict` parses and appears in help; no precedence claim |
+| `T-CLI-61` | `--strict` parses and appears in help; no precedence claim |
 | `T-MAT-31` | Two unreadable untracked files are both named, byte-wise ordered, in one error |
 | `T-INC-09` | Under `--strict`, an unreadable `.worktreeinclude` match raises `strict_skip_refused` and rolls back, proving cross-phase aggregation reaches include |
-| `T-OUT-24` | `strict_skip_refused` JSON `details` matches its schema exactly |
-| `T-OUT-25` | `entry_unreadable` JSON `details` matches its schema, with ordered `deletion_blockers` |
+| `T-OUT-25` | `strict_skip_refused` JSON `details` matches its schema exactly |
+| `T-OUT-26` | `entry_unreadable` JSON `details` matches its schema, with ordered `deletion_blockers` |
 
 ### Step 7 — end-to-end behaviour, once the plumbing exists
 
@@ -690,9 +697,9 @@ exercise had been built.
 | Row | Asserts |
 |---|---|
 | `T-INC-08` | An unreadable `.worktreeinclude` match is skipped with a notice; the fork succeeds |
-| new `T-OUT` row | A successful fork with skips: notices absent from stdout, on stderr **exactly once**, and retained in JSON `notices[]`, per A13's contract |
-| new `T-MAT` row | `--strict --with-ignored`: ignored capture, ignored transport, and `.worktreeinclude`'s independent re-enumeration are distinct gated paths and each must reach the aggregate |
-| new `T-MAT` row | `--no-verify` with a materialize-time skip, where initial capture is bypassed entirely |
+| `T-OUT-27` | A successful fork with skips: notices absent from stdout, on stderr **exactly once**, and retained in JSON `notices[]`, per A13's contract |
+| `T-MAT-37` | `--strict --with-ignored`: ignored capture, ignored transport, and `.worktreeinclude`'s independent re-enumeration are distinct gated paths and each must reach the aggregate |
+| `T-MAT-38` | `--no-verify` with a materialize-time skip, where initial capture is bypassed entirely |
 
 ### Step 8 — documentation
 
