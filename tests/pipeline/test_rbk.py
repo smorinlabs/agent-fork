@@ -329,6 +329,7 @@ def test_terminating_the_hook_group_reaches_survivors_after_the_leader_exits(tmp
         stderr=subprocess.PIPE,
         start_new_session=True,
     )
+    confirmed_dead = False
     try:
         for _ in range(500):
             if process.poll() is not None and recorded.exists():
@@ -343,7 +344,6 @@ def test_terminating_the_hook_group_reaches_survivors_after_the_leader_exits(tmp
         finally:
             include._ACTIVE.group = None
 
-        confirmed_dead = False
         for _ in range(300):
             try:
                 os.kill(survivor, 0)
