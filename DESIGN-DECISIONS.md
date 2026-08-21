@@ -33,7 +33,7 @@
 ## Decisions in detail
 
 ### D3 — Exact-copy is the default (`ch-01-a` ★)
-A bare fork carries staged + unstaged + untracked state; gitignored files are excluded by default. **Owner note applied:** gitignored carryover remains available both as the `--with-ignored` flag and the `with_ignored` config key — config can make it a personal default. *agent-deck reconciliation:* matches the TUI quick-fork posture (#1299) with the #1354 gitignored reversal preserved; rejects the opt-in-everything posture of agent-deck's own CLI as wrong for a one-word gesture.
+A bare fork carries staged + unstaged + untracked state; gitignored files are excluded by default. **Amended 2026-08-20 (owner, P02 A5):** exact-copy is best-effort for untracked and ignored entries — one that cannot be carried is skipped and named rather than making the repository unforkable. `--strict` restores the all-or-nothing posture. **Owner note applied:** gitignored carryover remains available both as the `--with-ignored` flag and the `with_ignored` config key — config can make it a personal default. *agent-deck reconciliation:* matches the TUI quick-fork posture (#1299) with the #1354 gitignored reversal preserved; rejects the opt-in-everything posture of agent-deck's own CLI as wrong for a one-word gesture.
 
 ### D2 — Toggle vocabulary, not modes (`ch-02-a` ★)
 Flags `--no-with-state`, `--with-ignored`; config `with_state` / `with_ignored`, tri-state `Optional[bool]` with agent-deck's asymmetric defaults (unset⇒true / unset⇒false) and the implication rule (`with_ignored` ⇒ `with_state`). No `--clean` alias in v1 (can be added compatibly later).
@@ -51,7 +51,7 @@ One identity across branch, worktree, and session. Claude: `-n '<fork-name>'` in
 When managed-agent preflight fails (agent CLI below the version matrix, Codex rollout not flushed, or a strict agent is undetectable), v1 **refuses with a diagnosis**: what was detected, which requirement failed, the minimum version or missing artifact, and a pointer to `agent-fork doctor`. No handoff-file rung, no session-file copying. The worktree is **not** created on a preflight refusal (fail before mutation). D16's intentional Git-only mode is not a fallback rung. *Consequence:* the fresh-session + `HANDOFF.md` degradation ladder moves to the v1.1+ roadmap; RESEARCH Q5 stays deferred until then. *Rationale (owner):* keep v1 honest and small — a fork that silently loses conversation context is a different product promise.
 
 ### D8 — Verification on by default (`ch-07-a` ★)
-The REQUIREMENTS §4 ladder runs after every fork; `--no-verify` skips. Failure ⇒ rollback + exit 1. This is agent-fork's deliberate improvement over agent-deck's runtime-unverified pipeline.
+The REQUIREMENTS §4 ladder runs after every fork; `--no-verify` skips. Failure ⇒ rollback + exit 1. **Amended 2026-08-20 (owner, P02 A5):** the ladder's domain is the carried set *minus* recorded skips; skipped paths are instead held to an `lstat` sentinel rechecked at finalization. Verification therefore still proves everything it claims to have carried, over a smaller and explicitly reported domain. This is agent-fork's deliberate improvement over agent-deck's runtime-unverified pipeline.
 
 ### D9 — Clipboard ships in v1 (`ch-08-a` ★)
 `--copy` flag; `copy` config key (default off) for always-on. Implementation order: OSC52 escape (SSH/tmux-safe) → `pbcopy`/`xclip`/`wl-copy` shell-outs. Copy failure is a stderr notice, never a failed exit.
