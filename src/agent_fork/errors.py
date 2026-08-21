@@ -31,7 +31,13 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
     "claude_parent_partial_record": ErrorSpec(
         3, "one or more Claude parent results were not recordable"
     ),
+    "claude_parent_incomplete_analysis": ErrorSpec(
+        3, "Claude transcript corpus exceeded a bounded analysis limit"
+    ),
     "cleanup_target_unknown": ErrorSpec(3, "cleanup target is not registered or found"),
+    "submodule_unrepresentable": ErrorSpec(
+        5, "submodule checkout differs from the commit recorded in the index"
+    ),
     "conflict_branch_exists": ErrorSpec(5, "fork branch already exists"),
     "conflict_branch_worktree": ErrorSpec(5, "branch is attached to a worktree"),
     "conflict_worktree_path": ErrorSpec(5, "worktree destination already exists"),
@@ -194,6 +200,13 @@ class ClaudeParentNotRecordableError(ClaudeParentError):
 
 class ClaudeParentPartialRecordError(ClaudeParentError):
     code = "claude_parent_partial_record"
+
+    def __init__(self, message: str, **kwargs):
+        super().__init__(message, code=self.code, **kwargs)
+
+
+class ClaudeParentIncompleteAnalysisError(ClaudeParentError):
+    code = "claude_parent_incomplete_analysis"
 
     def __init__(self, message: str, **kwargs):
         super().__init__(message, code=self.code, **kwargs)

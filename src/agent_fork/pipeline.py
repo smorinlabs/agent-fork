@@ -94,7 +94,13 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
     if agent_check is not None:
         notices.extend(agent_check.notices)
     resolved_agent = agent_check.context if agent_check is not None else request.agent
-    validate_fork_guards(request.parent, request.branch, request.destination, env=env)
+    validate_fork_guards(
+        request.parent,
+        request.branch,
+        request.destination,
+        with_state=request.with_state,
+        env=env,
+    )
     planned_child_id = (
         request.child_session_id or str(uuid.uuid4())
         if resolved_agent is not None and resolved_agent.agent == "claude"

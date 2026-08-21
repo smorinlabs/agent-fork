@@ -64,6 +64,14 @@ def compact_result(document: Mapping[str, object]) -> dict[str, object]:
     }
     if "error" in document:
         result["error"] = _text(document["error"])
+    limit = document.get("limit")
+    if isinstance(limit, dict):
+        result["limit"] = {
+            "name": _text(limit.get("name")),
+            "allowed": limit.get("allowed"),
+            "observed": limit.get("observed"),
+            "scope": _text(limit.get("scope")),
+        }
     return result
 
 

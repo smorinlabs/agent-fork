@@ -836,3 +836,194 @@ def test_document_includes_transcript(repo_scenario):
         "path": str(result.transcript.path),
         "exists": False,
     }
+
+
+def _fingerprint(path: Path) -> str:
+    import hashlib
+
+    stat = path.stat()
+    raw = (
+        f"{path.absolute()}:{stat.st_dev}:{stat.st_ino}:"
+        f"{stat.st_size}:{stat.st_mtime_ns}"
+    )
+    return f"{path}:{hashlib.sha256(raw.encode()).hexdigest()}"
+
+
+@pytest.mark.matrix("T-SES-48")
+def test_stale_source_inference_surfaces_as_last_known_good(repo_scenario):
+    from agent_fork.lineage_inference_store import (
+        InferenceRecord,
+        add_inference,
+        update_index_freshness,
+    )
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+    session_id = "child"
+    transcript = world.parent_path / "transcript.jsonl"
+    transcript.write_text("{}\n")
+    record = InferenceRecord(
+        session_id,
+        "parent",
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00Z",
+        (_fingerprint(transcript),),
+        "generation-1",
+        "universe-1",
+    )
+    add_inference(record, env=world.env)
+    update_index_freshness(session_id, "universe-1", "generation-1", env=world.env)
+    transcript.write_text("{}\n\n")  # invalidate the recorded fingerprint
+
+    env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": session_id,
+    }
+    result = inspect_session(env, cwd=world.parent_path)
+    assert result.parent_inference.status == "last_known_good"
+    assert result.parent_inference.parent_session_id == "parent"
+    assert result.parent_session is None
+    assert result.lineage_status == "not_found"
+
+
+@pytest.mark.matrix("T-SES-49")
+def test_parent_inference_field_shape_per_status(repo_scenario):
+    from dataclasses import replace
+
+    from agent_fork.lineage import LineageClaim, add_lineage
+    from agent_fork.lineage_inference_store import (
+        InferenceRecord,
+        add_inference,
+        update_index_freshness,
+    )
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+
+    # not_consulted: a planned claim exists, so inference is never consulted
+    add_lineage(
+        LineageClaim.create(
+            agent="claude",
+            child_session_id="claimed-child",
+            parent_session_id="parent",
+        ),
+        env=world.env,
+    )
+    env = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "claimed-child"}
+    result = inspect_session(env, cwd=world.parent_path)
+    assert result.parent_inference.status == "not_consulted"
+    assert result.transcript is not None  # coexists with the transcript field
+
+    # not_consulted: Codex is never assessed either
+    env = {**world.env, "CODEX_THREAD_ID": "codex-thread"}
+    result = inspect_session(env, cwd=world.parent_path)
+    assert result.parent_inference.status == "not_consulted"
+
+    # absent: consulted, no record
+    env = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "no-record"}
+    result = inspect_session(env, cwd=world.parent_path)
+    assert result.parent_inference.status == "absent"
+    assert result.parent_inference.freshness is None
+    assert result.parent_inference.parent_session_id is None
+    assert result.parent_inference.analyzed_at is None
+    assert result.parent_inference.changed_sources == ()
+
+    # current
+    transcript = world.parent_path / "current.jsonl"
+    transcript.write_text("{}\n")
+    current_record = InferenceRecord(
+        "current-child",
+        "parent",
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00Z",
+        (_fingerprint(transcript),),
+        "generation-1",
+        "universe-1",
+    )
+    add_inference(current_record, env=world.env)
+    update_index_freshness("current-child", "universe-1", "generation-1", env=world.env)
+    env = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "current-child"}
+    result = inspect_session(env, cwd=world.parent_path)
+    assert result.parent_inference.status == "current"
+    assert result.parent_inference.freshness == "current_at_last_analysis"
+    assert result.parent_inference.parent_session_id == "parent"
+    assert result.parent_inference.analyzed_at == "2026-01-01T00:00:00Z"
+
+    # superseded: nulls parent_session_id, analyzed_at, changed_sources but
+    # keeps freshness == "stale_algorithm"
+    superseded_record = replace(
+        current_record, child_session_id="superseded-child", algorithm_version=2
+    )
+    add_inference(superseded_record, env=world.env)
+    env = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "superseded-child"}
+    result = inspect_session(env, cwd=world.parent_path)
+    assert result.parent_inference.status == "superseded"
+    assert result.parent_inference.freshness == "stale_algorithm"
+    assert result.parent_inference.parent_session_id is None
+    assert result.parent_inference.analyzed_at is None
+    assert result.parent_inference.changed_sources == ()
+
+    # unreadable: the inference store itself is structurally invalid, so
+    # find_inference() raises ValueError rather than returning a record
+    from agent_fork.lineage_inference_store import inference_path
+
+    store_path = inference_path(world.env)
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    store_path.write_text("not json at all {{{")
+    env = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "unreadable-child"}
+    result = inspect_session(env, cwd=world.parent_path)
+    assert result.parent_inference.status == "unreadable"
+    assert result.parent_inference.freshness is None
+    assert result.parent_inference.parent_session_id is None
+    assert result.parent_inference.analyzed_at is None
+    assert result.parent_inference.changed_sources == ()
+
+
+@pytest.mark.matrix("T-SES-50")
+def test_validate_has_parent_requires_current_status(repo_scenario):
+    from agent_fork.errors import SessionValidationError
+    from agent_fork.lineage_inference_store import (
+        InferenceRecord,
+        add_inference,
+        update_index_freshness,
+    )
+    from agent_fork.session import SessionAssertions, inspect_session, validate_session
+
+    world = repo_scenario()
+    session_id = "child"
+    transcript = world.parent_path / "transcript.jsonl"
+    transcript.write_text("{}\n")
+    record = InferenceRecord(
+        session_id,
+        "parent",
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00Z",
+        (_fingerprint(transcript),),
+        "generation-1",
+        "universe-1",
+    )
+    add_inference(record, env=world.env)
+    # no freshness index written yet -> freshness_unknown
+    env = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": session_id}
+    result = inspect_session(env, cwd=world.parent_path)
+    assert result.parent_inference.status == "freshness_unknown"
+    with pytest.raises(SessionValidationError):
+        validate_session(result, SessionAssertions(has_parent=True))
+
+    update_index_freshness(session_id, "universe-1", "generation-1", env=world.env)
+    result = inspect_session(env, cwd=world.parent_path)
+    assert result.parent_inference.status == "current"
+    validate_session(result, SessionAssertions(has_parent=True))
