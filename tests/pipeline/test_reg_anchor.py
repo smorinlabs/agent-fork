@@ -182,7 +182,14 @@ def test_force_targeting_confirms_the_path_before_deleting_it(repo_scenario):
         first.env,
         first.parent_path,
     )
-    assert result.returncode != 0, result.stdout
+    # The refusal must be the *targeting* one. Asserting only a non-zero exit
+    # would also pass if Git happened to reject the removal for its own
+    # reasons — which it does — so this test would survive the fix being
+    # reverted and prove nothing. Verified by mutation: reverting confirmed
+    # discovery to the raw listing leaves the two assertions below true, and
+    # only this one fails.
+    assert result.returncode == 3, result.stdout
+    assert b"cleanup_target_unknown" in result.stderr, result.stderr
     assert Path(worktree).exists(), "--force deleted the occupying worktree"
     assert (
         subprocess.run(
@@ -231,6 +238,48 @@ def test_undo_add_does_not_resurrect_after_another_writer_supersedes(repo_scenar
     )
 
 
+@pytest.mark.matrix("T-REG-34")
+def test_cascading_rollback_does_not_resurrect_a_failed_fork(repo_scenario):
+    """O displaced by F, F displaced by W, then both F and W roll back.
+
+    W's displaced list names F, so a naive restore would put back a record
+    for a worktree W's own rollback already deleted.
+    """
+    from agent_fork.models import RegistryEntry
+    from agent_fork.registry import add_entry, read_registry, undo_add
+
+    world = repo_scenario()
+    repository = str(world.parent_path / ".git")
+    root = world.parent_path.parent
+
+    def record(suffix, *, on_disk):
+        worktree = root / f"wt-{suffix}"
+        if on_disk:
+            worktree.mkdir(exist_ok=True)
+        return RegistryEntry.create(
+            name="shared",
+            branch=f"fork/{suffix}",
+            worktree=worktree,
+            agent=None,
+            repository=repository,
+        )
+
+    original = record("original", on_disk=True)
+    add_entry(original, env=world.env)
+    failing = record("failing", on_disk=False)  # its rollback removed it
+    displaced_by_failing = add_entry(failing, env=world.env)
+    winner = record("winner", on_disk=True)
+    displaced_by_winner = add_entry(winner, env=world.env)
+
+    undo_add(failing, displaced_by_failing, env=world.env)
+    undo_add(winner, displaced_by_winner, env=world.env)
+
+    names = [(item.name, item.branch) for item in read_registry(env=world.env)]
+    assert ("shared", "fork/failing") not in names, (
+        f"a record was restored for a worktree that no longer exists: {names}"
+    )
+
+
 @pytest.mark.matrix("T-REG-33")
 def test_undo_add_restores_when_cleanup_removed_the_record(repo_scenario):
     """Absence is not supersession: with no successor, the original returns.
@@ -246,10 +295,15 @@ def test_undo_add_restores_when_cleanup_removed_the_record(repo_scenario):
     repository = str(world.parent_path / ".git")
 
     def record(name, suffix):
+        worktree = world.parent_path.parent / f"wt-{suffix}"
+        # The worktree must exist: restoration deliberately skips a record
+        # whose directory is gone, so a record with no directory would make
+        # this test pass for the wrong reason.
+        worktree.mkdir(exist_ok=True)
         return RegistryEntry.create(
             name=name,
             branch=f"fork/{suffix}",
-            worktree=world.parent_path.parent / f"wt-{suffix}",
+            worktree=worktree,
             agent=None,
             repository=repository,
         )

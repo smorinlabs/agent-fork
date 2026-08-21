@@ -247,7 +247,20 @@ def undo_add(
                 return
         remaining = [item for item in entries if item.token() != token]
         present = {item.token() for item in remaining}
-        remaining.extend(item for item in displaced if item.token() not in present)
+        # Only records whose worktree is still on disk. Rollbacks cascade: a
+        # successor that later fails carries *this* call's record in its own
+        # displaced list, and restoring it would resurrect a fork whose
+        # worktree that rollback already deleted — a record pointing at
+        # nothing, which is what `prune` exists to remove. One residual case
+        # is accepted rather than solved: if a successor takes the name and
+        # then also fails, the record this call displaced is not recovered,
+        # because the successor never knew about it. Its worktree survives,
+        # unregistered, and `prune` plus a fresh fork restores order.
+        remaining.extend(
+            item
+            for item in displaced
+            if item.token() not in present and Path(item.worktree).exists()
+        )
         _atomic_write(path, remaining)
 
 

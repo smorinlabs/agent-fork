@@ -240,7 +240,7 @@ cause a redundant row, never a wrong deletion:
 | Linked worktrees | Correct by construction — all share one common directory |
 | Submodules | Correct; a submodule is its own repository with its own branch namespace |
 | Bare repositories | Works if the helper reads the common directory directly; requiring `--show-toplevel` would regress bare support (`repository.py:105-115`) |
-| Moved repositories | Stored value goes stale. Harmless: the predicate governs destruction, and the safe backfill below repairs the field |
+| Moved repositories | Stored value goes stale, and nothing repairs it: the record stops matching and `prune` clears it |
 | Mount aliases, case-aliased paths | Residual weakness; `Path.resolve()` handles symlinks, not every mount-level alias |
 | `GIT_DIR` / `GIT_COMMON_DIR` in the environment | **Empirically refuted as a threat, not deferred.** See the A2 note below |
 
@@ -448,8 +448,8 @@ pinned with literal dictionaries instead.
    a shipped tool's state file is the worse trade. Standing, not conditional
    on review outcomes.
 4. **Migration is conservative — no identity is inferred from a stored path.**
-   Superseded in part by decision 5: identity is now backfilled from live
-   enumeration, which is evidence, whereas probing a stored path is not.
+   Superseded 2026-08-20 (gate 6 round 3): identity is not backfilled at
+   all. A live pair shows the fork exists, not that it belongs here.
 5. **The plan is reshaped around the actionability predicate**, with a typed
    refusal when a row does not match disk and a `prune` verb to clear such
    rows. Replaces five site-specific guards with one mechanism.
@@ -530,8 +530,8 @@ Call sites that must change together:
   - non-dry-run cleanup from repoE cannot touch repoF;
   - a pre-upgrade (null-identity) fork whose worktree exists is cleaned **by
     name, without `--force`, with the dirty and unpushed guards intact**;
-  - safe backfill writes an identity into a live null row, and does **not**
-    write one into a row whose path is occupied by another repository;
+  - a null record authorizes nothing, gains no identity from forking, and is
+    cleared by `prune` without its worktree being touched;
   - fork-time replacement removes a same-name row only when the predicate
     confirms it, and a lineage failure afterwards leaves any pre-existing row
     intact — the existing compensation test starts from an empty registry
@@ -550,7 +550,7 @@ Call sites that must change together:
 
 `REQUIREMENTS.md` and `README.md`: cleanup acts only on a row confirmed
 against live state; the two refusals and what they mean; `prune` and its
-narrower predicate; conservative migration, safe backfill, and the
+narrower predicate; conservative migration with no backfill, and the
 older-binary no-downgrade consequence; `list` reports path existence, not fork
 liveness. New `T-REG` rows in `docs/testing/TEST-MATRIX.md` under G-REG.
 

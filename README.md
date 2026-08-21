@@ -273,7 +273,8 @@ same name may legitimately exist in several repositories and outside a
 repository there is nothing to resolve against. And **a record left behind by a
 worktree you deleted yourself is cleared with `agent-fork prune`**, which
 changes only the registry — it never removes a worktree or a branch. `prune`
-removes a record only when nothing is at its recorded path; a path now occupied
+removes a record when nothing is at its recorded path, and when the record
+predates the repository field and so cannot identify its fork; a path now occupied
 by something else is reported and kept, because that may be another
 repository's live worktree.
 
@@ -532,8 +533,8 @@ ordinary since it keys on a repository's basename alone.
 The forks themselves are unaffected. To finish an older fork:
 
 ```
-agent-fork cleanup /path/to/the/worktree --force   # removes the fork
-agent-fork prune                                   # clears the leftover records
+agent-fork prune                                  # clears the unusable records
+agent-fork cleanup /path/to/the/worktree --force  # removes the fork itself
 ```
 
 `prune` never touches a worktree, so the order does not matter. Note that once

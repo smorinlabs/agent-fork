@@ -272,16 +272,20 @@ def resolve_cleanup_target(
             ),
             True,
         )
-    # An explicit existing path is fresh input from the user, so a record that
-    # authorizes nothing need not stand in its way. A bare name or branch has
-    # only the record behind it, so it still refuses — with the hint that says
-    # how to clear the record.
-    target_is_path = Path(target).expanduser().exists()
-    identified = [
-        entry
-        for entry in candidates
-        if entry.repository is not None or not target_is_path
-    ]
+    # A record carrying no repository is inert in both directions: it cannot
+    # authorize and it does not veto. It is therefore dropped here rather than
+    # given a say.
+    #
+    # An earlier revision let an explicit existing path slip past such a
+    # record, to keep the pre-v2 recovery in one step. That inferred the
+    # selector from the filesystem — `Path(target).exists()` — which misreads
+    # a bare fork name as a path whenever a directory of that name happens to
+    # sit in the invoking directory, and let the mere presence of a null
+    # record waive the unregistered-target gate. Recovery is two steps
+    # instead: `prune` clears the inert records, after which the worktree is
+    # genuinely unregistered and `cleanup <path> --force` applies, exactly as
+    # for any worktree agent-fork did not create.
+    identified = [entry for entry in candidates if entry.repository is not None]
     if identified:
         # Not overridable by --force: a record naming a repository is the only
         # evidence that the worktree still belongs to it, and --force is
@@ -293,13 +297,18 @@ def resolve_cleanup_target(
             f"{_escape_terminal_text(stale.branch)}, which is not a worktree of "
             f"this repository; run 'agent-fork prune' if the fork is gone",
         )
-    # Every candidate names no repository. Such a record authorizes nothing,
-    # but it vetoes nothing either, so the target is effectively unregistered
-    # and falls through to confirmed discovery below. Deliberately without
-    # demanding --force: that flag also waives the dirty and unpushed guards,
-    # and a user finishing a fork left over from an older release should not
-    # have to waive them to do it.
-    if not candidates and not force:
+    if not force:
+        if candidates:
+            # Records exist, but every one predates the repository field and
+            # so cannot show the fork is this repository's. Saying "not
+            # created by agent-fork" would be false and unhelpful.
+            raise CleanupTargetError(
+                f"cleanup target {_escape_terminal_text(target)} matches only "
+                "registry records written before agent-fork recorded which "
+                "repository a fork belongs to, so they cannot identify it; "
+                "run 'agent-fork prune' to clear them, then target the "
+                "worktree by path with --force"
+            )
         raise CleanupTargetError(
             f"cleanup target {target!r} was not created by agent-fork; "
             "use --force to extend targeting"

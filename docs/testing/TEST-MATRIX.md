@@ -390,6 +390,7 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-31 | a failed fork's compensation does not resurrect the record it displaced once another writer has superseded it | baseline | F | live | REQ-41 (A3); gate-6 r3 |
 | T-REG-32 | `prune` clears a v1 record without touching its worktree, after which the now-unregistered fork is removable by explicit path with `--force` | baseline | F | live | REQ-31a (A3); gate-6 r4 |
 | T-REG-33 | absence is not supersession — when no successor holds the name, compensation restores the record the failed fork displaced | baseline | F | live | REQ-41 (A3); gate-6 r4 |
+| T-REG-34 | cascading rollback does not resurrect a failed fork — a displaced record whose worktree the rollback already deleted is not restored | baseline | F | live | REQ-41 (A3); gate-6 r5 |
 
 ---
 

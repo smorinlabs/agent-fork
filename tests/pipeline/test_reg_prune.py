@@ -190,27 +190,38 @@ def test_v1_record_authorizes_nothing_and_prune_clears_it(repo_scenario):
         world.env,
         world.parent_path,
     )
-    assert refused.returncode == 5, refused.stdout
-    assert b"cleanup_registry_stale" in refused.stderr
+    assert refused.returncode == 3, refused.stdout
+    assert b"cleanup_target_unknown" in refused.stderr
+    assert b"agent-fork prune" in refused.stderr, "the refusal must name the remedy"
 
     from pathlib import Path
 
     assert Path(worktree).exists()
 
-    # The documented recovery, in the documented order and exactly as the
-    # README prints it. A null record vetoes nothing, so the explicit path
-    # reaches confirmed discovery without needing --force.
-    removed = run_cli(
+    # An inert record does not waive the unregistered-target gate either, so
+    # the explicit path alone is still refused.
+    ungated = run_cli(
         ["cleanup", worktree, "--yes", "--allow-unpushed"],
+        world.env,
+        world.parent_path,
+    )
+    assert ungated.returncode != 0, ungated.stdout
+    assert Path(worktree).exists()
+
+    # The documented recovery: prune clears the inert record, after which the
+    # worktree is genuinely unregistered and the usual --force route applies.
+    pruned = run_cli(["prune", "--yes"], world.env, world.parent_path)
+    assert pruned.returncode == 0, pruned.stderr
+    assert _rows(world.env) == [], "an unresolvable record must be clearable"
+    assert Path(worktree).exists(), "prune must not touch the worktree"
+
+    removed = run_cli(
+        ["cleanup", worktree, "--force", "--yes", "--allow-unpushed"],
         world.env,
         world.parent_path,
     )
     assert removed.returncode == 0, removed.stderr
     assert not Path(worktree).exists()
-
-    pruned = run_cli(["prune", "--yes"], world.env, world.parent_path)
-    assert pruned.returncode == 0, pruned.stderr
-    assert _rows(world.env) == [], "an unresolvable record must be clearable"
 
 
 @pytest.mark.matrix("T-REG-32")
