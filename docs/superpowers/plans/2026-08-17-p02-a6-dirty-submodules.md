@@ -7,7 +7,7 @@ verification verdict through implementation sign-off.
 |---|---|
 | 1. Adversarial verification | **CONFIRMED-WITH-CORRECTIONS** (2026-08-17) — matrices below; Codex second lens returned CONFIRM-WITH-CORRECTIONS, findings 5 and 6 narrow the verdict wording |
 | 3. Design doc | this document |
-| 4. Plan + adversarial plan review (incl. Codex) | **NOT-READY** on both passes. First pass 2026-08-17: nine findings, four high, all absorbed. Re-validated against main 2026-08-20 after 51 commits (fault unchanged; `:(literal)` requirement added). Second pass 2026-08-20: **NOT-READY** — two blockers, both absorbed below (pins-vs-verbatim-reuse collision; carrying activated before its flag and verifier). Report file was lost to a read-only sandbox; findings recovered from the job log and independently re-verified. **Third pass required before gate 5** |
+| 4. Plan + adversarial plan review (incl. Codex) | **NOT-READY** on both passes. First pass 2026-08-17: nine findings, four high, all absorbed. Re-validated against main 2026-08-20 after 51 commits (fault unchanged; `:(literal)` requirement added). Second pass 2026-08-20: **NOT-READY** — two blockers, both absorbed below (pins-vs-verbatim-reuse collision; carrying activated before its flag and verifier). Report file was lost to a read-only sandbox; findings recovered from the job log and independently re-verified. Re-validated against A6a's shipped code 2026-08-21 (A6a merged, `9956f4a`): the opt-out row and implementation-plan step 6 assumed fresh `=all` filtering that was never built; A6a shipped more precise unconditional filtering instead, so the design now gates that rather than rebuilding it. **Third pass in progress** |
 | 5. Implementation (TDD, subagent-driven) | blocked on gate 4 re-review |
 | 6. Adversarial implementation review (incl. Codex) | pending |
 
@@ -207,6 +207,64 @@ are resolved" below: a typed `submodule_unrepresentable` refusal, shipped in
 A6a and gated on submodules not being carried, so A6b removes the limitation
 rather than inheriting it.
 
+## Re-validation against A6a's shipped code, 2026-08-21
+
+A6a merged (`origin/main` at `9956f4a`) since this design was last touched. Its
+actual implementation is more specific than what this design's "opt-out" row
+assumed, and the difference changes what A6b needs to build.
+
+**What A6a actually shipped, unconditionally, with no flag gating it:**
+
+- `--ignore-submodules=dirty` at three sites — `verify.py:114` (status
+  comparison), `content.py:245` (unstaged inventory listing), `cli.py:551`
+  (dry-run preview) — plus `repository.py:269` inside the unrepresentable-check.
+- `content.py` gained real infrastructure this design doc does not mention:
+  `gitlink_paths()` (shared submodule enumeration), `parse_porcelain_status()`
+  (rename-safe porcelain parsing — gate-6 pass 2 found the naive slice
+  fabricates paths from rename source records), and `suppressed_submodules()`
+  (a **per-status-code** comparison between `--ignore-submodules=none` and
+  `=dirty`, not the membership-set comparison this design doc never specified
+  and would have gotten wrong the same way the first attempt did).
+- `materialize.py`'s notice is `submodule_loss_notices()`, built on
+  `suppressed_submodules()`.
+- `repository.py`'s `validate_fork_guards(..., with_state=True)` raises
+  `submodule_unrepresentable` whenever an unstaged, modified (not deleted, not
+  conflicted) gitlink exists and `with_state` is true. **No `with_submodules`
+  parameter exists yet** — there is nothing else to gate it on.
+
+**Consequence for this design's "Flag" table.** The row
+`--no-with-submodules | ... | \`--ignore-submodules=all\` on both status calls
+and the unstaged inventory listing` is **superseded**. Building fresh `=all`
+filtering for the opt-out would discard the precision A6a already shipped —
+the per-status-code comparison that catches a submodule both staged and dirty
+at once, and the rename-safe parser. **A6b's opt-out path is not new code**:
+it is A6a's already-shipped, already-reviewed behavior, gated behind
+`with_submodules=False` instead of being unconditional. Concretely:
+
+- `verify.py:114`, `content.py:245`, `cli.py:551` — the existing
+  `--ignore-submodules=dirty` call becomes conditional
+  (`if not with_submodules`); when `with_submodules` is true, these sites drop
+  the filter entirely (strict comparison, no exemption, per this design's
+  existing "Verification: unchanged; strict, no exemption" cell — that cell
+  was already correct, just not yet wired to a flag because the flag doesn't
+  exist).
+- `repository.py`'s guard condition changes from "fires whenever `with_state`"
+  to "fires whenever `with_state` and not `with_submodules`" — matching the
+  docstring already in the code (`repository.py:253-256`: "A6b removes this
+  limitation for the default path... this guard must not fire").
+- `materialize.py`'s `submodule_loss_notices()` becomes conditional the same
+  way: called under `with_submodules=False`; under `with_submodules=True` a
+  successful carry either emits nothing or a distinct "carried" notice, not
+  this one.
+
+**This does not change the recipe** (init, name/path resolution, offline URL
+override, remote restoration, recursive snapshot, `config_pins`) — that part
+of the design was never about A6a's code and is unaffected. It changes
+implementation plan **step 6**: "gate the four existing
+`--ignore-submodules=dirty` call sites and the existing guard condition on the
+new flag" rather than "add new `=all` filtering", which was never built and
+should not be. Step 6 below reflects this; the earlier draft did not.
+
 ## Design
 
 ### Flag
@@ -220,8 +278,8 @@ config key `with_submodules`, and appears in the JSON document beside
 
 | Mode | Carry | Verification |
 |---|---|---|
-| `--with-submodules` (default) | init + recursive transport per the recipe | unchanged; strict, no exemption |
-| `--no-with-submodules` | nothing; submodule directories stay cold | `--ignore-submodules=all` on both status calls and the unstaged inventory listing; notice names what was not carried |
+| `--with-submodules` (default) | init + recursive transport per the recipe | strict, no exemption — the four sites below drop their filter |
+| `--no-with-submodules` | nothing; submodule directories stay cold | **A6a's already-shipped behavior, gated rather than rebuilt** (see "Re-validation against A6a's shipped code" above): `--ignore-submodules=dirty` at `verify.py`, `content.py`, `cli.py`, `repository.py`'s guard; `suppressed_submodules()` names what was not carried |
 
 **The opt-out is "do not initialize or carry submodule working trees" — not
 "carry nothing"** (finding 8). Blanket `--ignore-submodules=all` would overstate
@@ -235,10 +293,14 @@ stops checking state the fork actually transported. Precisely:
   suppressed in the parent-vs-child comparison;
 - before filtering, the hidden submodule paths and their state classes are
   inventoried so the notice can name exactly what was dropped, rather than
-  falling silent;
+  falling silent — **this is exactly what `suppressed_submodules()` already
+  does**, comparing per status code rather than path membership so a submodule
+  both staged and dirty is not missed;
 - the `parent-untouched` bracket stays **unfiltered** — it is a different
   comparison (parent before vs parent after), and filtering it would hide a
-  clean-to-changed gitlink transition occurring during the fork.
+  clean-to-changed gitlink transition occurring during the fork. This bracket
+  (`pipeline.py:114`, `verify.py:146`) is not gated by `with_submodules` either
+  way, matching what A6a already does.
 
 Interaction with `--with-state`: `--no-with-state` implies no submodule carry
 (there is no state to carry); `--with-submodules` must not silently re-enable
@@ -431,12 +493,19 @@ plan is a safe stopping point.
    plus `with_state` / `with_ignored` / `config_pins` / `env`, and returning
    carried paths, skipped paths, and notices. Unit-tested directly; not yet
    called by the pipeline.
-6. **Recursive verification** — rungs per carried submodule with the semantic
-   pins; opt-out filtering on `status_args` (`verify.py:103`) and the unstaged
-   inventory listing (`content.py:158`), leaving the staged path carried.
-   `pipeline.py:114` and `verify.py:146` are a matched pair for the
-   `parent-untouched` rung: that bracket stays unfiltered on both sides. With
-   nothing carrying yet, this verifies the status quo and must stay green.
+6. **Recursive verification, and gate the opt-out filtering that already
+   exists rather than building it fresh.** `--ignore-submodules=dirty` at
+   `verify.py:114`, `content.py`'s unstaged listing (~line 245), `cli.py:551`,
+   and the guard condition in `repository.py`'s `validate_fork_guards` all ship
+   unconditionally today (A6a). Make each conditional on `not with_submodules`;
+   add recursive rungs per carried submodule with the semantic pins for the
+   `with_submodules=True` path. `pipeline.py:114` and `verify.py:146` — the
+   `parent-untouched` rung — stay unfiltered on both sides, unchanged, matching
+   what A6a already does. With `with_submodules` defaulting true but nothing yet
+   consuming the recursive plan (steps 4–5 are read-only), this step's own
+   tests must still see the *default* pass in `--no-with-submodules` mode,
+   which now runs A6a's unmodified path; the `with_submodules=True` path stays
+   red until step 7.
 7. **Pipeline wiring — the behaviour change.** Carry after
    `create_worktree_at_anchor`, before verification, consuming the frozen plan,
    gated on the flag. The nine cells flip from red to green here.
