@@ -273,6 +273,30 @@ def test_worktree_location_template_rejects_unsafe_renders(repo_scenario):
         assert "invalid worktree location template" in str(caught.value)
 
 
+@pytest.mark.matrix("T-LOC-24")
+def test_worktree_location_unknown_placeholder_name_is_escaped_in_the_message(
+    repo_scenario,
+):
+    """T-LOC-24 — PR #62 review finding: an unknown placeholder name is
+    attacker/repo-controlled (parsed straight out of the TOML template) and
+    reached the raised `ConfigError` unescaped, unlike every other
+    diagnostic in this codebase (`ConfigFinding.render()`). A bidi control
+    character embedded in the placeholder name must render as a printable
+    escape, not the raw control character.
+    """
+    from agent_fork.config import ConfigError
+    from agent_fork.location import derive_worktree_path
+
+    root = repo_scenario("plain@main").parent_path
+    template = "{repo-name}/{evil‮name}"
+
+    with pytest.raises(ConfigError) as caught:
+        derive_worktree_path(root, "fork/x", "x", template)
+    message = str(caught.value)
+    assert "‮" not in message
+    assert "\\u202e" in message
+
+
 @pytest.mark.matrix("T-LOC-23")
 def test_worktree_location_empty_home_rejected_but_unset_home_falls_back(
     repo_scenario, monkeypatch
@@ -284,7 +308,16 @@ def test_worktree_location_empty_home_rejected_but_unset_home_falls_back(
     convention that an empty value counts as unset. A genuinely *absent*
     `HOME` is different — `Path.expanduser()` then falls back to the pwd
     database and must not raise.
+
+    PR #62 review finding: the unset-`HOME` half previously relied on the
+    test runner's own UID having a resolvable passwd entry — `pwd.getpwuid()`
+    raises `KeyError` without one, which `derive_worktree_path()` converts to
+    `ConfigError`, failing this test for a reason unrelated to the code under
+    test on a runner image with no such entry. `pwd.getpwuid` is patched here
+    so the assertion holds regardless of the runner.
     """
+    import pwd
+
     from agent_fork.config import ConfigError
     from agent_fork.location import derive_worktree_path
 
@@ -296,8 +329,13 @@ def test_worktree_location_empty_home_rejected_but_unset_home_falls_back(
     assert "empty HOME" in str(caught.value)
 
     monkeypatch.delenv("HOME", raising=False)
+    fake_entry = pwd.struct_passwd(
+        ("user", "x", 0, 0, "", "/nonexistent-fallback-home", "/bin/sh")
+    )
+    monkeypatch.setattr("pwd.getpwuid", lambda uid: fake_entry)
     path = derive_worktree_path(root, "fork/x", "x", "~/{repo-name}")
     assert path.is_absolute()
+    assert str(path).startswith("/nonexistent-fallback-home")
 
 
 @pytest.mark.matrix("T-LOC-22")

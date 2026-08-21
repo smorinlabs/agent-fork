@@ -10,6 +10,7 @@ from platformdirs import user_data_path
 
 from agent_fork.config import ConfigError
 from agent_fork.errors import PreconditionError
+from agent_fork.text import escape_terminal_text
 
 _ALLOWED_TEMPLATE_FIELDS = {"repo-name", "repo-root", "branch", "branch-escaped"}
 
@@ -171,7 +172,14 @@ def derive_worktree_path(
 
     reason = worktree_location_reason(location)
     if reason is not None:
-        raise ConfigError(f"invalid worktree location template {location!r}: {reason}")
+        # `reason` can carry attacker/repo-controlled text verbatim — an
+        # unknown placeholder name parsed straight out of the TOML template,
+        # e.g. — so it needs the same escaping every other diagnostic in
+        # this codebase applies (`ConfigFinding.render()`).
+        raise ConfigError(
+            f"invalid worktree location template {location!r}: "
+            f"{escape_terminal_text(reason)}"
+        )
     values = {
         "repo-name": root.name,
         "repo-root": str(root.parent),
@@ -201,7 +209,9 @@ def derive_worktree_path(
         # Belt-and-braces: worktree_location_reason() rules out every render
         # failure this function has ever been found to have, but a render
         # failure must still exit 2 (config_error), not 1, if one slips
-        # through some case this grammar didn't anticipate.
+        # through some case this grammar didn't anticipate. `error`'s text
+        # is escaped for the same reason `reason` is above.
         raise ConfigError(
-            f"invalid worktree location template {location!r}: {error}"
+            f"invalid worktree location template {location!r}: "
+            f"{escape_terminal_text(str(error))}"
         ) from None

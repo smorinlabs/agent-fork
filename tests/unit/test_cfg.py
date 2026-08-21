@@ -465,6 +465,51 @@ def test_config_get_rejects_every_internal_attribute(repo_scenario):
             config_get(base, leaked)
 
 
+@pytest.mark.matrix("T-CFG-36")
+def test_unknown_key_is_escaped_in_get_and_set_error_messages(repo_scenario, tmp_path):
+    """T-CFG-36 — PR #62 review finding: `key` is a raw CLI argument echoed
+    verbatim into "unknown config key: {key}" by both `config_get()` and
+    `set_user_value()`, unlike every other diagnostic in this codebase
+    (`ConfigFinding.render()`). A bidi control character in the key must
+    render as a printable escape in both call sites, not the raw control
+    character, so a malicious key cannot reorder or hide terminal output.
+    """
+    from agent_fork.config import (
+        ConfigError,
+        ResolvedConfig,
+        config_get,
+        set_user_value,
+    )
+
+    base = ResolvedConfig(
+        with_state=True,
+        with_ignored=False,
+        branch_prefix="fork/",
+        worktree_location="sibling",
+        worktree_location_explicit=False,
+        agent_mode="auto",
+        verify=True,
+        copy=False,
+        output="text",
+        config_path=None,
+        claude_extra_args=(),
+        codex_extra_args=(),
+        codex_session_name_resolution=True,
+    )
+    evil_key = "evil‮name"
+
+    with pytest.raises(ConfigError) as caught:
+        config_get(base, evil_key)
+    assert "‮" not in str(caught.value)
+    assert "\\u202e" in str(caught.value)
+
+    config_path = tmp_path / "agent-fork_config.toml"
+    with pytest.raises(ConfigError) as caught:
+        set_user_value(config_path, evil_key, "x")
+    assert "‮" not in str(caught.value)
+    assert "\\u202e" in str(caught.value)
+
+
 @pytest.mark.matrix("T-CFG-32")
 def test_config_set_array_key_refuses_naming_the_exact_file(repo_scenario, tmp_path):
     """T-CFG-32 — `config set` on an array key refuses, naming the exact

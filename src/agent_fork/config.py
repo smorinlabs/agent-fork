@@ -247,7 +247,9 @@ def config_get(resolved: ResolvedConfig, key: str) -> str:
     """
     spec = _GET_KEYS_BY_DOTTED.get(key) or _GET_KEYS_BY_BARE.get(key)
     if spec is None:
-        raise ConfigError(f"unknown config key: {key}")
+        # `key` is a raw CLI argument, echoed verbatim; escape it like every
+        # other diagnostic in this codebase (`ConfigFinding.render()`).
+        raise ConfigError(f"unknown config key: {escape_terminal_text(key)}")
     value = getattr(resolved, spec.field)
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -582,7 +584,7 @@ def set_user_value(path: Path, key: str, value: str) -> None:
     resolved_path = path.resolve()
     spec = _GET_KEYS_BY_BARE.get(key) or _GET_KEYS_BY_DOTTED.get(key)
     if spec is None:
-        raise ConfigError(f"unknown config key: {key}")
+        raise ConfigError(f"unknown config key: {escape_terminal_text(key)}")
     if not spec.settable:
         raise ConfigError(
             f"{spec.dotted} is an array and cannot be set from the CLI; edit "
