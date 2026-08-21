@@ -1437,3 +1437,70 @@ def test_interrupt_before_the_hook_step_renders_json_when_configured(
             "message": "interrupted before any mutation",
         }
     }
+
+
+@pytest.mark.matrix("T-CLI-56")
+def test_a_signal_while_the_output_mode_resolves_is_deferred_until_it_is_published(
+    repo_scenario, monkeypatch, capsys
+):
+    """T-CLI-56 — resolving the mode and publishing it have to be one step.
+
+    Moving the publication next to `resolve_discovered_config()` narrowed the
+    window but could not close it: resolving, computing `output_kind`, and
+    assigning `args._resolved_machine` are three statements, and CPython runs
+    signal handlers between bytecodes. A SIGINT landing in that gap unwinds
+    with the resolved mode still unpublished, so `main()`'s boundary falls back
+    to the raw flags and prints human text for a fork that `AGENT_FORK_OUTPUT`
+    put in JSON mode. Blocking SIGINT and SIGTERM across the three statements
+    defers such a signal until after the assignment, which is the only lever
+    that closes the gap rather than narrowing it.
+
+    Given:  `AGENT_FORK_OUTPUT=json`, no `--json` flag, and a resolved config
+            whose `output` read raises a real SIGINT at this process — so the
+            interrupt is pending exactly between the resolution and the
+            assignment
+    Expect: exit 130 and exactly one JSON error object on stderr
+    Source: R7.8; REQ-22; P02 A12 gate-6 round 4
+    """
+    import signal
+
+    from agent_fork import config as config_module
+    from agent_fork.cli import main
+
+    world = repo_scenario("plain@main")
+    monkeypatch.setattr("os.environ", dict(world.env, AGENT_FORK_OUTPUT="json"))
+    monkeypatch.chdir(world.parent_path)
+    real = config_module.resolve_discovered_config
+
+    class _SignallingConfig:
+        """The resolved config, with the window opened where it really is."""
+
+        def __init__(self, resolved):
+            self._resolved = resolved
+
+        def __getattr__(self, name):
+            return getattr(self._resolved, name)
+
+        @property
+        def output(self):
+            # `output_kind = ... or config.output` has run; the assignment to
+            # `args._resolved_machine` has not. This is the window.
+            os.kill(os.getpid(), signal.SIGINT)
+            return self._resolved.output
+
+    def signalling(*args, **kwargs):
+        return _SignallingConfig(real(*args, **kwargs))
+
+    monkeypatch.setattr(config_module, "resolve_discovered_config", signalling)
+    entry_mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+    assert main(["fork", "windowed", "--no-agent"]) == 130
+    assert signal.pthread_sigmask(signal.SIG_BLOCK, set()) == entry_mask
+    captured = capsys.readouterr()
+    lines = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == {
+        "error": {
+            "code": "interrupted_sigint",
+            "message": "interrupted before any mutation",
+        }
+    }

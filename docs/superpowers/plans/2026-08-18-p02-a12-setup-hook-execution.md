@@ -1208,6 +1208,21 @@ hazard introduced by row 1's own fix. All three are fixed here.
 |---|---|---|---|
 | 1 | The `Popen()`-to-registration window was **not** closed by round 2. `process = Popen(...)` spawns before it binds the name, so a handler firing in the gap has nothing to reap (the local is unbound) and nothing to signal (`_ACTIVE` is unwritten) — enclosure in the protected block cannot help | `{SIGINT, SIGTERM}` blocked with `signal.pthread_sigmask` across the spawn and registration, restored with `SIG_SETMASK` inside the protected block; `preexec_fn` restores the child's inherited mask so the hook can still receive the ladder's SIGTERM. "Signal path" above is rewritten to match | `T-INC-19`, `T-INC-20` |
 | 2 | New hazard from round 1's fix: a PID is reserved as its group's id only while the group is non-empty, so the unconditional `killpg` could signal an unrelated process group after the hook's own had emptied and the PID had been reused — worse than the orphan A12 exists to prevent | Emptiness latched on a `_HookGroup` record read by every signalling path; `_signal_hook_group()` probes and returns rather than signalling once latched. The reap-ladder section's "can never name an unrelated process" claim is corrected | `T-INC-18` |
-| 3 | Round 2's resolved-output publication sat immediately before the hook step, leaving agent-mode resolution, repository inspection, the anchor and branch Git calls, naming, and destination calculation inside the window it was meant to close | Published immediately after configuration resolution, the first point the mode is knowable | `T-CLI-55` |
+| 3 | Round 2's resolved-output publication sat immediately before the hook step, leaving agent-mode resolution, repository inspection, the anchor and branch Git calls, naming, and destination calculation inside the window it was meant to close | Published immediately after configuration resolution, the first point the mode is knowable. **Partial — see round 4, item 1: moving the publication narrows the window, it does not close it** | `T-CLI-55` |
 
 Matrix rows move from 537 to 541.
+
+### Round 4 (2026-08-21)
+
+A second independent Codex pass confirmed round 3's item 1 genuinely closed and
+found the remaining two items short of their claims: item 3 narrowed a window
+it could not close by position alone, and item 2's latch stops repeated
+signalling but leaves a sub-syscall race the primitives on both supported
+platforms cannot remove. The first is fixed; the second is tightened as far as
+it goes and then disclosed as Known limit 9 rather than claimed closed.
+
+| # | Defect | Correction | Rows |
+|---|---|---|---|
+| 1 | The resolve-to-publish window was **not** closed by round 3. `resolve_discovered_config()`, the `output_kind` computation, and the `args._resolved_machine` assignment are three statements, and CPython runs signal handlers between bytecodes, so a signal landing between the return and the assignment still unwound with the mode unpublished and rendered a human error under `AGENT_FORK_OUTPUT=json` | `{SIGINT, SIGTERM}` blocked with `signal.pthread_sigmask` across all three statements in `_fork_cli()`, restored with `SIG_SETMASK` in a `finally` — the same technique round 3 used for the spawn, and simpler here because no child process is involved. A `ConfigError` from resolution still leaves the mode unpublished, which is correct: none exists yet | `T-CLI-56` |
+
+Matrix rows move from 541 to 542.

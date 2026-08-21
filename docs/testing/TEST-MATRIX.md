@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04, T-RBK-08/09, T-RBK-10, T-INC-16, T-INC-17, T-CLI-53, T-CLI-54, and T-OUT-27 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 541 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 542 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -601,6 +601,7 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-53 | A12 Gate-1 fact 7 — a real SIGINT during the setup hook makes `main()` return 130 with a rendered error rather than a traceback and exit 1; `--json` prints exactly one JSON error object with code `interrupted_sigint` | baseline | C | live | REQ-22; P02 A12 |
 | T-CLI-54 | A12 gate-6 — an interrupt under `AGENT_FORK_OUTPUT=json` with no `--json` flag still renders exactly one JSON error object on stderr, because the boundary reads the resolved output mode rather than the raw arguments | baseline | C | live | R7.8; REQ-22; P02 A12 gate-6 |
 | T-CLI-55 | A12 gate-6 round 3 — the same guarantee holds for an interrupt *before* the hook step (raised from `inspect_repository()`), because the resolved mode is published as soon as configuration resolves rather than just before the hook runs | baseline | C | live | R7.8; REQ-22; P02 A12 gate-6 round 3 |
+| T-CLI-56 | A12 gate-6 round 4 — SIGINT/SIGTERM are blocked across the resolve-and-publish critical section, so a signal raised between `resolve_discovered_config()` returning and `args._resolved_machine` being assigned is deferred until after the assignment and still renders one JSON error object; the caller's mask is restored afterwards | baseline | C | live | R7.8; REQ-22; P02 A12 gate-6 round 4 |
 
 ---
 

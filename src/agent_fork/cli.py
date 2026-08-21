@@ -468,19 +468,32 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         }.items()
         if value is not None
     }
-    config = resolve_discovered_config(
-        cwd, environment, explicit_path=args.config, flags=flags
+    # Resolving the output mode and publishing it are one critical section, held
+    # under a blocked mask. `main()`'s exception boundary otherwise sees only the
+    # raw flags and renders a human error for a fork put into JSON mode by
+    # `AGENT_FORK_OUTPUT`, breaking R7.8's one-JSON-object-on-stderr contract
+    # exactly when it matters, on the interrupt path. Position alone cannot close
+    # that: these are three statements and CPython runs signal handlers between
+    # bytecodes, so an interrupt landing between the resolution and the
+    # assignment unwinds with nothing published. Blocking exactly the pair
+    # `rollback.run_with_rollback()` handles defers such a signal — it is not
+    # dropped — to the `SIG_SETMASK` below, which restores whatever mask the
+    # caller had rather than assuming it was empty. The section covers reading
+    # local configuration files and two assignments; nothing in it waits.
+    restore_mask = signal.pthread_sigmask(
+        signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM}
     )
-    output_kind = "json" if args.json else (args.output or config.output)
-    # Published here, the first point at which the mode is knowable, and read by
-    # `main()`'s exception boundary, which otherwise sees only the raw flags and
-    # would render a human error for a fork put into JSON mode by
-    # `AGENT_FORK_OUTPUT` — breaking R7.8's one-JSON-object-on-stderr contract
-    # exactly when it matters, on the interrupt path. Publishing it any later
-    # leaves every step in between (agent-mode resolution, repository
-    # inspection, the anchor and branch Git calls, naming, destination) inside
-    # the window it exists to close.
-    args._resolved_machine = output_kind == "json"
+    try:
+        config = resolve_discovered_config(
+            cwd, environment, explicit_path=args.config, flags=flags
+        )
+        output_kind = "json" if args.json else (args.output or config.output)
+        args._resolved_machine = output_kind == "json"
+    finally:
+        # A `ConfigError` raised inside leaves `_resolved_machine` unpublished,
+        # which is correct: no resolved mode exists yet, so the boundary's raw-
+        # flag fallback is all there is to go on.
+        signal.pthread_sigmask(signal.SIG_SETMASK, restore_mask)
     context = resolve_agent_mode(
         config.agent_mode,
         environment,
