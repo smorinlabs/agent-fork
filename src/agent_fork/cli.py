@@ -565,6 +565,11 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         else ()
     )
     output_kind = "json" if args.json else (args.output or config.output)
+    # Published to `main()`'s exception boundary, which otherwise sees only the
+    # raw flags and would render a human error for a fork put into JSON mode by
+    # `AGENT_FORK_OUTPUT` — breaking R7.8's one-JSON-object-on-stderr contract
+    # exactly when it matters, on the interrupt path.
+    args._resolved_machine = output_kind == "json"
 
     if args.dry_run:
         if context is not None:
@@ -724,6 +729,12 @@ def main(argv: list[str] | None = None) -> int:
     from agent_fork.rollback import OperationInterrupted
 
     def _machine() -> bool:
+        # `_fork_cli()` publishes the fully resolved mode once it has one; the
+        # raw flags are the fallback for everything that fails before
+        # resolution, where they are all there is to go on.
+        resolved = getattr(args, "_resolved_machine", None)
+        if resolved is not None:
+            return resolved
         return (
             bool(getattr(args, "json", False))
             or getattr(args, "output", None) == "json"

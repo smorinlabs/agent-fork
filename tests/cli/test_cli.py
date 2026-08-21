@@ -1341,3 +1341,56 @@ def test_main_translates_a_signal_during_the_hook_into_exit_130(repo_scenario):
             "message": "interrupted after rollback",
         }
     }
+
+
+@pytest.mark.requires_process_group_signals
+@pytest.mark.matrix("T-CLI-54")
+def test_interrupt_renders_json_when_the_mode_comes_from_configuration(repo_scenario):
+    """T-CLI-54 — R7.8 is owed to the resolved output mode, not to `--json` alone.
+
+    `main()`'s interrupt boundary decided human-versus-machine rendering from the
+    raw arguments, while `_fork_cli()` resolves the mode from `--json`, `-o`,
+    and `AGENT_FORK_OUTPUT`. A fork put into JSON mode by the environment rather
+    than by a flag therefore printed a human-readable error where the contract
+    promises exactly one JSON error object on stderr. (`output` is deliberately
+    not a `[fork]` configuration key — `load_config()` rejects it — so the
+    environment variable is the whole of the non-flag route.)
+
+    Given:  `AGENT_FORK_OUTPUT=json`, no `--json` flag, and a real SIGINT while
+            the setup hook blocks
+    Expect: exit 130 and exactly one JSON error object on stderr
+    Source: R7.8; REQ-22; P02 A12 gate-6 review
+    """
+    import signal
+    import sys
+    import time
+
+    world = repo_scenario("plain@main")
+    _commit_hook(world, '#!/bin/sh\n: > "$REPO_ROOT/hook-ready"\nsleep 120\n')
+    environment = dict(world.env, AGENT_FORK_OUTPUT="json")
+    executable = Path(sys.executable).with_name("agent-fork")
+    process = subprocess.Popen(
+        [str(executable), "fork", "interrupted", "--no-agent"],
+        env=environment,
+        cwd=world.parent_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    ready = world.parent_path / "hook-ready"
+    for _ in range(1000):
+        if ready.exists():
+            break
+        time.sleep(0.01)
+    assert ready.exists(), "setup hook never signalled readiness"
+    os.kill(process.pid, signal.SIGINT)
+    _, stderr = process.communicate(timeout=30)
+    assert process.returncode == 130, stderr.decode()
+    assert b"Traceback" not in stderr
+    lines = [line for line in stderr.decode().splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == {
+        "error": {
+            "code": "interrupted_sigint",
+            "message": "interrupted after rollback",
+        }
+    }
