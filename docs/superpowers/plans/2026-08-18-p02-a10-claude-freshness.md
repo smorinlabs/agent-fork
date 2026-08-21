@@ -27,7 +27,7 @@ network access, streaming, plugins, or interactive behavior.
 | 3. Design document | **complete**; revalidated against `origin/main` on 2026-08-20 |
 | 4. Implementation plan and adversarial review, including Codex | **APPROVE-WITH-CHANGES** on 2026-08-20; both required lenses concurred, every required change incorporated; see "Plan-review outcome" below |
 | 5. Test-driven implementation | **complete** on 2026-08-20; 31 new tests, all four repository gates pass; see "Implementation evidence" below |
-| 6. Adversarial implementation review, including Codex | pending |
+| 6. Adversarial implementation review, including Codex | **APPROVE-WITH-CHANGES** on 2026-08-20; both required lenses concurred, all 13 required findings corrected, 16 additional test IDs added; see "Gate-6 findings and corrections" below |
 
 ## Revalidation against main (2026-08-20)
 
@@ -1262,12 +1262,167 @@ underlying requirement (`max_entries` enforcement), so it was updated to check
 `CorpusLimitError.limit == "max_entries"` directly — a stronger, more direct
 assertion of the same requirement, not a weakening.
 
-Repository gates, run after the matrix and documentation updates below:
+Repository gates after the gate-5 matrix and documentation updates (superseded
+by the gate-6 corrections below):
 
 | Gate | Result |
 |---|---|
 | `just all` | **pass** — Ruff format, Ruff lint, `ty`, version sync, 542 tests passed, 1 skipped, 9 deselected |
 | `just check-matrix` | **pass** — 444 rows across 20 groups, one collected item per live row |
+| `just strict-collect` | **pass** — clean collection across every test directory, no unknown markers or import errors |
+| `just clean-install` | **pass** — sdist and wheel built; disposable venv install and smoke check completed |
+
+## Gate-6 findings and corrections
+
+Two independent lenses reviewed the real committed diff (`d82ddf8`), both
+using empirical probes and mutation testing against the live worktree rather
+than reading code alone, and both returned **APPROVE-WITH-CHANGES**: 8
+required-before-merge findings from the Opus lens, 10 from the independent
+Codex lens, substantially overlapping. The core architecture held up under
+both — the per-child migration mechanism, the lock ordering, the delete
+ordering, the `except` clause ordering, the sweep's `.sweep` exemption, and
+counter additivity were all independently verified correct by direct
+empirical proof (mutation testing that killed the right assertions when a
+production line was reverted). What both lenses found were implementation
+gaps around that correct core: two genuine crash bugs, several places where
+the "never fails, always degrades neutrally" promise wasn't actually
+enforced, one cumulative-counter false positive, one silently misrouted error
+code, one misleading corpus-vs-target label, and several tests whose
+assertions didn't actually prove what their matrix row claimed.
+
+All required findings were fixed test-first, each with a genuine RED
+confirmation before its GREEN change:
+
+1. **`_read_targets()` crashed with `AttributeError` on non-dict top-level
+   JSON** (a malformed freshness-index file), which propagated through
+   `assess_inference`, `remove_index_freshness`, and — most severely —
+   `cleanup`'s new disclosure step, meaning a corrupted advisory cache file
+   could block a destructive worktree removal that pre-A10 code was
+   completely unaffected by. Fixed by rejecting non-`dict` JSON in
+   `_read_targets` explicitly, tested at both the state and legacy paths
+   through all four call sites (`T-CPI-58`).
+2. **A malformed fingerprint entry (no `:` separator) crashed with
+   `UnboundLocalError`** in `assess_inference`'s per-file loop — the `except`
+   block referenced a variable that was never bound when the unpacking itself
+   was what failed. Fixed by validating the separator before the `try`, so
+   the exception handler's variable is always bound; resolves to
+   `stale_sources` with `changed_sources == ("other",)` (`T-CPI-59`).
+3. **A broken symlink at either freshness-index path was treated as an
+   absent (empty) store**, silently proceeding as "no recorded freshness
+   data" instead of the codebase's existing symlink-rejection convention.
+   Fixed by checking `is_symlink()` before `exists()` (`T-CPI-60`).
+4. **The cache sweep was neither bounded nor confined the way the design
+   promised**: `list(root.iterdir())` materialized every entry before the
+   `CACHE_SWEEP_MAX_ENTRIES` bound was checked, defeating a "bounded" sweep;
+   the one-time legacy-`v2` removal used recursive `rglob("*")`, contradicting
+   the design's explicit immediate-children-only boundary; and the `.sweep`
+   marker's `stat()`/touch could follow a symlink. Fixed by switching to a
+   lazily-iterated `os.scandir()` that stops reading before the bound is
+   exceeded, immediate-children-only legacy removal (an unexpected
+   subdirectory is left alone and the final `rmdir` simply fails, counted
+   rather than destroying anything beneath it), and an `O_NOFOLLOW` open for
+   the marker (`T-CPI-47` corrected, plus `T-CPI-61` through `T-CPI-67`
+   covering the byte cap, age cap, bounded scan, foreign/symlinked legacy
+   root, and marker symlink safety individually).
+5. **The freshness-write-failure CLI notice fired as a false positive on
+   every target after the first failure in an `--all` run**, because it
+   checked the corpus-wide `Work` object's counter for merely being nonzero
+   rather than whether *this* target's call caused a new failure. Fixed by
+   snapshotting the counter immediately before and after each target's
+   `infer_one()` call.
+6. **Cleanup disclosure had three defects**: an invalid freshness store was
+   silently converted to an empty dict instead of the design-promised neutral
+   notice; a legacy-only entry was reported as if it lived at the new state
+   path; and session IDs/paths were terminal-escaped before being placed in
+   *JSON* output, which would corrupt a value a script pastes back into a
+   command. Fixed by propagating "couldn't read" as a distinct signal
+   (`T-CLN-31`), reporting each entry's real location (`T-CLN-30`), and
+   keeping `retained_metadata` raw with escaping applied only to the human
+   `notices` strings — proved with an actual embedded control character, not
+   a plain UUID that would pass either way (`T-CLN-29`).
+7. **`analyzed_at` was not escaped on the human `parent inference:` output
+   line**, unlike its neighbors on the same line. Fixed by wrapping it in
+   `terminal_text()` too.
+8. **The interactive delete confirmation prompt was missing the two lines
+   the design specified** — what will be removed and what will remain — this
+   section of `cli.py` had not been touched at all. Added both lines.
+9. **`retained_planned_record` was hardcoded to `False`** in the `inferred`
+   delete branch, never checking whether a planned claim actually survives
+   for the same child. Fixed to compute it via `find_lineage(...)`.
+10. **A single-target (non-`--all`) limit-breach failure surfaced the wrong
+    error code** — the typed per-target handling was correct, but the
+    post-loop error-raising logic downgraded it to the generic
+    not-recordable/unavailable classes instead of
+    `claude_parent_incomplete_analysis`. Fixed by tracking whether the
+    failure was specifically a limit breach and raising the typed error
+    class when it was (`T-CLI-38` extended to cover this end to end; a
+    dedicated `T-CLI-42` added because the original `max_files` scenario is a
+    *whole-corpus* limit that never touched this code path in the first
+    place — the bug was specifically in the *per-target* `max_candidates`
+    routing for a single-target invocation).
+11. **`max_seconds` reported a misleading `scope: "target"`.** It bounds one
+    shared corpus-wide clock (pre-existing, not something A10 should turn
+    into independent per-target budgets — that would be a real architecture
+    change, not a bug fix), so once it expires, every subsequent target in an
+    `--all` run reports "this target ran out of time" when the corpus-wide
+    clock actually expired, possibly before that target was even reached.
+    Changed the reported scope to `"corpus"`, leaving `max_candidates`
+    correctly at `"target"` (`T-CPI-57` updated; `T-CLI-43` added for the
+    `--all` case).
+12. **`TEST-MATRIX.md`'s asserted total was wrong** (`413 + 31 = 444`, not
+    recounted per the header's own instruction). Corrected to the actual
+    count after every new row, including the sixteen added during this
+    gate-6 pass.
+13. **Eight tests had gaps between what they asserted and what their matrix
+    row claimed**: `T-CLI-38` asserted only exit code and non-recording for
+    one invocation shape, despite the new stable error code having zero
+    coverage anywhere in the suite — rewritten to assert the code, empty
+    stdout, and one JSON error object across `--session-id`, `--record`,
+    `--current`, and `--all`. `T-CLN-28`'s escaping proof embedded no control
+    character, so it passed even with escaping removed — the genuine proof
+    moved to the new `T-CLN-29`. `T-CPI-47` expected the recursive-deletion
+    bug as correct behavior — corrected to the design's immediate-children
+    boundary and extended to actually exercise the byte cap, age cap, and
+    failure counter, none of which appeared anywhere in the suite before.
+    `T-CPI-49` covered only the freshness-failure half of the additivity
+    claim — the shard-only half is now `T-CPI-68`. `T-CPI-54` asserted
+    `isinstance(..., dict)` after a pop that empties the dict, which passes
+    even if the pop never ran — now asserts the real value is `{}`.
+    `T-SES-49` claimed all seven statuses but never exercised `unreadable` —
+    added. `T-CLI-40` claimed `max_seconds` coverage it didn't have and
+    checked only that an unaffected target's status "wasn't incomplete"
+    rather than confirming what actually happened to it — split into
+    `T-CLI-40` (strengthened `max_candidates` case) and the new `T-CLI-43`
+    (`max_seconds`, since that scenario has no plausible "unaffected target"
+    given the shared-clock finding above). `T-CLN-25` claimed exact store
+    paths and exact removal commands without asserting them — now does.
+
+One item from the merged review findings was corrected in scope rather than
+implemented as literally specified: finding 10's fix instruction named
+`T-CLI-38` as the vehicle for proving the single-target routing fix, but
+`T-CLI-38`'s existing `max_files` scenario is a whole-corpus limit that
+already routed correctly before this pass — it never exercised the bug.
+`T-CLI-38` was still strengthened as instructed (real error-code assertion,
+`--current`/`--all` coverage), and a separate `T-CLI-42` was added
+specifically for the per-target `max_candidates` case, which is what
+actually exercises finding 10's fix. Confirmed by temporarily reverting the
+`cli.py` fix and observing `T-CLI-42` fail for the exact predicted reason
+before restoring it — see the sixteen new IDs below for the equivalent
+proof pattern applied throughout.
+
+Sixteen new test IDs were added during this gate-6 pass, beyond the original
+31: `T-CPI-58` through `T-CPI-68` (11), `T-CLI-42` and `T-CLI-43` (2), and
+`T-CLN-29` through `T-CLN-31` (3). Total new A10 test IDs: 47. `TEST-MATRIX.md`
+now asserts 488 total rows (472 pre-existing + 16 net new to this branch,
+matching the review's own independently recomputed pre-fix count of 472).
+
+Repository gates after the gate-6 corrections, matrix, and documentation
+updates:
+
+| Gate | Result |
+|---|---|
+| `just all` | **pass** — Ruff format, Ruff lint, `ty`, version sync, 558 tests passed, 1 skipped, 9 deselected |
+| `just check-matrix` | **pass** — 488 rows across 20 groups, one collected item per live row |
 | `just strict-collect` | **pass** — clean collection across every test directory, no unknown markers or import errors |
 | `just clean-install` | **pass** — sdist and wheel built; disposable venv install and smoke check completed |
 

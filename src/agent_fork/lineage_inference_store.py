@@ -109,16 +109,22 @@ def _legacy_index_freshness_path(env: Mapping[str, str] | None = None) -> Path:
 
 def _read_targets(path: Path) -> dict[str, object] | None:
     """Return the validated ``targets`` dict, or None if structurally invalid."""
+    if path.is_symlink():
+        return None
     if not path.exists():
         return {}
-    if path.is_symlink() or path.stat().st_size > MAX_STORE_BYTES:
+    if path.stat().st_size > MAX_STORE_BYTES:
         return None
     try:
         with path.open("rb") as stream:
             document = json.loads(stream.read(MAX_STORE_BYTES + 1))
     except (OSError, TypeError, json.JSONDecodeError):
         return None
-    if document.get("version") != 1 or not isinstance(document.get("targets"), dict):
+    if (
+        not isinstance(document, dict)
+        or document.get("version") != 1
+        or not isinstance(document.get("targets"), dict)
+    ):
         return None
     return document["targets"]
 
@@ -272,9 +278,13 @@ def assess_inference(
 
     changed: set[ChangedSource] = set()
     for item in record.source_fingerprints:
+        if ":" not in item:
+            # a malformed entry has no path to classify against target/parent
+            changed.add("other")
+            continue
+        raw_path, expected = item.rsplit(":", 1)
+        path = Path(raw_path)
         try:
-            raw_path, expected = item.rsplit(":", 1)
-            path = Path(raw_path)
             if path.is_symlink():
                 changed.add(_classify_changed_source(record, raw_path))
                 continue
@@ -284,7 +294,7 @@ def assess_inference(
                 f"{stat.st_size}:{stat.st_mtime_ns}"
             )
             actual = hashlib.sha256(actual_raw.encode()).hexdigest()
-        except (OSError, ValueError):
+        except OSError:
             changed.add(_classify_changed_source(record, raw_path))
             continue
         if actual != expected:

@@ -462,6 +462,33 @@ def test_cleanup_discloses_retained_lineage_metadata(repo_scenario):
     assert child in dry_document["retained_metadata"]["inferred_records"]
     assert child in dry_document["retained_metadata"]["freshness_entries"]
     assert dry_document["retained_metadata"]["removal_commands"]
+    commands = {
+        entry["source"]: entry["command"]
+        for entry in dry_document["retained_metadata"]["removal_commands"]
+        if entry["session_id"] == child
+    }
+    assert commands == {
+        "planned": (
+            f"agent-fork session claude-parent delete --session-id {child} "
+            "--source planned --yes"
+        ),
+        "inferred": (
+            f"agent-fork session claude-parent delete --session-id {child} "
+            "--source inferred --yes"
+        ),
+    }
+    from agent_fork.lineage import lineage_path
+    from agent_fork.lineage_inference_store import (
+        index_freshness_path as _idx_path,
+    )
+    from agent_fork.lineage_inference_store import inference_path
+
+    dry_human = run_cli(
+        ["cleanup", "disclose", "--dry-run"], world.env, world.parent_path
+    ).stdout.decode()
+    assert str(lineage_path(world.env)) in dry_human
+    assert str(inference_path(world.env)) in dry_human
+    assert str(_idx_path(world.env)) in dry_human
     assert result.creation.path.exists()
 
     real = run_cli(
@@ -543,6 +570,7 @@ def test_cleanup_disclosure_handles_no_match_and_read_failure(
         "freshness_entries": [],
         "removal_commands": [],
     }
+    assert any("could not read" in notice for notice in failure_document["notices"])
     assert not fork_result.creation.path.exists()
 
 
@@ -602,3 +630,130 @@ def test_cleanup_removal_commands_are_source_qualified_and_escaped(repo_scenario
 
     human = run_cli(["cleanup", "qualified", "--dry-run"], world.env, world.parent_path)
     assert b"\x1b" not in human.stdout
+
+
+@pytest.mark.matrix("T-CLN-29")
+def test_cleanup_disclosure_escapes_notices_but_not_json(repo_scenario):
+    """A genuinely load-bearing escaping proof: a control character embedded
+    in a stored session ID must reach JSON output raw (so a script can paste
+    it back verbatim) but must never appear as a raw byte in human notices."""
+    from agent_fork.lineage import LineageClaim, add_lineage
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "control-char")
+    hostile_child = "hostile\x1bchild"
+    add_lineage(
+        LineageClaim.create(
+            agent="claude",
+            child_session_id=hostile_child,
+            parent_session_id="parent",
+            worktree=result.creation.path,
+        ),
+        env=world.env,
+    )
+
+    machine = run_cli(
+        ["cleanup", "control-char", "--dry-run", "-o", "json"],
+        world.env,
+        world.parent_path,
+    )
+    document = json.loads(machine.stdout)
+    assert hostile_child in document["retained_metadata"]["lineage_claims"]
+    commands = document["retained_metadata"]["removal_commands"]
+    assert any(entry["session_id"] == hostile_child for entry in commands)
+
+    human = run_cli(
+        ["cleanup", "control-char", "--dry-run"], world.env, world.parent_path
+    )
+    assert b"\x1b" not in human.stdout
+
+
+@pytest.mark.matrix("T-CLN-30")
+def test_cleanup_disclosure_reports_legacy_only_freshness_location(repo_scenario):
+    """A freshness entry that lives only at the legacy XDG_CACHE_HOME path
+    (not yet migrated) must be disclosed as such, not claimed to live at the
+    new XDG_STATE_HOME path it was never written to."""
+    from agent_fork.lineage_inference_store import (
+        InferenceRecord,
+        _legacy_index_freshness_path,
+        add_inference,
+        index_freshness_path,
+    )
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "legacy-loc")
+    child = "33333333-3333-3333-3333-333333333333"
+    add_inference(
+        InferenceRecord(
+            child,
+            "parent",
+            "inferred",
+            "boundary",
+            3,
+            1,
+            1,
+            "2026-01-01T00:00:00Z",
+            (),
+            "generation-1",
+            "universe-1",
+        ),
+        env=world.env,
+    )
+    # write directly to the legacy location only; never call
+    # update_index_freshness, which would migrate it to the state path
+    legacy_path = _legacy_index_freshness_path(world.env)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "targets": {
+                    child: {
+                        "candidate_universe_digest": "universe-1",
+                        "analysis_index_generation": "generation-1",
+                    }
+                },
+            }
+        )
+    )
+    assert not index_freshness_path(world.env).exists()
+
+    completed = run_cli(
+        ["cleanup", "legacy-loc", "--dry-run"], world.env, world.parent_path
+    )
+    human_text = completed.stdout.decode()
+    assert "not yet migrated" in human_text
+    assert str(legacy_path) in human_text
+    assert str(index_freshness_path(world.env)) not in human_text
+
+
+@pytest.mark.matrix("T-CLN-31")
+def test_cleanup_disclosure_degrades_neutrally_on_invalid_freshness_store(
+    repo_scenario,
+):
+    """A structurally invalid freshness-index file (not the JSON shape this
+    store expects) must degrade cleanup's disclosure to the neutral empty
+    metadata plus its own notice, never propagate a crash, and never
+    silently report partial/misleading metadata."""
+    from agent_fork.lineage_inference_store import index_freshness_path
+    from conftest import run_cli
+
+    world, result = _forked(repo_scenario, "invalid-store")
+    state_path = index_freshness_path(world.env)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(["not", "a", "dict"]))
+
+    completed = run_cli(
+        ["cleanup", "invalid-store", "--dry-run", "-o", "json"],
+        world.env,
+        world.parent_path,
+    )
+    document = json.loads(completed.stdout)
+    assert document["retained_metadata"] == {
+        "lineage_claims": [],
+        "inferred_records": [],
+        "freshness_entries": [],
+        "removal_commands": [],
+    }
+    assert any("could not read" in notice for notice in document["notices"])
+    assert result.creation.path.exists()  # dry-run: nothing actually removed

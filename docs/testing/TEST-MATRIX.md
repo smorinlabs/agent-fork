@@ -11,7 +11,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 444 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Total rows: 488 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -414,6 +414,9 @@ the group.
 | T-CLN-26 | cleanup of a target with no matching lineage claim, and cleanup when a lineage-store read fails, both succeed with the neutral notice and empty `retained_metadata` | freshness=A10 | C | live | P02 A10; REQ-32 |
 | T-CLN-27 | `retained_metadata` reaches machine output: `cleanup --json` emits it alongside `notices`, proving the hand-assembled CLI document was extended and not only the `CleanupResult` dataclass | freshness=A10 | C | live | P02 A10; REQ-17 |
 | T-CLN-28 | removal commands are per record and source-qualified; a child holding both a planned claim and an inferred record produces two command lines, neither omitting `--source`; store-derived notices are escaped | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLN-29 | a control character embedded in a stored session ID reaches machine (JSON) `retained_metadata` output raw, but never appears as a raw byte in human notice text — a genuinely load-bearing escaping proof, unlike a plain-UUID fixture | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLN-30 | a freshness entry that exists only at the legacy `XDG_CACHE_HOME` location (not yet migrated) is disclosed as retained at that location, not misreported as living at the new `XDG_STATE_HOME` path | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLN-31 | a structurally invalid freshness-index file degrades cleanup disclosure to the neutral empty `retained_metadata` plus its own notice, never a crash and never a partial, misleading result | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
 
 ---
 
@@ -543,8 +546,10 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-37 | `delete --source inferred` reports every additive field and removes the freshness entry; `delete --source planned` with a surviving inferred record retains the freshness entry and says so | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
 | T-CLI-38 | exceeding a whole-corpus limit (`max_files`) under `--current`, `--session-id`, `--all`, and `--record` exits 3 as `claude_parent_incomplete_analysis` with one JSON error and no spool, inference, freshness, or registry write | freshness=A10 | C | live | P02 A10; REQ-17; REQ-18; R6.1 |
 | T-CLI-39 | `delete --source inferred` removes the freshness entry before the record; a fault injected after the freshness removal leaves the record readable as `freshness_unknown`, never `current` | freshness=A10 | C | live | P02 A10; REQ-32 |
-| T-CLI-40 | a per-target limit (`max_candidates`) tripped on one of several `--all` targets yields that target's own typed incomplete-analysis document inside the bulk output while every other target is recorded normally and the spool closes cleanly | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLI-40 | a per-target limit (`max_candidates`) tripped on one of several `--all` targets yields that target's own typed incomplete-analysis document inside the bulk output while an unaffected target completes its own analysis with no error and no "incomplete" status, and the bulk spool closes cleanly with a valid summary | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLI-43 | an already-expired shared `max_seconds` deadline under `--all` reports `scope: "corpus"` (not `"target"`) for every affected target, since it is one shared clock, and the batch still exits cleanly with a valid summary | freshness=A10 | C | live | P02 A10; REQ-17; REQ-48 |
 | T-CLI-41 | a freshness-index write failure increments `work.freshness_write_failures`; the CLI appends the rerun notice only on a `--record` run that actually recorded, never on a preview run | freshness=A10 | C | live | P02 A10; REQ-17 |
+| T-CLI-42 | a per-target limit (`max_candidates`) breaching inside `infer_one()` for a single, non-`--all` target still surfaces the typed `claude_parent_incomplete_analysis` code end to end, not a generic not-recordable/unavailable class | freshness=A10 | C | live | P02 A10; REQ-17; REQ-48 |
 
 ---
 
@@ -667,15 +672,26 @@ Varying axes: relationship (parent/child/sibling/unrelated), cache (cold/warm), 
 | T-CPI-46 | three successive transcript appends plus re-inference leave exactly one flat `{stem}.json` screen-cache shard | freshness=A10 | U | live | P02 A10; REQ-48 |
 | T-CPI-47 | the bounded sweep removes the legacy v2 tree once under its own safety check, removes orphan and aged shards, respects the marker interval, and never removes a live in-flight temp file or the `.sweep` marker itself | freshness=A10 | U | live | P02 A10; REQ-48 |
 | T-CPI-48 | each of `max_files`, `max_entries`, `max_total_bytes`, and `max_candidates` raises `CorpusLimitError` with the exact `limit`, `allowed`, `observed`, and `scope` | freshness=A10 | U | live | P02 A10; REQ-48 |
-| T-CPI-49 | a freshness-index write failure increments `freshness_write_failures` in addition to the unchanged `cache_write_failures` aggregate; a shard-write failure increments only the latter | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-49 | a freshness-index write failure increments `freshness_write_failures` in addition to the unchanged `cache_write_failures` aggregate | freshness=A10 | U | live | P02 A10; REQ-48 |
 | T-CPI-50 | `index_freshness_path` resolves under `XDG_STATE_HOME`; `update_index_freshness` writes the state entry and removes only this child's key from the legacy file, which still exists afterward | freshness=A10 | U | live | P02 A10; REQ-48 |
 | T-CPI-51 | `assess_inference` falls back to a legacy-only entry when the state file is entirely absent, evaluating it identically to a state-path hit | freshness=A10 | U | live | P02 A10; REQ-48 |
 | T-CPI-52 | `remove_index_freshness` removes the entry from whichever location holds it, and from both when present in both, returning `True` whenever either changed | freshness=A10 | U | live | P02 A10; REQ-48 |
 | T-CPI-53 | the per-entry migration repro: a state file holding other children's entries but not this child's still falls back to this child's legacy entry rather than reporting `freshness_unknown` | freshness=A10 | U | live | P02 A10; REQ-48 |
-| T-CPI-54 | `update_index_freshness` for one child leaves every other child's legacy entry byte-identical; a pop that empties `targets` rewrites an empty dict rather than unlinking | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-54 | `update_index_freshness` for one child leaves every other child's legacy entry byte-identical; a pop that empties `targets` rewrites the file to an actual empty dict (`{}`), never unlinking it | freshness=A10 | U | live | P02 A10; REQ-48 |
 | T-CPI-55 | with an entry for the same child in both locations, reads use the state-path entry, writes leave only the state-path entry, and deletes remove both | freshness=A10 | U | live | P02 A10; REQ-48 |
 | T-CPI-56 | `update_index_freshness` and `remove_index_freshness` acquire the state-path lock before the legacy-path lock and release in reverse order, on every path touching both files | freshness=A10 | U | live | P02 A10; REQ-48 |
-| T-CPI-57 | `infer_one` raises `TimeoutError` at its `max_seconds` deadline guard, and the CLI-boundary mapping function turns it into the structured `max_seconds`/`target` shape | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-57 | `infer_one` raises `TimeoutError` at its `max_seconds` deadline guard, and the CLI-boundary mapping function turns it into the structured `max_seconds`/`corpus` shape (one shared clock, unlike the genuinely per-target `max_candidates`) | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-58 | `_read_targets` rejects a non-dict top-level JSON document (array or string) at either the state or legacy freshness path, degrading `assess_inference` to `freshness_unknown` and `remove_index_freshness` to its own typed `ValueError` rather than crashing with `AttributeError` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-59 | a source-fingerprint entry with no `:` separator resolves `assess_inference` to `stale_sources` with `changed_sources == ("other",)` rather than raising `UnboundLocalError` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-60 | a broken symlink at the state or legacy freshness path is treated as structurally invalid (`freshness_unknown`), not as an absent, empty store | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-61 | a legacy `v2` cache root containing only flat shard files is fully removed in one pass | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-62 | the cache sweep's `CACHE_SWEEP_MAX_ENTRIES` bound stops the underlying directory scan itself rather than materializing every entry first | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-63 | the cache sweep's byte cap evicts the oldest shard first when total shard bytes exceed `CACHE_MAX_BYTES` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-64 | the cache sweep removes a shard older than `CACHE_MAX_AGE_SECONDS` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-65 | a symlinked or foreign-owned legacy `v2` root is left completely untouched even though the `v3` root independently passed its own safety check | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-66 | the `.sweep` marker's name-based exemption from deletion is load-bearing on its own, independent of a freshly refreshed mtime | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-67 | a `.sweep` marker replaced with a symlink to a file outside the cache root is never stat'd or written through | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-68 | a shard-write failure increments only the pre-existing `cache_write_failures` aggregate, never the new `freshness_write_failures` counter | freshness=A10 | U | live | P02 A10; REQ-48 |
 
 ---
 

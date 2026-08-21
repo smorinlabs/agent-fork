@@ -415,7 +415,7 @@ def test_update_index_freshness_removes_only_this_childs_legacy_key(tmp_path):
     # the state path -- record it now to exercise the empty-targets rewrite.
     legacy_document = json.loads(legacy.read_text())
     assert legacy.exists()
-    assert isinstance(legacy_document["targets"], dict)
+    assert legacy_document["targets"] == {}
 
 
 @pytest.mark.matrix("T-CPI-55")
@@ -578,3 +578,96 @@ def test_remove_index_freshness_both_locations(tmp_path):
     assert remove_index_freshness("child", env=env) is True
     assert "child" not in json.loads(index_freshness_path(env).read_text())["targets"]
     assert "child" not in json.loads(legacy.read_text())["targets"]
+
+
+@pytest.mark.matrix("T-CPI-58")
+def test_read_targets_rejects_non_dict_top_level_json(tmp_path):
+    env = _env(tmp_path)
+    target = tmp_path / "child.jsonl"
+    target.write_text("{}\n")
+    record = InferenceRecord(
+        "child",
+        "parent",
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00Z",
+        (_fp(target),),
+        "generation-1",
+        "universe-1",
+    )
+    state_path = index_freshness_path(env)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(["not", "a", "dict"]))
+    # assess_inference must degrade to freshness_unknown, not crash
+    assert assess_inference(record, env=env).status == "freshness_unknown"
+
+    # remove_index_freshness must raise its own typed ValueError, not AttributeError
+    with pytest.raises(ValueError):
+        remove_index_freshness("child", env=env)
+
+    # same for a non-dict legacy file, with a valid state file
+    state_path.write_text(json.dumps({"version": 1, "targets": {}}))
+    legacy_path = _legacy_index_freshness_path(env)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text(json.dumps("not a dict either"))
+    assert assess_inference(record, env=env).status == "freshness_unknown"
+    with pytest.raises(ValueError):
+        remove_index_freshness("child", env=env)
+
+
+@pytest.mark.matrix("T-CPI-59")
+def test_assess_inference_malformed_fingerprint_is_stale_not_a_crash(tmp_path):
+    env = _env(tmp_path)
+    record = InferenceRecord(
+        "child",
+        "parent",
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00Z",
+        ("no-colon-separator",),
+        "generation-1",
+        "universe-1",
+    )
+    update_index_freshness("child", "universe-1", "generation-1", env=env)
+    result = assess_inference(record, env=env)
+    assert result.status == "stale_sources"
+    assert result.changed_sources == ("other",)
+
+
+@pytest.mark.matrix("T-CPI-60")
+def test_read_targets_broken_symlink_is_invalid_not_absent(tmp_path):
+    env = _env(tmp_path)
+    target = tmp_path / "child.jsonl"
+    target.write_text("{}\n")
+    record = InferenceRecord(
+        "child",
+        "parent",
+        "inferred",
+        "boundary",
+        3,
+        1,
+        1,
+        "2026-01-01T00:00:00Z",
+        (_fp(target),),
+        "generation-1",
+        "universe-1",
+    )
+
+    state_path = index_freshness_path(env)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.symlink_to(state_path.with_name("does-not-exist.json"))
+    assert assess_inference(record, env=env).status == "freshness_unknown"
+    state_path.unlink()
+
+    # state genuinely lacks this child; legacy is a broken symlink, not absent
+    state_path.write_text(json.dumps({"version": 1, "targets": {}}))
+    legacy_path = _legacy_index_freshness_path(env)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.symlink_to(legacy_path.with_name("also-missing.json"))
+    assert assess_inference(record, env=env).status == "freshness_unknown"

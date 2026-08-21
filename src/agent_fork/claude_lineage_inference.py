@@ -55,14 +55,18 @@ class CorpusLimitError(ValueError):
 
 
 def map_timeout_to_limit_error(error: TimeoutError, limits: Limits) -> CorpusLimitError:
-    """Map the per-target `max_seconds` deadline guard to the same typed shape.
+    """Map the shared corpus-wide `max_seconds` deadline guard to the typed shape.
 
     `TimeoutError` is not itself a `CorpusLimitError` (it derives from
     `OSError`, not `ValueError`), so the CLI boundary maps it explicitly
-    rather than catching it as one.
+    rather than catching it as one. `scope="corpus"`, not `"target"`: the
+    deadline is one shared clock set once for the whole corpus, so once it
+    expires every subsequent target in a `--all` run trips it immediately —
+    reporting `"target"` would misleadingly imply each one individually ran
+    out of time, unlike `max_candidates`, which genuinely is per-target.
     """
     allowed = int(limits.max_seconds)
-    return CorpusLimitError("max_seconds", allowed, allowed + 1, scope="target")
+    return CorpusLimitError("max_seconds", allowed, allowed + 1, scope="corpus")
 
 
 @dataclass(frozen=True)
@@ -355,13 +359,20 @@ def sweep_cache(env: Mapping[str, str], stems: set[str], work: Work) -> None:
         return
     marker = root / ".sweep"
     try:
-        marker_stat = marker.stat()
-        if time.time() - marker_stat.st_mtime < CACHE_SWEEP_INTERVAL:
+        marker_lstat = marker.lstat()
+        if stat_module.S_ISREG(marker_lstat.st_mode) and (
+            time.time() - marker_lstat.st_mtime < CACHE_SWEEP_INTERVAL
+        ):
             return
     except OSError:
         pass
     try:
-        marker.touch()
+        # O_NOFOLLOW: if `.sweep` was replaced with a symlink, this fails
+        # with ELOOP rather than creating or touching whatever it points to.
+        flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(marker, flags, 0o600)
+        os.close(fd)
+        os.utime(marker, None, follow_symlinks=False)
     except OSError:
         work.cache_prune_failures += 1
         return
@@ -369,21 +380,15 @@ def sweep_cache(env: Mapping[str, str], stems: set[str], work: Work) -> None:
     legacy_root = _legacy_cache_root(env)
     if legacy_root != root and _root_safe(legacy_root):
         try:
-            for child in legacy_root.rglob("*"):
+            # Immediate children only, never recursing: an unexpected
+            # subdirectory is left alone and the final rmdir simply fails,
+            # counted below rather than destroying anything beneath it.
+            for child in legacy_root.iterdir():
                 if child.is_file() or child.is_symlink():
                     try:
                         child.unlink()
                     except OSError:
                         work.cache_prune_failures += 1
-            for directory in sorted(
-                (item for item in legacy_root.rglob("*") if item.is_dir()),
-                key=lambda item: len(item.parts),
-                reverse=True,
-            ):
-                try:
-                    directory.rmdir()
-                except OSError:
-                    work.cache_prune_failures += 1
             legacy_root.rmdir()
             work.legacy_cache_removed = 1
         except OSError:
@@ -393,49 +398,49 @@ def sweep_cache(env: Mapping[str, str], stems: set[str], work: Work) -> None:
     scanned = 0
     candidates: list[tuple[Path, os.stat_result]] = []
     try:
-        entries = list(root.iterdir())
+        with os.scandir(root) as raw_entries:
+            for raw_entry in raw_entries:
+                scanned += 1
+                if scanned > CACHE_SWEEP_MAX_ENTRIES:
+                    work.cache_sweep_incomplete = 1
+                    break
+                entry = Path(raw_entry.path)
+                if entry.name == ".sweep":
+                    continue
+                try:
+                    entry_stat = entry.lstat()
+                except OSError:
+                    continue
+                if entry.is_symlink():
+                    continue
+                if _SHARD_NAME.fullmatch(entry.stem) is None or entry.suffix != ".json":
+                    if now - entry_stat.st_mtime > CACHE_TEMP_GRACE_SECONDS:
+                        try:
+                            entry.unlink()
+                            work.cache_shards_pruned += 1
+                            work.cache_bytes_reclaimed += entry_stat.st_size
+                        except OSError:
+                            work.cache_prune_failures += 1
+                    continue
+                if entry.stem not in stems:
+                    try:
+                        entry.unlink()
+                        work.cache_shards_pruned += 1
+                        work.cache_bytes_reclaimed += entry_stat.st_size
+                    except OSError:
+                        work.cache_prune_failures += 1
+                    continue
+                if now - entry_stat.st_mtime > CACHE_MAX_AGE_SECONDS:
+                    try:
+                        entry.unlink()
+                        work.cache_shards_pruned += 1
+                        work.cache_bytes_reclaimed += entry_stat.st_size
+                    except OSError:
+                        work.cache_prune_failures += 1
+                    continue
+                candidates.append((entry, entry_stat))
     except OSError:
         work.cache_prune_failures += 1
-        entries = []
-    for entry in entries:
-        scanned += 1
-        if scanned > CACHE_SWEEP_MAX_ENTRIES:
-            work.cache_sweep_incomplete = 1
-            break
-        if entry.name == ".sweep":
-            continue
-        try:
-            entry_stat = entry.lstat()
-        except OSError:
-            continue
-        if entry.is_symlink():
-            continue
-        if _SHARD_NAME.fullmatch(entry.stem) is None or entry.suffix != ".json":
-            if now - entry_stat.st_mtime > CACHE_TEMP_GRACE_SECONDS:
-                try:
-                    entry.unlink()
-                    work.cache_shards_pruned += 1
-                    work.cache_bytes_reclaimed += entry_stat.st_size
-                except OSError:
-                    work.cache_prune_failures += 1
-            continue
-        if entry.stem not in stems:
-            try:
-                entry.unlink()
-                work.cache_shards_pruned += 1
-                work.cache_bytes_reclaimed += entry_stat.st_size
-            except OSError:
-                work.cache_prune_failures += 1
-            continue
-        if now - entry_stat.st_mtime > CACHE_MAX_AGE_SECONDS:
-            try:
-                entry.unlink()
-                work.cache_shards_pruned += 1
-                work.cache_bytes_reclaimed += entry_stat.st_size
-            except OSError:
-                work.cache_prune_failures += 1
-            continue
-        candidates.append((entry, entry_stat))
 
     total_bytes = sum(entry_stat.st_size for _, entry_stat in candidates)
     if total_bytes > CACHE_MAX_BYTES:

@@ -972,6 +972,21 @@ def test_parent_inference_field_shape_per_status(repo_scenario):
     assert result.parent_inference.analyzed_at is None
     assert result.parent_inference.changed_sources == ()
 
+    # unreadable: the inference store itself is structurally invalid, so
+    # find_inference() raises ValueError rather than returning a record
+    from agent_fork.lineage_inference_store import inference_path
+
+    store_path = inference_path(world.env)
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    store_path.write_text("not json at all {{{")
+    env = {**world.env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "unreadable-child"}
+    result = inspect_session(env, cwd=world.parent_path)
+    assert result.parent_inference.status == "unreadable"
+    assert result.parent_inference.freshness is None
+    assert result.parent_inference.parent_session_id is None
+    assert result.parent_inference.analyzed_at is None
+    assert result.parent_inference.changed_sources == ()
+
 
 @pytest.mark.matrix("T-SES-50")
 def test_validate_has_parent_requires_current_status(repo_scenario):

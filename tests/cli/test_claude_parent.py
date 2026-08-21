@@ -641,28 +641,86 @@ def _patch_limits(monkeypatch, **overrides):
 
 @pytest.mark.matrix("T-CLI-38")
 def test_whole_corpus_limit_exits_incomplete_analysis(repo_scenario, monkeypatch):
+    import io
+    import json as json_module
+    from contextlib import redirect_stderr, redirect_stdout
+
     from agent_fork.cli import main
     from agent_fork.lineage_inference_store import inference_path
 
     world = repo_scenario()
     env, _parent, child = _seed(world)
     _patch_limits(monkeypatch, max_files=1)
-    monkeypatch.setattr("os.environ", env)
 
-    for extra_args in ([], ["--record"]):
-        exit_code = main(
-            [
-                "session",
-                "claude-parent",
-                "infer",
-                "--session-id",
-                child,
-                "-o",
-                "json",
-                *extra_args,
-            ]
-        )
+    current_env = {**env, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": child}
+    for invocation, invocation_env in (
+        (["--session-id", child], env),
+        (["--session-id", child, "--record"], env),
+        (["--current"], current_env),
+        (["--all"], env),
+    ):
+        monkeypatch.setattr("os.environ", invocation_env)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            exit_code = main(
+                [
+                    "session",
+                    "claude-parent",
+                    "infer",
+                    *invocation,
+                    "-o",
+                    "json",
+                ]
+            )
         assert exit_code == 3
+        assert out.getvalue() == ""
+        error_document = json_module.loads(err.getvalue())
+        assert error_document["error"]["code"] == "claude_parent_incomplete_analysis"
+
+    assert not inference_path(env).exists()
+
+
+@pytest.mark.matrix("T-CLI-42")
+def test_single_target_per_target_limit_exits_incomplete_analysis(
+    repo_scenario, monkeypatch
+):
+    """Distinct from the whole-corpus case above: max_candidates is raised
+    inside infer_one() for one target, not in discover() before any target
+    is reached. A single-target (non---all) invocation must still route
+    through to the typed claude_parent_incomplete_analysis code rather than
+    falling through to the generic not-recordable/unavailable classes."""
+    import io
+    import json as json_module
+    from contextlib import redirect_stderr, redirect_stdout
+
+    from agent_fork.cli import main
+    from agent_fork.lineage_inference_store import inference_path
+
+    world = repo_scenario()
+    env, _parent, child = _seed(world)
+    # child and parent share evidence (per _seed), so a single target lookup
+    # for `child` alone finds at least one candidate — max_candidates=0
+    # trips inside infer_one(), never inside discover()/the constructor.
+    _patch_limits(monkeypatch, max_candidates=0)
+
+    for invocation in (
+        ["--session-id", child],
+        ["--session-id", child, "--record"],
+    ):
+        monkeypatch.setattr("os.environ", env)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            exit_code = main(
+                ["session", "claude-parent", "infer", *invocation, "-o", "json"]
+            )
+        assert exit_code == 3
+        assert out.getvalue() == ""
+        error_document = json_module.loads(err.getvalue())
+        assert error_document["error"]["code"] == "claude_parent_incomplete_analysis"
+        assert (
+            error_document["error"]["details"]["analysis"]["limit"]["name"]
+            == "max_candidates"
+        )
 
     assert not inference_path(env).exists()
 
@@ -704,13 +762,74 @@ def test_per_target_limit_under_all_does_not_void_batch(
     assert exit_code == 3
     captured = capsys.readouterr()
     document = json_module.loads(captured.err)
-    results = document["error"]["details"]["analysis"]["results"]
+    analysis = document["error"]["details"]["analysis"]
+    results = analysis["results"]
+    # the bulk spool closed cleanly and rendered a complete, valid summary —
+    # a hung or unclosed spool would not have produced parseable JSON here
+    assert analysis["summary"]["total"] == len(results)
     child_result = next(r for r in results if r["session_id"] == child)
     assert child_result["relationship"]["status"] == "incomplete"
     assert child_result["limit"]["scope"] == "target"
     assert child_result["recorded"] is False
     isolated_result = next(r for r in results if r["session_id"] == isolated)
-    assert isolated_result["relationship"]["status"] != "incomplete"
+    # unaffected by the other target's limit breach: it ran its own
+    # inference to completion (no candidates found for a genuinely isolated
+    # transcript, so nothing recordable — but critically, no error, no
+    # "incomplete" status, and no corpus-level abort)
+    assert isolated_result["relationship"]["status"] == "insufficient_evidence"
+    assert "error" not in isolated_result
+    assert isolated_result["recorded"] is False
+    from agent_fork.lineage_inference_store import find_inference
+
+    assert find_inference(child, env=env) is None
+
+
+@pytest.mark.matrix("T-CLI-43")
+def test_max_seconds_under_all_reports_corpus_scope_and_exits_cleanly(
+    repo_scenario, monkeypatch, capsys
+):
+    import json as json_module
+
+    from agent_fork.cli import main
+
+    world = repo_scenario()
+    env, parent, child = _seed(world)
+
+    isolated = "20000000-0000-4000-8000-000000000098"
+    root = Path(env["CLAUDE_CONFIG_DIR"])
+    (root / "projects" / "-repo" / f"{isolated}.jsonl").write_text(
+        json_module.dumps(
+            {
+                "sessionId": isolated,
+                "uuid": "10000000-0000-4000-8000-000000009002",
+                "parentUuid": None,
+                "type": "user",
+                "timestamp": "2026-06-01T00:00:00Z",
+            }
+        )
+        + "\n"
+    )
+
+    # an already-expired shared deadline: every target trips it immediately,
+    # proving this is a corpus-wide clock, not an independent per-target one
+    _patch_limits(monkeypatch, max_seconds=-1)
+    monkeypatch.setattr("os.environ", env)
+
+    exit_code = main(
+        ["session", "claude-parent", "infer", "--all", "--record-all", "-o", "json"]
+    )
+    assert exit_code == 3
+    captured = capsys.readouterr()
+    document = json_module.loads(captured.err)
+    analysis = document["error"]["details"]["analysis"]
+    results = analysis["results"]
+    assert analysis["summary"]["total"] == len(results)
+    assert len(results) >= 2
+    for result in results:
+        assert result["relationship"]["status"] == "incomplete"
+        assert result["limit"]["name"] == "max_seconds"
+        assert result["limit"]["scope"] == "corpus"
+        assert result["recorded"] is False
 
 
 @pytest.mark.matrix("T-CLI-41")

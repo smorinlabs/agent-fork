@@ -838,8 +838,22 @@ def main(argv: list[str] | None = None) -> int:
                             f"source: {terminal_text(selected['source'])}",
                             file=sys.stderr,
                         )
+                        if selected["source"] == "inferred":
+                            will_remove_freshness = True
+                        else:
+                            will_remove_freshness = (
+                                find_inference(args.session_id, env=environment) is None
+                            )
+                        removed_bits = [f"the {selected['source']} record"]
+                        if will_remove_freshness:
+                            removed_bits.append("its corroborating freshness entry")
                         print(
-                            "This does not delete Claude transcripts or Git resources.",
+                            f"This will remove {' and '.join(removed_bits)}.",
+                            file=sys.stderr,
+                        )
+                        print(
+                            "This will not remove Claude transcripts, Git "
+                            "resources, or the shared transcript screen cache.",
                             file=sys.stderr,
                         )
                         if selected["source"] == "planned":
@@ -858,7 +872,10 @@ def main(argv: list[str] | None = None) -> int:
                             args.session_id, env=environment
                         )
                         remove_inference(args.session_id, env=environment)
-                        retained_planned_record = False
+                        retained_planned_record = (
+                            find_lineage("claude", args.session_id, env=environment)
+                            is not None
+                        )
                         retained_inferred_record = False
                     else:
                         surviving_inferred = find_inference(
@@ -940,7 +957,9 @@ def main(argv: list[str] | None = None) -> int:
                     from agent_fork.bulk_output import BulkSpool
 
                     bulk_spool = BulkSpool()
+                limit_breach_targets = 0
                 for sid in ids:
+                    freshness_failures_before = corpus.work.freshness_write_failures
                     try:
                         result = corpus.infer_one(sid)
                         recorded = False
@@ -954,7 +973,11 @@ def main(argv: list[str] | None = None) -> int:
                                 recorded = True
                                 recorded_count += 1
                         document = {**result.document(), "recorded": recorded}
-                        if recorded and result.work.freshness_write_failures:
+                        this_target_freshness_failed = (
+                            corpus.work.freshness_write_failures
+                            > freshness_failures_before
+                        )
+                        if recorded and this_target_freshness_failed:
                             existing_notices = document["notices"]
                             assert isinstance(existing_notices, list)
                             document["notices"] = [
@@ -969,6 +992,7 @@ def main(argv: list[str] | None = None) -> int:
                             bulk_spool.append(document)
                     except (CorpusLimitError, TimeoutError) as error:
                         failures += 1
+                        limit_breach_targets += 1
                         limit_error = (
                             error
                             if isinstance(error, CorpusLimitError)
@@ -1036,6 +1060,14 @@ def main(argv: list[str] | None = None) -> int:
                         "summary": {"total": len(documents), "failed": failures},
                     }
                 )
+                if failures and limit_breach_targets:
+                    # non-`--all` path: exactly one target, and its failure
+                    # was specifically a corpus/candidate/time limit breach —
+                    # surface the typed code rather than a generic one.
+                    raise ClaudeParentIncompleteAnalysisError(
+                        "Claude transcript corpus exceeded a bounded analysis limit",
+                        details={"analysis": analysis},
+                    )
                 if failures and (args.record or args.record_all):
                     record_error = (
                         ClaudeParentNotRecordableError
@@ -1118,7 +1150,9 @@ def main(argv: list[str] | None = None) -> int:
                     else:
                         detail_bits = []
                         if pi.analyzed_at is not None:
-                            detail_bits.append(f"analyzed {pi.analyzed_at}")
+                            detail_bits.append(
+                                f"analyzed {terminal_text(pi.analyzed_at)}"
+                            )
                         if pi.changed_sources:
                             detail_bits.append(
                                 f"{', '.join(pi.changed_sources)} transcript changed"

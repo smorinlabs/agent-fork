@@ -401,41 +401,62 @@ def _retained_metadata(
         inferred_by_child = {
             record.child_session_id for record in read_inferences(env=env)
         }
-        state_targets = _read_targets(index_freshness_path(env)) or {}
-        legacy_targets = _read_targets(_legacy_index_freshness_path(env)) or {}
+        state_targets = _read_targets(index_freshness_path(env))
+        legacy_targets = _read_targets(_legacy_index_freshness_path(env))
+        if state_targets is None or legacy_targets is None:
+            # A structurally invalid store is a fault to disclose, not a
+            # cache miss to paper over as "no freshness evidence retained" —
+            # degrade to the same neutral shape as an unreadable lineage
+            # store, per the design's "disclosure must never fail a
+            # cleanup" guarantee, with an honest notice instead of silence.
+            return dict(_EMPTY_RETAINED_METADATA), (
+                "could not read Claude parent freshness metadata; nothing "
+                "disclosed for it",
+            )
 
         lineage_claims: list[str] = []
         inferred_records: list[str] = []
         freshness_entries: list[str] = []
+        freshness_entries_state: list[str] = []
+        freshness_entries_legacy: list[str] = []
         removal_commands: list[dict[str, str]] = []
         for claim in sorted(claims, key=lambda item: item.child_session_id):
+            # Raw values in every machine-readable field below: JSON encoding
+            # already represents control characters safely, and escaping
+            # here would corrupt a session ID a script pastes back into a
+            # command. Escaping applies only to the human `notices` text.
             child = claim.child_session_id
-            escaped_child = _escape_terminal_text(child)
-            lineage_claims.append(escaped_child)
+            lineage_claims.append(child)
             removal_commands.append(
                 {
-                    "session_id": escaped_child,
+                    "session_id": child,
                     "source": "planned",
                     "command": (
                         "agent-fork session claude-parent delete --session-id "
-                        f"{escaped_child} --source planned --yes"
+                        f"{child} --source planned --yes"
                     ),
                 }
             )
             if child in inferred_by_child:
-                inferred_records.append(escaped_child)
+                inferred_records.append(child)
                 removal_commands.append(
                     {
-                        "session_id": escaped_child,
+                        "session_id": child,
                         "source": "inferred",
                         "command": (
                             "agent-fork session claude-parent delete --session-id "
-                            f"{escaped_child} --source inferred --yes"
+                            f"{child} --source inferred --yes"
                         ),
                     }
                 )
-            if child in state_targets or child in legacy_targets:
-                freshness_entries.append(escaped_child)
+            in_state = child in state_targets
+            in_legacy = child in legacy_targets
+            if in_state or in_legacy:
+                freshness_entries.append(child)
+                if in_state:
+                    freshness_entries_state.append(child)
+                else:
+                    freshness_entries_legacy.append(child)
 
         metadata = {
             "lineage_claims": lineage_claims,
@@ -445,20 +466,31 @@ def _retained_metadata(
         }
         notices = (
             "retained planned lineage claim(s) for: "
-            + ", ".join(lineage_claims)
+            + ", ".join(_escape_terminal_text(item) for item in lineage_claims)
             + f"; store: {_escape_terminal_text(str(lineage_path(env)))}",
         )
         if inferred_records:
             notices += (
                 "retained inferred record(s) for: "
-                + ", ".join(inferred_records)
+                + ", ".join(_escape_terminal_text(item) for item in inferred_records)
                 + f"; store: {_escape_terminal_text(str(inference_path(env)))}",
             )
-        if freshness_entries:
+        if freshness_entries_state:
             notices += (
                 "retained freshness corroboration for: "
-                + ", ".join(freshness_entries)
+                + ", ".join(
+                    _escape_terminal_text(item) for item in freshness_entries_state
+                )
                 + f"; store: {_escape_terminal_text(str(index_freshness_path(env)))}",
+            )
+        if freshness_entries_legacy:
+            notices += (
+                "retained freshness corroboration (not yet migrated) for: "
+                + ", ".join(
+                    _escape_terminal_text(item) for item in freshness_entries_legacy
+                )
+                + "; store: "
+                + _escape_terminal_text(str(_legacy_index_freshness_path(env))),
             )
         notices += (
             "these are kept because the forked agent session remains resumable "
@@ -469,7 +501,10 @@ def _retained_metadata(
         )
         return metadata, notices
     except (OSError, ValueError):
-        return dict(_EMPTY_RETAINED_METADATA), ()
+        return dict(_EMPTY_RETAINED_METADATA), (
+            "could not read Claude parent lineage/inference metadata; "
+            "nothing disclosed",
+        )
 
 
 def cleanup(
