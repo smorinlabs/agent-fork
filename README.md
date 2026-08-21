@@ -604,7 +604,7 @@ cleanup guard refusals use the cleanup schema shown above.
 | Exit | Meaning | Codes |
 |---|---|---|
 | 0 | Success | — |
-| 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy` |
+| 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy`, `entry_unreadable` |
 | 2 | Usage error or required prompt disabled | `config_error` |
 | 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown`, `claude_parent_incomplete_analysis` |
 | 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable` |

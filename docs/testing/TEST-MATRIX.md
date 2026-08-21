@@ -289,6 +289,8 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-27 | A6a gate-6 — a submodule sitting at its recorded commit produces no loss notice; the notice reports only paths whose state the filter suppresses | baseline | F | live | A6 gate-6 finding 4 |
 | T-MAT-28 | A6a gate-6 pass 2 — a submodule both staged at a new commit and dirty inside reports its loss; the comparison is per status code (`MM` vs `M `), not per path membership | baseline | F | live | A6 gate-6 pass-2 M1 |
 | T-MAT-29 | A6a gate-6 pass 2 — a porcelain rename source record cannot fabricate a path that masks a genuinely dirty submodule | baseline | F | live | A6 gate-6 pass-2 M2 |
+| T-MAT-33 | A5 — a tracked, modified file whose content cannot be read raises the typed `entry_unreadable` naming the path, never a raw `runtime_error`; tracked paths never skip | baseline | F | live | P02 A5 design; REQ-21 |
+| T-MAT-34 | A5 — an `lstat` failing with anything other than ENOENT/ENOTDIR raises `entry_unreadable` rather than reporting kind `absent`, so an unreadable path cannot masquerade as a legitimate deletion | baseline | F | live | P02 A5 design; issue #59 |
 
 ---
 

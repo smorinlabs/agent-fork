@@ -14,6 +14,9 @@ class ErrorSpec:
 ERROR_CATALOG: dict[str, ErrorSpec] = {
     "runtime_error": ErrorSpec(1, "unexpected runtime or materialization failure"),
     "verify_failed": ErrorSpec(1, "fork verification failed"),
+    "entry_unreadable": ErrorSpec(
+        1, "a carried entry could not be read and could not be skipped"
+    ),
     "registry_busy": ErrorSpec(1, "registry lock wait expired"),
     "config_error": ErrorSpec(2, "configuration is invalid or unsupported"),
     "agent_not_detected": ErrorSpec(3, "agent identity is missing or ambiguous"),
@@ -131,6 +134,34 @@ class VerificationError(AgentForkError):
     def __init__(self, message: str, *, details: dict[str, object] | None = None):
         super().__init__(message)
         self.details = details
+
+
+class EntryUnreadableError(AgentForkError):
+    """A carried entry could not be read and did not qualify for a skip.
+
+    Skipping is reserved for untracked or ignored entries whose ``lstat``
+    succeeded and whose fork carries no deletion (P02 A5). Anything else —
+    a tracked path, a failed ``lstat``, or a skip blocked by a deletion —
+    surfaces here rather than as a raw ``runtime_error`` carrying an errno.
+    """
+
+    code = "entry_unreadable"
+    exit_code = 1
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str,
+        reason: str,
+        phase: str,
+        deletion_blockers: tuple[str, ...] = (),
+    ):
+        super().__init__(message)
+        self.details: dict[str, object] = {
+            "entry": {"path": path, "reason": reason, "phase": phase},
+            "deletion_blockers": list(deletion_blockers),
+        }
 
 
 class RegistryBusyError(AgentForkError):

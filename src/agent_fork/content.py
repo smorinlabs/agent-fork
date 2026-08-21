@@ -12,6 +12,7 @@ reinterpret glob characters such as ``[`` in a filename.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import stat
@@ -19,7 +20,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_fork.errors import EntryUnreadableError
 from agent_fork.git import run_git
+from agent_fork.text import escape_terminal_text
 
 GITLINK_MODE = "160000"
 _DIGEST_CHUNK = 1 << 20
@@ -263,7 +266,18 @@ def _manifest_entry(root: Path, relative: str, *, tracked: bool) -> ManifestEntr
     target = root / relative
     try:
         info = target.lstat()
-    except OSError:
+    except OSError as error:
+        # Only a genuinely missing path may read as absent. Every other errno —
+        # EACCES from an untraversable ancestor, EIO, ELOOP — would otherwise
+        # masquerade as a deletion, which the carried-state rules treat as
+        # legitimate, and the entry would be dropped silently (P02 A5).
+        if error.errno not in (errno.ENOENT, errno.ENOTDIR):
+            raise EntryUnreadableError(
+                f"cannot stat carried entry: {escape_terminal_text(relative)}",
+                path=relative,
+                reason="lstat-failed",
+                phase="capture",
+            ) from error
         return ManifestEntry(relative, tracked, "absent", 0, "", "")
     mode = stat.S_IMODE(info.st_mode)
     if stat.S_ISLNK(info.st_mode):
@@ -271,7 +285,16 @@ def _manifest_entry(root: Path, relative: str, *, tracked: bool) -> ManifestEntr
             relative, tracked, "symlink", mode, "", os.readlink(target)
         )
     if stat.S_ISREG(info.st_mode):
-        return ManifestEntry(relative, tracked, "file", mode, _digest(target), "")
+        try:
+            digest = _digest(target)
+        except OSError as error:
+            raise EntryUnreadableError(
+                f"cannot read carried entry: {escape_terminal_text(relative)}",
+                path=relative,
+                reason="unreadable",
+                phase="capture",
+            ) from error
+        return ManifestEntry(relative, tracked, "file", mode, digest, "")
     return ManifestEntry(relative, tracked, "other", mode, "", "")
 
 
