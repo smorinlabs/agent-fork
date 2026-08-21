@@ -451,6 +451,15 @@ Varying axes: none of the shared four vary (baseline pinned).
 | T-INC-04 | hook failure → non-fatal, stderr notice, fork still succeeds | baseline | F | live | REQ-24; RESEARCH §2.1 step 12 |
 | T-INC-05 | pipeline order — include/hook run after verify; their filesystem changes are excluded from the verify comparison | baseline | F | live | spec §5 |
 | T-INC-07 | issue #32 — the setup-hook failure notice escapes hook stdout/stderr, which the repository controls directly | baseline | F | live | issue #32 |
+| T-INC-08 | A12 — a hook committed at the fork anchor and byte-identical on disk is `eligible` and runs (`status=ran`, exit 0) | baseline | F | live | P02 A12; REQ-24 |
+| T-INC-09 | A12 Gate-1 fact 1 — an index-untracked hook carried into the child is skipped under the default `tracked` policy (`eligibility=untracked`), and the notice names `--setup-hook-policy any` | baseline | F | live | P02 A12; REQ-24 |
+| T-INC-10 | A12 — a hook committed at the anchor but modified in the working tree is `modified` and skipped, decided by byte comparison rather than `git status` (the A1 lesson) | baseline | F | live | P02 A12; A1 |
+| T-INC-11 | A12 — `--setup-hook-policy any` runs an untracked or modified hook while still reporting the observed eligibility rather than masking it | baseline | F | live | P02 A12 |
+| T-INC-12 | A12 — a hook recorded as mode `120000` in the anchor tree, and separately a hook that is a symlink on disk, are both `not_a_regular_blob` and skipped | baseline | F | live | P02 A12 |
+| T-INC-13 | A12 — `--setup-hook-policy off` evaluates no eligibility and spawns no process (`status=disabled`) | baseline | F | live | P02 A12 |
+| T-INC-14 | A12 Gate-1 fact 3 — successful stdout/stderr are retained as bounded tails with pre-bound byte totals and a `truncated` flag | baseline | F | live | P02 A12 |
+| T-INC-15 | A12 — success-path hook output is escaped, extending T-INC-07's guarantee beyond the failure path | baseline | F | live | P02 A12; issue #32 |
+| T-INC-16 | A12 Gate-1 fact 2 — a hook exceeding its timeout is killed with its whole process group (its backgrounded grandchild is gone), `timed_out=true`, and the fork still succeeds | baseline | F | live | P02 A12 |
 
 ---
 
