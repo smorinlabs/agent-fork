@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -395,6 +396,60 @@ def test_no_verify_can_skip_an_entry_first_read_during_materialize(repo_scenario
     )
     assert not (result.creation.path / "materialize-only.txt").exists()
     assert sum("materialize-only.txt" in notice for notice in result.notices) == 1
+
+
+@pytest.mark.matrix("T-MAT-39")
+def test_no_verify_does_not_follow_a_post_lstat_symlink_swap(
+    repo_scenario, monkeypatch
+):
+    """A source classified as regular cannot redirect the later open.
+
+    This exercises the public ``--no-verify`` pipeline, where content
+    comparison cannot catch a copy from the replacement symlink target. The
+    materialize read must instead become a skip; the final skip sentinel then
+    observes the parent mutation and rolls the fork back.
+    """
+    from agent_fork.errors import VerificationError
+    from agent_fork.pipeline import ForkRequest, fork
+
+    world = repo_scenario()
+    source = world.parent_path / "raced.txt"
+    source.write_text("classified regular source\n")
+    replacement_target = world.parent_path.parent / "different-target.txt"
+    replacement_target.write_text("different symlink target\n")
+    real_lstat = Path.lstat
+    swapped = False
+
+    def swap_after_lstat(path):
+        nonlocal swapped
+        info = real_lstat(path)
+        if path == source and not swapped:
+            source.unlink()
+            source.symlink_to(replacement_target)
+            swapped = True
+        return info
+
+    monkeypatch.setattr(Path, "lstat", swap_after_lstat)
+    request = ForkRequest(
+        parent=world.parent_path,
+        destination=world.parent_path.parent / "a5-no-follow",
+        name="a5-no-follow",
+        branch="fork/a5-no-follow",
+        agent=None,
+        verify=False,
+        git_version_output="git version 2.43.0",
+    )
+    try:
+        with pytest.raises(VerificationError, match="skipped entry changed"):
+            fork(request, env=world.env)
+    finally:
+        if source.is_symlink():
+            source.unlink()
+        source.write_text("classified regular source\n")
+        replacement_target.unlink()
+
+    assert swapped is True
+    assert not request.destination.exists()
 
 
 @pytest.mark.matrix("T-VER-42")

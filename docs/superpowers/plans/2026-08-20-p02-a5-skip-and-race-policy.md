@@ -1,8 +1,8 @@
 # P02-A5 — Skip policy for bad entries, and the parent-change race
 
-**Status:** gates 1–6 complete locally; publication is pending. Gate 6 absorbed
-four implementation defects and the missing evidence rows. The final
-repository gate passed with 681 tests, 1 expected skip, and 20 deselections.
+**Status:** gates 1–6 complete locally; publication is pending. Gate 6 and PR
+review absorbed five implementation defects and the missing evidence rows. The final
+repository gate passed with 682 tests, 1 expected skip, and 20 deselections.
 
 **Register entry:** A5 in
 [P02](../../../projects/P02-agent-fork-fault-remediation.md).
@@ -578,7 +578,7 @@ scenario rows come only after the plumbing they exercise exists.
 
 ### Row numbering
 
-`T-MAT-30..38`, `T-VER-40..45`, `T-INC-22..24`, `T-OUT-29..31`, `T-CLI-68`.
+`T-MAT-30..39`, `T-VER-40..45`, `T-INC-22..24`, `T-OUT-29..31`, `T-CLI-68`.
 **Refreshed 2026-08-21 after the A12 merge:** `main` had taken `T-INC-08..21`,
 `T-OUT-25..28`, and `T-CLI-61..67`. `T-MAT-33` and `T-MAT-34` were already
 implemented and registered.
@@ -710,7 +710,8 @@ field. Both accepted known limits documented where users meet them.
 ## Gate 6 — adversarial implementation review
 
 Executed 2026-08-21 over the complete A5 branch, including steps 0–5 inherited
-from the handoff. The review found four implementation defects:
+from the handoff, and continued through PR review. The review found five
+implementation defects:
 
 1. Capture recorded a skipped path's sentinel with a second `lstat`, so a
    target swap between the failed read and that call could become the baseline.
@@ -719,11 +720,15 @@ from the handoff. The review found four implementation defects:
    stable vocabulary for tracked and deletion-blocked paths.
 4. An unreadable ignored path matched by `.worktreeinclude` was re-opened,
    recorded twice, and announced twice under `--with-ignored`.
+5. The manual materialize copy introduced for source/destination error
+   classification followed a symlink substituted after `lstat`; under
+   `--no-verify`, it could copy the replacement target as a regular file.
 
-All four were reproduced RED before repair. Gate 6 also filled evidence gaps
+All five were reproduced RED before repair. Gate 6 also filled evidence gaps
 left by the earlier implementation: `T-MAT-32`, `T-MAT-36`, `T-VER-40`,
 `T-VER-41`, `T-VER-43`, and final-sentinel rows `T-VER-44..45`. `T-INC-24`
-protects the duplicate-reporting repair. The focused rows and the full
+protects the duplicate-reporting repair; PR-review row `T-MAT-39` protects the
+descriptor-identity repair. The focused rows and the full
 repository gate pass; the exact full-gate result is recorded in the status.
 
 ### Not in this plan

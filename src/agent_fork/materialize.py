@@ -8,6 +8,7 @@ import stat
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 from agent_fork.content import (
     Inventory,
@@ -73,6 +74,36 @@ def _prepare_destination(destination: Path) -> None:
             destination.unlink()
 
 
+def _open_classified_regular(source: Path, info: os.stat_result) -> BinaryIO | None:
+    """Open exactly the regular file identified by the preceding ``lstat``.
+
+    ``Path.open()`` follows a symlink substituted after classification. Open
+    without following symlinks where the platform supports it, then compare
+    the descriptor's identity and metadata with the observation. The
+    descriptor pins that inode for the copy after this check.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(source, flags)
+    except OSError:
+        return None
+    try:
+        opened = os.fstat(descriptor)
+    except OSError:
+        os.close(descriptor)
+        return None
+    if not stat.S_ISREG(opened.st_mode) or sentinel_from_stat(
+        opened
+    ) != sentinel_from_stat(info):
+        os.close(descriptor)
+        return None
+    try:
+        return os.fdopen(descriptor, "rb")
+    except (OSError, ValueError):
+        os.close(descriptor)
+        return None
+
+
 def _copy_entry(
     parent: Path,
     child: Path,
@@ -107,9 +138,8 @@ def _copy_entry(
     # failure qualifies for the A5 skip; a child mkdir/open/write failure is a
     # materialization failure and must never be mislabeled as an unreadable
     # parent entry.
-    try:
-        source_file = source.open("rb")
-    except OSError:
+    source_file = _open_classified_regular(source, info)
+    if source_file is None:
         return _skip_copy(relative, "unreadable", info, deletion_blockers)
     _prepare_destination(destination)
     source_error: OSError | None = None
