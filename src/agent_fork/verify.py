@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from agent_fork.content import (
     CarriedState,
     Difference,
+    SkipRecord,
     capture_state,
     collect_inventory,
     compare_states,
@@ -14,6 +15,7 @@ from agent_fork.content import (
 from agent_fork.errors import VerificationError
 from agent_fork.git import run_git
 from agent_fork.repository import WorktreeCreation
+from agent_fork.submodules import SEMANTIC_PINS, SubmoduleSnapshot, verify_submodules
 from agent_fork.text import escape_terminal_text
 from agent_fork.worktree_list import list_worktrees
 
@@ -66,13 +68,47 @@ def _worktree_pairs(creation: WorktreeCreation, *, env: Mapping[str, str] | None
     }
 
 
+def _submodule_roots_with_entry_skips(
+    plans: tuple[SubmoduleSnapshot, ...], skipped: tuple[SkipRecord, ...]
+) -> tuple[str, ...]:
+    """Name top-level gitlinks whose recursive content has an allowed skip."""
+    skipped_paths = tuple(str(getattr(record, "path", record)) for record in skipped)
+    return tuple(
+        plan.path
+        for plan in plans
+        if any(path.startswith(f"{plan.path}/") for path in skipped_paths)
+    )
+
+
+def _without_top_level_paths(
+    state: CarriedState, omitted: tuple[str, ...]
+) -> CarriedState:
+    """Remove exact top-level paths delegated to recursive verification."""
+    omitted_set = set(omitted)
+    return CarriedState(
+        paths=tuple(path for path in state.paths if path not in omitted_set),
+        index=tuple(entry for entry in state.index if entry.path not in omitted_set),
+        manifest=tuple(
+            entry for entry in state.manifest if entry.path not in omitted_set
+        ),
+        skipped=tuple(
+            record for record in state.skipped if record.path not in omitted_set
+        ),
+    )
+
+
 def verify_fork(
     creation: WorktreeCreation,
     *,
     with_state: bool = True,
     with_ignored: bool = False,
+    with_submodules: bool = False,
     parent_status_before: bytes,
     parent_state_before: CarriedState | None = None,
+    submodule_plans: tuple[SubmoduleSnapshot, ...] = (),
+    submodule_skipped: tuple[str, ...] = (),
+    submodule_reasoned_skipped: tuple[str, ...] = (),
+    submodule_entry_skips: tuple[SkipRecord, ...] = (),
     skipped: tuple[object, ...] = (),
     env: Mapping[str, str] | None = None,
 ) -> None:
@@ -86,6 +122,9 @@ def verify_fork(
     """
     failures: list[str] = []
     failed_checks: list[dict[str, object]] = []
+    recursive_skip_roots = _submodule_roots_with_entry_skips(
+        submodule_plans, submodule_entry_skips
+    )
     head = _text(
         run_git(creation.path, ["rev-parse", "--verify", "HEAD"], env=env).stdout
     )
@@ -102,66 +141,104 @@ def verify_fork(
         failures.append("worktree-list")
 
     # `--ignore-submodules=dirty` suppresses submodule *working-tree* state,
-    # which a fork does not carry — `git worktree add` never initializes
-    # submodules, so the child cannot reproduce the parent's ` M <path>`. It
-    # still reports commit-level gitlink differences, so a submodule advance
-    # staged in the parent, which does travel in the staged patch, keeps being
-    # compared. `=all` would hide that too (A6a).
+    # which an opted-out fork does not carry — `git worktree add` never
+    # initializes submodules, so the child cannot reproduce the parent's
+    # ` M <path>`. It still reports commit-level gitlink differences, so a
+    # submodule advance staged in the parent, which does travel in the staged
+    # patch, keeps being compared. `=all` would hide that too (A6a). Dropped
+    # entirely when `with_submodules` is true (A6b step 6): a fork that
+    # carries submodules identically should match the parent exactly, with no
+    # exemption — the recursive rungs below carry the real weight of proving
+    # that, but the top-level status comparison stays strict too.
     status_args = [
         "status",
         "--porcelain=v1",
         "-z",
         "--untracked-files=all",
-        "--ignore-submodules=dirty",
     ]
+    if not with_submodules:
+        status_args.append("--ignore-submodules=dirty")
     if with_ignored:
         status_args.append("--ignored")
     # A skipped entry is in the parent and absent from the child by design, so
-    # an unfiltered comparison would fail every skipping fork. Excluded at the
-    # query boundary rather than by post-processing porcelain, following A6a's
-    # shape, with `literal` magic so a filename containing pathspec characters
-    # cannot act as a pattern. The `parent-untouched` bracket below is
-    # deliberately NOT filtered: it compares the parent against itself, where a
-    # skipped path appears identically on both sides, and filtering it would
-    # hide a real mid-fork transition (P02 A5).
-    if skipped:
-        status_args.extend(["--", "."])
-        status_args.extend(
-            ":(exclude,literal)" + str(getattr(r, "path", r)) for r in skipped
+    # exclude it at the query boundary. Literal pathspecs keep metacharacters
+    # in a filename from acting as patterns (P02 A5).
+    status_exclusions = tuple(
+        sorted(
+            {
+                *(str(getattr(record, "path", record)) for record in skipped),
+                *recursive_skip_roots,
+            },
+            key=lambda path: path.encode("utf-8", "surrogateescape"),
         )
-    child_status = run_git(creation.path, status_args, env=env).stdout
+    )
+    if status_exclusions:
+        status_args.extend(["--", "."])
+        status_args.extend(":(exclude,literal)" + path for path in status_exclusions)
+
+    # The child's carried submodule is a fresh `submodule update --init`, so
+    # it never inherits the parent's own submodule's local git config
+    # (nothing copies arbitrary config, only tracked/working-tree state) --
+    # an ambient setting like `diff.ignoreSubmodules` inside the PARENT's
+    # submodule can therefore make the two raw `git status` outputs
+    # genuinely differ even though carry transported the content correctly
+    # (gate-6 finding 2, same root cause one more layer up). Pinning both
+    # sides to the same semantic policy is what makes the comparison
+    # apples-to-apples.
+    status_pins = SEMANTIC_PINS if with_submodules else ()
+    child_status = run_git(
+        creation.path, status_args, env=env, config_pins=status_pins
+    ).stdout
     if with_state:
-        parent_status = run_git(creation.parent_path, status_args, env=env).stdout
+        parent_status = run_git(
+            creation.parent_path, status_args, env=env, config_pins=status_pins
+        ).stdout
         if child_status != parent_status:
             failures.append("exact-copy-status")
     elif child_status:
         failures.append("clean-from-head")
 
     if with_state and parent_state_before is not None:
+        # SEMANTIC_PINS matches the pins pipeline.py applies to the snapshot
+        # it captured before the fork (gate-6 finding 2): recomputing here
+        # without them would create the same false-difference domain
+        # mismatch one more time, symmetrically, at the top level.
+        top_level_pins = SEMANTIC_PINS if with_submodules else ()
         parent_after = capture_state(
             creation.parent_path,
             collect_inventory(
                 creation.parent_path,
                 with_state=with_state,
                 with_ignored=with_ignored,
+                with_submodules=with_submodules,
                 env=env,
+                config_pins=top_level_pins,
             ),
             known_skipped=skipped,
             env=env,
+            config_pins=top_level_pins,
         )
-        drift = compare_states(parent_state_before, parent_after)
+        expected_state = _without_top_level_paths(
+            parent_state_before, recursive_skip_roots
+        )
+        parent_after = _without_top_level_paths(parent_after, recursive_skip_roots)
+        drift = compare_states(expected_state, parent_after)
         child_state = capture_state(
             creation.path,
             collect_inventory(
                 creation.path,
                 with_state=with_state,
                 with_ignored=with_ignored,
+                with_submodules=with_submodules,
                 env=env,
+                config_pins=top_level_pins,
             ),
             known_skipped=skipped,
             env=env,
+            config_pins=top_level_pins,
         )
-        content = compare_states(parent_state_before, child_state)
+        child_state = _without_top_level_paths(child_state, recursive_skip_roots)
+        content = compare_states(expected_state, child_state)
         if drift:
             failures.append(_labelled("parent-content", drift))
             failed_checks.append(_failed_check("parent-content", drift, primary=True))
@@ -169,6 +246,27 @@ def verify_fork(
             failures.append(_labelled("content-match", content))
             failed_checks.append(
                 _failed_check("content-match", content, primary=not drift)
+            )
+
+    if with_state and with_submodules and submodule_plans:
+        submodule_differences = verify_submodules(
+            creation.parent_path,
+            creation.path,
+            submodule_plans,
+            with_ignored=with_ignored,
+            skipped=submodule_skipped,
+            reasoned_skipped=submodule_reasoned_skipped,
+            env=env,
+        )
+        if submodule_differences:
+            first_failure = not failures
+            failures.append(_labelled("submodule-content-match", submodule_differences))
+            failed_checks.append(
+                _failed_check(
+                    "submodule-content-match",
+                    submodule_differences,
+                    primary=first_failure,
+                )
             )
 
     parent_status_after = run_git(

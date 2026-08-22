@@ -134,7 +134,18 @@ Port of RESEARCH §2 (agent-deck `forkWithStateWorktree` + `MaterializeWipFromPa
 - **REQ-22 Rollback:** on materialize failure, remove worktree (+ branch only if created), report `cleaned up` or emit the exact manual-recovery command when cleanup itself fails. Signals mid-pipeline trigger the same rollback (exit 130/143).
 - **REQ-23 Verify (default on, `--no-verify` opt-out — D8):** ladder from RESEARCH §4 — anchor commit matches · branch matches · `git worktree list` registers the pair · exact-copy: child `status --porcelain -z` byte-equal to parent's (ignored-aware when `--with-ignored`) **Amended 2026-08-20 (owner, P02 A5): excluding paths recorded as skipped, which are filtered from both sides before comparison; the `parent status before == after` bracket is never filtered. Each skipped path additionally carries an `lstat` sentinel `(st_dev, st_ino, st_mode, st_size, st_mtime_ns, st_ctime_ns)` rechecked at finalization, after include copying and the setup hook and before the registry write; any change fails the fork.** · clean mode: empty status · parent status before == after. Any failure → exit 1 with rollback (never hand the user an unverified fork).
 - **REQ-24 (SHOULD)** `.worktreeinclude` and a post-create setup hook (`.agent-fork/worktree-setup.sh`) as non-fatal steps, agent-deck-compatible in spirit (D7 scope call). The hook is provenance-gated, bounded, disclosed, and opt-outable while remaining non-fatal (D22): by default it runs only when committed in the fork anchor's tree as a regular blob whose bytes are identical to the copy in the new worktree; an ineligible hook is skipped with a named reason and a named override, never refused, because a `SHOULD`-tier step must not be able to fail a fork. Execution is bounded by `setup_hook_timeout` (default 300 s) in the hook's own process group, so a timeout or an interrupt terminates the hook *and every descendant that remained in that group*. A descendant that calls `setsid()` leaves the group and cannot be signalled with it; the bound that still holds for it is on waiting, not on killing — agent-fork releases the hook's pipes after a short drain and reports `descendants_cleared: false`, so a process left behind is disclosed rather than allowed to stall the fork. A timeout bounds duration only and cannot undo side effects the hook already made. `fork --dry-run` and `doctor` disclose the step before it runs, and `fork --json` reports it including a bounded tail of its output on success as well as failure.
-- **REQ-25 (SHOULD)** Submodules: warn-only, copied opaquely, documented.
+- **REQ-25 (SHOULD)** Submodules: warn-only, copied opaquely, documented. **Amended
+  2026-08-20 (owner, P02 A6a/A6b):** superseded as the default. A dirty
+  submodule no longer blocks a fork (A6a); by default (`with_submodules`,
+  default `true`) each submodule's working-tree state is carried recursively
+  through the same recipe as the top-level worktree — offline
+  initialization from the parent's own checkout, `remote.origin.url`
+  restored, checkout at the parent submodule's exact commit, then recurse —
+  and verified recursively (initialization, commit identity, detached
+  state, content, at every nesting depth). `--no-with-submodules` reproduces
+  the original opaque-gitlink, warn-only behavior this requirement
+  originally specified, including the exit-5 `submodule_unrepresentable`
+  refusal for an advance the child cannot otherwise represent.
 
 ---
 

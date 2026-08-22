@@ -335,14 +335,21 @@ def validate_fork_guards(
     destination: Path,
     *,
     with_state: bool = True,
+    with_submodules: bool = False,
     env: Mapping[str, str] | None = None,
 ) -> RepositoryInfo:
     """Run every refusal before filesystem or ref mutation.
 
-    ``with_state`` gates the submodule refusal only. A fork that carries no
-    state reproduces nothing about the parent's submodules, so there is no
-    divergence to refuse — and refusing anyway would block the remedy the error
-    itself recommends.
+    The submodule refusal fires on ``with_state and not with_submodules``
+    (A6b step 6). A fork that carries no state reproduces nothing about the
+    parent's submodules, so there is no divergence to refuse — and refusing
+    anyway would block the remedy the error itself recommends. A fork that
+    carries submodules identically can represent an unstaged gitlink advance,
+    because the child gets a real submodule checkout to detach at the
+    parent's submodule HEAD — so the refusal must not fire there either.
+    ``with_submodules`` defaults false so a caller that predates A6b, or that
+    never resolved the flag, keeps A6a's original unconditional-on-with_state
+    behaviour.
     """
     info = inspect_repository(parent, env=env)
     attached = _worktree_branches(info.parent_path, env=env)
@@ -395,12 +402,62 @@ def validate_fork_guards(
             "unmerged_index",
             f"unmerged index paths: {rendered}; resolve conflicts and re-run",
         )
+    if with_state and with_submodules:
+        from agent_fork.submodules import inspect_submodule_preflight
+
+        preflight = inspect_submodule_preflight(info.parent_path, env=env)
+        if preflight.unmerged_paths:
+            listed = ", ".join(
+                escape_terminal_text(path) for path in preflight.unmerged_paths
+            )
+            raise PreconditionError(
+                "unmerged_index",
+                f"unmerged index paths: {listed}; resolve conflicts and re-run",
+            )
+        if preflight.cold_content:
+            finding = preflight.cold_content[0]
+            listed = ", ".join(escape_terminal_text(path) for path in finding.entries)
+            raise PreconditionError(
+                "submodule_cold_content",
+                "cold submodule directory contains content that initialization "
+                f"could overwrite: {listed}; move or remove it, then re-run",
+                details={
+                    "submodule": escape_terminal_text(finding.path),
+                    "entries": [escape_terminal_text(path) for path in finding.entries],
+                    "count": finding.count,
+                },
+            )
+        if preflight.unsafe_transports:
+            finding = preflight.unsafe_transports[0]
+            raise PreconditionError(
+                "submodule_transport_unsafe",
+                "ambient Git url.*.insteadOf configuration rewrites the pinned "
+                f"local source for {escape_terminal_text(finding.path)}; remove "
+                "the matching rewrite and re-run",
+                details={
+                    "submodule": escape_terminal_text(finding.path),
+                    "source": escape_terminal_text(finding.source),
+                    "rewrite_prefix": escape_terminal_text(finding.rewrite_prefix),
+                },
+            )
+        if preflight.missing_metadata:
+            listed = ", ".join(
+                escape_terminal_text(path) for path in preflight.missing_metadata
+            )
+            raise PreconditionError(
+                "submodule_unrepresentable",
+                "initialized submodule has no matching .gitmodules path entry: "
+                f"{listed}; restore its .gitmodules metadata, or fork without "
+                "carrying submodules (--no-with-submodules)",
+            )
     # Last, because every guard above names a state the user can act on directly.
     # `gitlink_paths` reads mode-160000 entries from every index stage, so a
     # conflicted submodule would otherwise be refused here first, with a remedy
     # -- stage it, or --no-with-state -- that cannot clear a conflicted index.
     unrepresentable = (
-        _unrepresentable_submodules(info.parent_path, env=env) if with_state else []
+        _unrepresentable_submodules(info.parent_path, env=env)
+        if with_state and not with_submodules
+        else []
     )
     if unrepresentable:
         listed = ", ".join(escape_terminal_text(path) for path in unrepresentable)

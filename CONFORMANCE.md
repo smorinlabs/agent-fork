@@ -95,7 +95,7 @@ open implementation finding.
 | REQ-22 | Implemented | G-RBK failure, manual recovery, producer, SIGINT, and SIGTERM rows; T-RBK-08/T-RBK-09 extend the signal rows to the setup hook's process group, and T-CLI-63 asserts the 130/143 translation at the `main()` boundary the library-level rows never reached |
 | REQ-23 | Implemented | G-VER full ladder, ignored-aware comparison, opt-out, rollback |
 | REQ-24 | Implemented | G-INC include precedence and non-fatal setup hook; A12 adds provenance gating, process-group bounds, and disclosure — T-INC-08..17 (eligibility, policy, bounded escaped output, timeout reaping, bounded drain for a descendant that leaves the group), T-RBK-10 (the group is signalled after its leader exits), T-CLI-61 (`--dry-run` disclosure), T-CLI-62 (`doctor` row and its failure condition), T-OUT-25 (JSON contract and stderr narration), T-OUT-27/28 (human-mode output-tail echo), T-CFG-37..39 (key resolution and A11-guard rejection) |
-| REQ-25 | Implemented | Opaque gitlink handling and submodule notices in G-MAT |
+| REQ-25 | Implemented | Recursive submodule carrying by default (`with_submodules`) via the G-MAT recipe and the G-VER recursive verification ladder; `--no-with-submodules` falls back to the original opaque-gitlink, warn-only behavior |
 | REQ-26 | Implemented | G-DET ambient strict detection plus T-DET-13..20 exact shared signal truth table; the direct skill selects it through `--require-agent`; pre-0.95 Codex ladder remains tombstoned per A7 |
 | REQ-27 | Implemented | G-PRE CLI/version/rollout matrix |
 | REQ-28 | Implemented + real-validated | G-EMT locked templates; E1–E3 rerun 2026-08-10 |

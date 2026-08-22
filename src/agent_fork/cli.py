@@ -182,6 +182,12 @@ def _parser() -> argparse.ArgumentParser:
         help="Also carry ignored files (default: disabled)",
     )
     fork.add_argument(
+        "--with-submodules",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Carry submodule working-tree state identically (default: enabled)",
+    )
+    fork.add_argument(
         "--verify",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -491,6 +497,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         for key, value in {
             "with_state": args.with_state,
             "with_ignored": args.with_ignored,
+            "with_submodules": args.with_submodules,
             "verify": args.verify,
             "copy": args.copy,
             "output": "json" if args.json else args.output,
@@ -661,29 +668,32 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             branch,
             destination,
             with_state=config.with_state,
+            with_submodules=config.with_submodules,
             env=environment,
         )
 
         def count(arguments):
             return count_paths(parent_path, arguments, env=environment)
 
+        unstaged_args = ["diff", "--name-only", "-z", "--no-renames"]
+        staged_args = ["diff", "--cached", "--name-only", "-z", "--no-renames"]
+        if config.with_submodules:
+            # Mirrors collect_inventory's own flag (gate-6 round 2 finding
+            # 4's second half): a local `submodule.<name>.ignore` value
+            # hides a staged gitlink advance from this listing and the `-c`
+            # pin cannot defeat it, only the explicit flag can. Without it
+            # here, the preview undercounts exactly what the real fork
+            # (materialize/collect_inventory, already carrying this flag)
+            # correctly carries.
+            unstaged_args.append("--ignore-submodules=none")
+            staged_args.append("--ignore-submodules=none")
+        else:
+            unstaged_args.append("--ignore-submodules=dirty")
         dry = DryRunOutput(
             branch,
             destination,
-            count(["diff", "--cached", "--name-only", "-z", "--no-renames"])
-            if config.with_state
-            else 0,
-            count(
-                [
-                    "diff",
-                    "--name-only",
-                    "-z",
-                    "--no-renames",
-                    "--ignore-submodules=dirty",
-                ]
-            )
-            if config.with_state
-            else 0,
+            count(staged_args) if config.with_state else 0,
+            count(unstaged_args) if config.with_state else 0,
             count(["ls-files", "--others", "--exclude-standard", "-z"])
             if config.with_state
             else 0,
@@ -695,7 +705,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
                 (agent_check.notices if context is not None else ())
                 + (
                     submodule_loss_notices(parent_path, env=environment)
-                    if config.with_state
+                    if config.with_state and not config.with_submodules
                     else ()
                 )
             ),
@@ -716,6 +726,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             agent=context,
             with_state=config.with_state,
             with_ignored=config.with_ignored,
+            with_submodules=config.with_submodules,
             verify=config.verify,
             force=args.force,
             strict=args.strict,
@@ -759,6 +770,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         anchor_commit=result.creation.anchor,
         with_state=config.with_state,
         with_ignored=config.with_ignored,
+        with_submodules=config.with_submodules,
         verification={"enabled": config.verify, "passed": config.verify},
         command=result.launch.command,
         notices=tuple(notices),
@@ -1633,6 +1645,7 @@ def main(argv: list[str] | None = None) -> int:
                 document = {
                     "with_state": resolved.with_state,
                     "with_ignored": resolved.with_ignored,
+                    "with_submodules": resolved.with_submodules,
                     "branch_prefix": resolved.branch_prefix,
                     "worktree_location": resolved.worktree_location,
                     "agent_mode": resolved.agent_mode,

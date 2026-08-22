@@ -167,6 +167,7 @@ def _apply_patch(
     args: Sequence[str],
     *,
     env: Mapping[str, str] | None,
+    config_pins: Sequence[tuple[str, str]] = (),
 ) -> bool:
     if not patch:
         return False
@@ -175,6 +176,7 @@ def _apply_patch(
         ["apply", "--binary", "--whitespace=nowarn", *args],
         env=env,
         input_bytes=patch,
+        config_pins=config_pins,
     )
     return True
 
@@ -201,7 +203,7 @@ def submodule_loss_notices(
     return (f"submodule working-tree changes are not carried: {listed}",)
 
 
-def _skip_notices(skipped: tuple[object, ...]) -> tuple[str, ...]:
+def skip_notices(skipped: tuple[object, ...]) -> tuple[str, ...]:
     """One notice per skipped entry, naming it.
 
     A count alone is not enough: the requirement is that the run says exactly
@@ -225,9 +227,11 @@ def materialize(
     *,
     with_state: bool = True,
     with_ignored: bool = False,
+    with_submodules: bool = False,
     inventory: Inventory | None = None,
     skipped: tuple[object, ...] = (),
     env: Mapping[str, str] | None = None,
+    config_pins: Sequence[tuple[str, str]] = (),
 ) -> MaterializeResult:
     """Transport staged → ITA/unstaged → untracked → optional ignored state.
 
@@ -237,6 +241,11 @@ def materialize(
     and a file that appeared or vanished since the snapshot would be carried
     without being checked. The pipeline always supplies it; the parameter stays
     optional for callers transporting a tree they resolved themselves.
+
+    ``config_pins`` is inert by default (A6b step 2). A6b reuses this function
+    one level down for each carried submodule, and pins are what let that reuse
+    stay "one added argument" rather than a second transport implementation —
+    see the design doc's "Semantic pins on recursive commands".
     """
     if with_ignored and not with_state:
         raise ValueError("with_ignored requires with_state")
@@ -245,23 +254,37 @@ def materialize(
     try:
         if inventory is None:
             inventory = collect_inventory(
-                parent, with_state=with_state, with_ignored=with_ignored, env=env
+                parent,
+                with_state=with_state,
+                with_ignored=with_ignored,
+                env=env,
+                config_pins=config_pins,
             )
         ita_paths = list(inventory.intent_to_add)
+        staged_args = [
+            "diff-index",
+            "-p",
+            "--binary",
+            "--no-color",
+            "--cached",
+            "--ita-invisible-in-index",
+        ]
+        if with_submodules:
+            # Mirrors collect_inventory's own flag: a local
+            # `submodule.<name>.ignore` value suppresses this patch for a
+            # staged gitlink advance and the `-c` pin cannot defeat it
+            # (gate-6 round 2 findings 4+5).
+            staged_args.append("--ignore-submodules=none")
+        staged_args.append("HEAD")
         staged = run_git(
             parent,
-            [
-                "diff-index",
-                "-p",
-                "--binary",
-                "--no-color",
-                "--cached",
-                "--ita-invisible-in-index",
-                "HEAD",
-            ],
+            staged_args,
             env=env,
+            config_pins=config_pins,
         ).stdout
-        staged_applied = _apply_patch(child, staged, ["--index"], env=env)
+        staged_applied = _apply_patch(
+            child, staged, ["--index"], env=env, config_pins=config_pins
+        )
 
         for path in ita_paths:
             ita_patch = run_git(
@@ -276,12 +299,14 @@ def materialize(
                     f":(literal){path}",
                 ],
                 env=env,
+                config_pins=config_pins,
             ).stdout
-            _apply_patch(child, ita_patch, [], env=env)
+            _apply_patch(child, ita_patch, [], env=env, config_pins=config_pins)
             run_git(
                 child,
                 ["add", "--intent-to-add", "--", f":(literal){path}"],
                 env=env,
+                config_pins=config_pins,
             )
 
         unstaged_args = [
@@ -291,6 +316,8 @@ def materialize(
             "--no-color",
             "--ita-invisible-in-index",
         ]
+        if with_submodules:
+            unstaged_args.append("--ignore-submodules=none")
         if ita_paths:
             unstaged_args.extend(
                 [
@@ -299,8 +326,12 @@ def materialize(
                     *(f":(exclude,literal){path}" for path in ita_paths),
                 ]
             )
-        unstaged = run_git(parent, unstaged_args, env=env).stdout
-        unstaged_applied = _apply_patch(child, unstaged, [], env=env)
+        unstaged = run_git(
+            parent, unstaged_args, env=env, config_pins=config_pins
+        ).stdout
+        unstaged_applied = _apply_patch(
+            child, unstaged, [], env=env, config_pins=config_pins
+        )
 
         skipped_paths = {getattr(record, "path", record) for record in skipped}
         newly_skipped: list[SkipRecord] = []
@@ -340,7 +371,7 @@ def materialize(
         copied_ignored=len(ignored)
         - sum(record.path in ignored for record in newly_skipped),
         intent_to_add=tuple(ita_paths),
-        notices=submodule_loss_notices(parent, env=env)
-        + _skip_notices((*skipped, *newly_skipped)),
+        notices=(submodule_loss_notices(parent, env=env) if not with_submodules else ())
+        + skip_notices((*skipped, *newly_skipped)),
         skipped=tuple(newly_skipped),
     )

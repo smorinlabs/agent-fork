@@ -69,12 +69,19 @@ def pytest_collection_modifyitems(items):
 
 @dataclass(frozen=True)
 class StateSpec:
-    """One file-state element of a scenario (spec §6.3 vocabulary)."""
+    """One file-state element of a scenario (spec §6.3 vocabulary).
+
+    ``extra`` is a small hashable bag for parameters specific to one kind (only
+    ``submodule()`` uses it, for A6b's growing axis set — config name, nesting,
+    URL shape) rather than a field every other kind carries unused. A tuple of
+    pairs, not a dict, so the frozen dataclass stays hashable.
+    """
 
     kind: str
     path: str
     target: str | None = None
     content: bytes | None = None
+    extra: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -165,21 +172,69 @@ def empty_dir(ignored: bool) -> StateSpec:
     return StateSpec("empty-dir-ignored" if ignored else "empty-dir", "empty-dir")
 
 
-def submodule(path: str | None = None, dirty: str | None = None) -> StateSpec:
+_SUBMODULE_DIRT = (
+    None,
+    "modified",
+    "untracked",
+    "advanced",
+    "advanced-staged",
+    "staged-in-own-index",
+    "uninit",
+)
+
+
+def submodule(
+    path: str | None = None,
+    dirty: str | None = None,
+    *,
+    committed: bool = False,
+    name: str | None = None,
+    nested: bool = False,
+    url_kind: str = "local",
+    update_policy: str | None = None,
+) -> StateSpec:
     """Submodule gitlink, seeded with `-c protocol.file.allow=always` (spec §6.3).
 
-    ``dirty`` selects what state the submodule carries, which is what A6
-    distinguishes. ``None`` leaves it clean. ``"modified"`` edits a tracked file
-    inside it and ``"untracked"`` adds an untracked one — both make the parent
-    report ` M <path>` while the child, whose submodule is never initialized,
-    reports nothing. ``"advanced"`` commits inside the submodule without staging
-    the gitlink in the parent, and ``"advanced-staged"`` also stages it; only the
-    staged form is transportable, because the gitlink OID then travels in the
-    parent's staged patch.
+    ``dirty`` selects what state the submodule carries. ``None`` leaves it
+    clean. ``"modified"`` edits a tracked file inside it and ``"untracked"``
+    adds an untracked one — both make the parent report ` M <path>` while a
+    fork that does not carry submodules reports nothing. ``"advanced"`` commits
+    inside the submodule without staging the gitlink in the parent;
+    ``"advanced-staged"`` also stages it, so the gitlink OID travels in the
+    parent's staged patch even without carrying. ``"staged-in-own-index"``
+    stages a change in the submodule's *own* index without advancing its HEAD
+    (cell `i`). ``"uninit"`` deinitializes the submodule in the parent after
+    adding it (cell `g`) — the fork must leave it cold too, never initialize
+    what the parent itself left cold.
+
+    ``name`` gives the submodule a config name that differs from its path
+    (cell `j`) — see A6's design doc on why the URL override must be keyed by
+    name, not path. ``nested`` adds a second submodule inside this one (cell
+    `h`). ``url_kind`` selects how the submodule is added: ``"local"`` (the
+    default, a sibling directory — every existing fixture), ``"relative"`` (a
+    `../`-relative `.gitmodules` URL), or ``"remote-unreachable"`` (a
+    syntactically valid but network-unreachable HTTPS URL, proving the recipe's
+    offline override engages rather than being masked by every prior fixture
+    using a path already). ``update_policy`` sets `submodule.<name>.update` in
+    the parent (e.g. ``"none"``, which makes `submodule update --init` exit 0
+    while doing nothing unless the recipe passes `--checkout`).
     """
-    if dirty not in (None, "modified", "untracked", "advanced", "advanced-staged"):
+    if dirty not in _SUBMODULE_DIRT:
         raise ValueError(f"unknown submodule dirt: {dirty}")
-    return StateSpec("submodule", path or "vendor/submodule", target=dirty)
+    if url_kind not in ("local", "relative", "remote-unreachable"):
+        raise ValueError(f"unknown submodule url_kind: {url_kind}")
+    extra: tuple[tuple[str, str], ...] = ()
+    if name is not None:
+        extra += (("name", name),)
+    if nested:
+        extra += (("nested", "1"),)
+    if url_kind != "local":
+        extra += (("url_kind", url_kind),)
+    if update_policy is not None:
+        extra += (("update_policy", update_policy),)
+    if committed:
+        extra += (("committed", "1"),)
+    return StateSpec("submodule", path or "vendor/submodule", target=dirty, extra=extra)
 
 
 def worktreeinclude(pattern: str | None = None) -> StateSpec:
@@ -654,17 +709,57 @@ def _apply_states(handle: WorldHandle, states: tuple[StateSpec, ...]) -> None:
         elif spec.kind == "submodule":
             module = parent.parent / f"module-{path.name}"
             _init_plain(module, handle.env)
-            _run_git(
-                handle.env,
+            extra = dict(spec.extra)
+            add_args = ["-c", "protocol.file.allow=always", "submodule", "add"]
+            if "name" in extra:
+                add_args += ["--name", extra["name"]]
+            add_args += [str(module), spec.path]
+            _run_git(handle.env, parent, *add_args)
+            config_name = extra.get("name", spec.path)
+            if "update_policy" in extra:
+                _run_git(
+                    handle.env,
+                    parent,
+                    "config",
+                    f"submodule.{config_name}.update",
+                    extra["update_policy"],
+                )
+            if extra.get("url_kind") == "relative":
+                relative_url = f"../{module.name}"
+                _rewrite_submodule_url(handle, parent, config_name, relative_url)
+            elif extra.get("url_kind") == "remote-unreachable":
+                # Syntactically valid, never resolves: reserved TEST-NET-1
+                # (RFC 5737), so this cannot flake by someone actually running
+                # a git server there.
+                _rewrite_submodule_url(
+                    handle, parent, config_name, "https://192.0.2.1/unreachable.git"
+                )
+            if "nested" in extra:
+                inner = parent.parent / f"module-inner-{path.name}"
+                _init_plain(inner, handle.env)
+                _run_git(
+                    handle.env,
+                    path,
+                    "-c",
+                    "protocol.file.allow=always",
+                    "submodule",
+                    "add",
+                    str(inner),
+                    "inner",
+                )
+                _run_git(handle.env, path, "commit", "-m", "add nested submodule")
+            _dirty_submodule(
+                handle,
                 parent,
-                "-c",
-                "protocol.file.allow=always",
-                "submodule",
-                "add",
-                str(module),
+                path,
                 spec.path,
+                spec.target,
+                # URL rewrites used to commit the gitlink accidentally via an
+                # unscoped `git commit`. Keep the fixture's established HEAD
+                # shape deliberately while `_rewrite_submodule_url` commits
+                # only `.gitmodules` and preserves unrelated staged state.
+                committed="committed" in extra or "url_kind" in extra,
             )
-            _dirty_submodule(handle, parent, path, spec.path, spec.target)
         elif spec.kind == "worktreeinclude":
             path.write_text(f"{spec.target}\n")
         else:
@@ -677,17 +772,37 @@ def _dirty_submodule(
     path: Path,
     relative: str,
     dirt: str | None,
+    *,
+    committed: bool = False,
 ):
     """Put the submodule at ``path`` into the state named by ``dirt``.
 
     ``_init_plain`` seeds every submodule with `tracked.txt`, so "modified"
     rewrites that file rather than introducing a second fixture filename.
+
+    A bare, clean submodule (``dirt is None``, ``committed=False``)
+    deliberately stays uncommitted — index-only: T-VER-30 and T-MAT-14 pin
+    that gitlink shape, and a fork carries it correctly with no worktree
+    checkout to compare. A6b's own carry tests need a *committed* clean
+    submodule instead — a child worktree anchors at a commit, not the index,
+    so a submodule only staged in the parent is invisible to
+    `git submodule update` in the child; ``committed=True`` closes that gap
+    without disturbing the existing index-only contract.
     """
     if dirt is None:
+        if committed:
+            _run_git(
+                handle.env,
+                parent,
+                "commit",
+                "-m",
+                f"add submodule {relative}",
+                "--",
+                ".gitmodules",
+                f":(literal){relative}",
+            )
         return
     # Commit the gitlink first, so the dirt below is the only state in play.
-    # Clean submodules deliberately stay uncommitted: T-VER-30 and T-MAT-14 pin
-    # the index-only gitlink shape, which a commit would erase.
     # Pathspec-scoped, so a `staged()` element earlier in the same states tuple
     # is not swept into this commit and silently lost.
     _run_git(
@@ -709,8 +824,54 @@ def _dirty_submodule(
         _run_git(handle.env, path, "commit", "-am", "advance the submodule")
         if dirt == "advanced-staged":
             _run_git(handle.env, parent, "add", "--", f":(literal){relative}")
+    elif dirt == "staged-in-own-index":
+        # HEAD does not move; only the submodule's own index changes (cell `i`).
+        (path / "tracked.txt").write_text("submodule staged\n")
+        _run_git(handle.env, path, "add", "tracked.txt")
+    elif dirt == "uninit":
+        # The gitlink is committed clean; the parent deliberately leaves the
+        # checkout cold afterward (cell `g`) — a fork must not initialize what
+        # the parent itself left uninitialized.
+        _run_git(handle.env, parent, "submodule", "deinit", "-f", "--", relative)
     else:
         raise ValueError(f"unknown submodule dirt: {dirt}")
+
+
+def _rewrite_submodule_url(
+    handle: WorldHandle, parent: Path, config_name: str, url: str
+) -> None:
+    """Point `.gitmodules` and the parent's own config at ``url``.
+
+    ``config_name`` must be the submodule's *config name* (`.gitmodules`
+    sections are `[submodule "<name>"]`, keyed by name, never by path) --
+    passing the path for a renamed submodule (name != path) silently writes
+    a spurious new section instead of editing the real one, leaving the
+    submodule's actual URL untouched.
+
+    Runs only in the parent, before any child worktree exists — never in a
+    linked worktree, where `submodule sync` would write into shared
+    `.git/config` (A6's design doc, gate-4 pass 1 finding 1).
+    """
+    _run_git(
+        handle.env,
+        parent,
+        "config",
+        "-f",
+        ".gitmodules",
+        f"submodule.{config_name}.url",
+        url,
+    )
+    _run_git(handle.env, parent, "add", "--", ".gitmodules")
+    _run_git(
+        handle.env,
+        parent,
+        "commit",
+        "-m",
+        f"repoint {config_name} url",
+        "--",
+        ".gitmodules",
+    )
+    _run_git(handle.env, parent, "submodule", "sync")
 
 
 def _apply_origin(handle: WorldHandle, spec: OriginSpec) -> None:

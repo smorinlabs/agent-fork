@@ -16,7 +16,7 @@ import errno
 import hashlib
 import os
 import stat
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -140,8 +140,15 @@ def nul_paths(data: bytes) -> list[str]:
     return [os.fsdecode(value) for value in data.split(b"\0") if value]
 
 
-def _index_records(root: Path, *, env: Mapping[str, str] | None) -> list[IndexEntry]:
-    result = run_git(root, ["ls-files", "--stage", "-z"], env=env)
+def _index_records(
+    root: Path,
+    *,
+    env: Mapping[str, str] | None,
+    config_pins: Sequence[tuple[str, str]] = (),
+) -> list[IndexEntry]:
+    result = run_git(
+        root, ["ls-files", "--stage", "-z"], env=env, config_pins=config_pins
+    )
     entries: list[IndexEntry] = []
     for record in result.stdout.split(b"\0"):
         if not record or b"\t" not in record:
@@ -156,18 +163,23 @@ def _index_records(root: Path, *, env: Mapping[str, str] | None) -> list[IndexEn
 
 
 def intent_to_add_paths(
-    root: Path, *, env: Mapping[str, str] | None = None
+    root: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+    config_pins: Sequence[tuple[str, str]] = (),
 ) -> list[str]:
     """Paths added with ``--intent-to-add``: visible in the index, content unstaged."""
     visible = run_git(
         root,
         ["diff", "--cached", "--ita-visible-in-index", "--name-only", "-z"],
         env=env,
+        config_pins=config_pins,
     )
     hidden = run_git(
         root,
         ["diff", "--cached", "--ita-invisible-in-index", "--name-only", "-z"],
         env=env,
+        config_pins=config_pins,
     )
     return sorted(set(nul_paths(visible.stdout)) - set(nul_paths(hidden.stdout)))
 
@@ -258,7 +270,9 @@ def collect_inventory(
     *,
     with_state: bool,
     with_ignored: bool,
+    with_submodules: bool = False,
     env: Mapping[str, str] | None = None,
+    config_pins: Sequence[tuple[str, str]] = (),
 ) -> Inventory:
     """Resolve every path a fork of ``root`` carries, by facet.
 
@@ -270,30 +284,53 @@ def collect_inventory(
     The result is the single domain shared by transport and verification. It is
     resolved once, before the worktree exists, so a file that appears or
     disappears mid-fork cannot change what either step operates on.
+
+    ``config_pins`` is inert by default (A6b step 2): recursive submodule calls
+    pass semantic pins through here so a nested repository's local
+    configuration cannot make identical content report differently than the
+    top level. A command-line flag on the same axis at the same call site
+    always wins over a pin — the unstaged listing's own
+    ``--ignore-submodules=dirty`` is exactly that case, confirmed empirically
+    rather than assumed.
     """
     if not with_state:
         return Inventory()
 
     def listing(arguments: list[str]) -> tuple[str, ...]:
-        return tuple(nul_paths(run_git(root, arguments, env=env).stdout))
+        return tuple(
+            nul_paths(run_git(root, arguments, env=env, config_pins=config_pins).stdout)
+        )
 
     ignored: tuple[str, ...] = ()
     if with_ignored:
         ignored = listing(
             ["ls-files", "--others", "-z", "--ignored", "--exclude-standard"]
         )
+    unstaged_args = ["diff", "--name-only", "-z", "--no-renames"]
+    staged_args = ["diff", "--cached", "--name-only", "-z", "--no-renames"]
+    if with_submodules:
+        # A `submodule.<name>.ignore` value set in local config (never cloned
+        # into a fresh checkout) silently drops a staged gitlink advance from
+        # this listing -- `-c diff.ignoreSubmodules=none` (`SEMANTIC_PINS`)
+        # cannot override it, only the explicit command-line flag can
+        # (gate-6 round 2 findings 4+5, confirmed empirically against real
+        # Git: `-c` left the listing empty, the flag restored it).
+        unstaged_args.append("--ignore-submodules=none")
+        staged_args.append("--ignore-submodules=none")
+    else:
+        # A6a's exemption: a fork that does not carry submodules must not
+        # treat their working-tree dirt as ordinary unstaged content (A6b
+        # step 6). When submodules ARE carried, this filter is dropped: the
+        # path belongs in the inventory so verification's membership checks
+        # see it, even though gitlink paths are excluded from the manifest
+        # either way (`_manifest_entry` below).
+        unstaged_args.append("--ignore-submodules=dirty")
     return Inventory(
-        staged=listing(["diff", "--cached", "--name-only", "-z", "--no-renames"]),
-        unstaged=listing(
-            [
-                "diff",
-                "--name-only",
-                "-z",
-                "--no-renames",
-                "--ignore-submodules=dirty",
-            ]
+        staged=listing(staged_args),
+        unstaged=listing(unstaged_args),
+        intent_to_add=tuple(
+            intent_to_add_paths(root, env=env, config_pins=config_pins)
         ),
-        intent_to_add=tuple(intent_to_add_paths(root, env=env)),
         untracked=listing(["ls-files", "--others", "-z", "--exclude-standard"]),
         ignored=ignored,
         deletions=tuple(
@@ -385,12 +422,18 @@ def capture_state(
     *,
     known_skipped: Iterable[object] = (),
     env: Mapping[str, str] | None = None,
+    config_pins: Sequence[tuple[str, str]] = (),
 ) -> CarriedState:
-    """Snapshot index and working-tree facts for ``inventory`` inside ``root``."""
+    """Snapshot index and working-tree facts for ``inventory`` inside ``root``.
+
+    ``config_pins`` is inert by default (A6b step 2); see `collect_inventory`.
+    """
     paths = tuple(inventory.paths if isinstance(inventory, Inventory) else inventory)
     carried = set(paths)
     index = tuple(
-        entry for entry in _index_records(root, env=env) if entry.path in carried
+        entry
+        for entry in _index_records(root, env=env, config_pins=config_pins)
+        if entry.path in carried
     )
     gitlinks = {entry.path for entry in index if entry.mode == GITLINK_MODE}
     tracked = {entry.path for entry in index}

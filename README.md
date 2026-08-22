@@ -223,7 +223,8 @@ agent-fork cleanup try-redis --yes   # remove one when you are done
 2. **Anchor** to the parent's current commit and create the fork branch.
 3. **Create** a linked Git worktree at the destination.
 4. **Copy** staged, then unstaged, then untracked files into it, preserving
-   symlinks and the executable bit.
+   symlinks and the executable bit — then, per gitlink, carry each submodule
+   the same way, recursively (see [Submodules](#submodules)).
 5. **Verify** that the new worktree matches what was promised — Git-visible
    state, and the contents themselves: staged entries, file types, permissions,
    symlink targets, and a checksum of every carried file. The parent is
@@ -466,6 +467,7 @@ record; cleanup adds no flag that prunes this metadata automatically.
 | `--worktree-name COMPONENT` | Replace only the derived directory name |
 | `--with-state` / `--no-with-state` | Carry staged, unstaged, and untracked state (default: enabled) |
 | `--with-ignored` / `--no-with-ignored` | Also carry ignored files (default: disabled) |
+| `--with-submodules` / `--no-with-submodules` | Carry each submodule's working-tree state, recursively (default: enabled) |
 | `--verify` / `--no-verify` | Verify the completed fork (default: enabled) |
 | `--strict` | Refuse and roll back when any carried entry must be skipped |
 | `--codex-session-name-resolution` / `--no-codex-session-name-resolution` | Resolve renamed Codex sessions (default: enabled) |
@@ -482,6 +484,7 @@ agent-fork fork review-auth                 # auto-detect agent or Git-only
 agent-fork fork terminal-copy --no-agent    # explicitly Git-only
 agent-fork fork session-copy --require-agent
 agent-fork fork review-auth --with-ignored
+agent-fork fork review-auth --no-with-submodules
 agent-fork fork --no-with-state --dry-run
 agent-fork fork --no-with-state --dry-run -o json
 agent-fork fork review-auth -o json
@@ -602,6 +605,7 @@ agent-fork 1.3 writes the registry, earlier versions will not read it.
 |---|---|---|---|
 | `with_state` | `true` | — | Carry staged, unstaged, and untracked files |
 | `with_ignored` | `false` | — | Also carry ignored files; implies `with_state` |
+| `with_submodules` | `true` | — | Carry each submodule's state recursively; does not imply `with_state` |
 | `branch_prefix` | `"fork/"` | — | Whitespace falls back to the default; must compose into a valid Git branch name |
 | `worktree_location` | `"sibling"` | — | `sibling`, `central` (XDG data), `subdirectory`, or a path template — see below |
 | `agent_mode` | `"auto"` | `AGENT_FORK_AGENT_MODE` | `auto`, `strict`, or `git-only` |
@@ -762,6 +766,39 @@ to run), under `off` (it is not evaluated), and when no hook is present.
 - **No network, no telemetry.** `agent-fork` makes no runtime network calls and
   collects no data ([details](#telemetry-and-networking)).
 
+## Submodules
+
+By default, `agent-fork` carries a dirty submodule the same way it carries any
+other uncommitted state: the child sees the same staged, unstaged, and
+untracked content inside the submodule that the parent had, at every nesting
+depth. This includes submodules the parent's own index does not record as
+carriable on its own — for example a submodule advanced to a commit only its
+own `HEAD` knows about, which a plain `git worktree add` cannot represent.
+
+Per submodule, the recipe is: skip it if the parent itself never initialized
+it and its checkout path is empty; otherwise refuse cold paths containing
+content before mutation. An initialized copy is cloned offline from the
+parent's own checkout rather than the remote. Effective `url.*.insteadOf`
+configuration that could rewrite that pinned local path is refused, and the
+clone command independently denies network protocols. The fork restores every
+`remote.origin.url` value in its original order, checks out the parent
+submodule's exact commit detached, copies its working-tree state, and recurses.
+Verification re-checks initialization, commit identity, detached state, exact
+remote URL values, and content, so a wrong commit or changed remote fails the
+fork rather than passing silently. Unmerged index stages inside any initialized
+submodule are also refused before branch or worktree creation.
+
+The one fidelity limit: only the ordered `remote.origin.url` values are restored inside each
+carried submodule. Other configuration — fetch refspecs, sparse-checkout
+settings, hooks — is whatever the fresh `git submodule add` step produced, not
+a copy of the parent's own local overrides. A completed fork's notices name
+this limit and list what was carried.
+
+`--no-with-submodules` reproduces the older, pre-carry behavior: submodules
+are left as opaque gitlinks, a notice explains what was not carried, and an
+unstaged submodule advance the child cannot represent is refused before any
+mutation (`submodule_unrepresentable`, exit 5) rather than silently dropped.
+
 ## Compatibility policy
 
 The v1 JSON result schema is open and stable within major version 1 as documented
@@ -797,7 +834,7 @@ same paths.
 | 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy`, `entry_unreadable`, `strict_skip_refused` |
 | 2 | Usage error or required prompt disabled | `config_error` |
 | 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown`, `claude_parent_incomplete_analysis` |
-| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable`, `conflict_fork_registered`, `cleanup_registry_stale`, `cleanup_registry_ambiguous` |
+| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable`, `submodule_cold_content`, `submodule_transport_unsafe`, `conflict_fork_registered`, `cleanup_registry_stale`, `cleanup_registry_ambiguous` |
 | 130 / 143 | Interrupted by SIGINT / SIGTERM | `interrupted_sigint`, `interrupted_sigterm` |
 
 Exit 4 remains reserved because this local tool has no authentication failure

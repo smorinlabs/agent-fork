@@ -7,9 +7,9 @@ verification verdict through implementation sign-off.
 |---|---|
 | 1. Adversarial verification | **CONFIRMED-WITH-CORRECTIONS** (2026-08-17) — matrices below; Codex second lens returned CONFIRM-WITH-CORRECTIONS, findings 5 and 6 narrow the verdict wording |
 | 3. Design doc | this document |
-| 4. Plan + adversarial plan review (incl. Codex) | **NOT-READY** on both passes. First pass 2026-08-17: nine findings, four high, all absorbed. Re-validated against main 2026-08-20 after 51 commits (fault unchanged; `:(literal)` requirement added). Second pass 2026-08-20: **NOT-READY** — two blockers, both absorbed below (pins-vs-verbatim-reuse collision; carrying activated before its flag and verifier). Report file was lost to a read-only sandbox; findings recovered from the job log and independently re-verified. **Third pass required before gate 5** |
-| 5. Implementation (TDD, subagent-driven) | blocked on gate 4 re-review |
-| 6. Adversarial implementation review (incl. Codex) | pending |
+| 4. Plan + adversarial plan review (incl. Codex) | **NOT-READY on four passes, closed by owner decision 2026-08-21 rather than pursuing a fifth.** Passes 1–3 summarized below this table's history (see git log on this file for the full text of each). Pass 4, 2026-08-21, scoped to the steps-6/7/8 merge: four findings, all absorbed — see the pass-4 commit (`d8099b9`) for the full list. Across four passes, zero mechanism-level defects survived past pass 2; every pass-3 and pass-4 finding was plan-prose precision, not a design flaw, and two of those findings were introduced by the prior round's own fix rather than pre-existing — the pattern of diminishing severity plus doc-editing risk outweighing review value is why the owner stopped here. Remaining precision risk is deferred to gate 6, which caught real bugs on A6a's own two rounds and reviews actual code rather than prose describing code that does not yet exist. |
+| 5. Implementation (TDD, subagent-driven) | **complete**, 2026-08-21 — all 8 steps plus a coverage-gap-closure pass, this branch; `just all`, `just check-matrix`, `just test-git-matrix` all green |
+| 6. Adversarial implementation review (incl. Codex) | **round 1: REJECT** (2026-08-21, Codex) — 8 findings, all independently verified real by direct code reading and reproduction before any fix; absorbed. **round 2: REJECT** (2026-08-21, Codex) — 10 findings against the post-merge tree (branch merged with `origin/main`'s A3/A10/A11/A12 between rounds). 9 confirmed real by direct reproduction and absorbed (see commit for the full list); 1 (verify-before-setup-hook ordering, `pipeline.py`) confirmed real but classified as a pre-existing pattern `main`'s own top-level `finish()` already has identically — not an A6b regression, left as a candidate future item rather than fixed here. **Known accepted residual of finding 1's reasoned-skip fix:** a `=`-named submodule with genuine dirt (not just clean and initialized) still rolls back the whole fork — the reasoned skip correctly leaves it cold, but dirt cannot be carried into a checkout that stays cold, so `exact-copy-status` legitimately disagrees; the fork failing is arguably correct, only the surfaced explanation is poor (rung 6 is exempted, but the mismatch is caught by a different rung with no reference back to the `=`-in-name reason). Not fixed here; T-VER-56 only covers the clean case. **round 3: REJECT** (2026-08-21, Codex) — confirmation-scoped, not a full re-review. 9 of round 2's 10 items CONFIRMED-FIXED, finding 6 CONFIRMED as intentionally-not-fixed with its documentation accurate; finding 2's own fix (the `check_git_matrix.sh` trap) was found broken a SECOND time — the double-quoted bake-in avoided the local-scope problem but is itself unsafe if `$tmp` ever contains a single quote (possible via `$TMPDIR`), reproduced by the reviewer in its own environment (this session's sandbox pins `TMPDIR`, so the specific apostrophe scenario could not be reproduced locally and was accepted analytically). Re-fixed by changing idiom rather than patching the quoting: `tmp` is no longer `local`, so the trap goes back to a plain, safe, single-quoted `'rm -rf "$tmp"'` — no interpolation, no scope loss. Verified the trap fires and actually removes the directory on the exact `set -e`-mid-function exit path this whole finding is about (captured the printed path from a subprocess, confirmed it gone after that subprocess exited non-zero). Two low doc-text findings also absorbed: T-VER-50's matrix row described the pin's old, weaker contract rather than the flag's current unconditional one; T-MAT-70's docstring claimed newline coverage the fixture does not exercise (`git submodule add --name` rejects a literal newline outright). **round 4: 2/3 CONFIRMED-FIXED, 1 blocked** (2026-08-21, Codex, narrowly scoped) — the two doc-text items (T-VER-50 row, T-MAT-70 docstring) CONFIRMED-FIXED. The trap-fix reproduction (item 1) came back "blocked, not disproven" in the reviewer's own words: its sandbox denied `mkdtemp` on an apostrophe-containing path with the identical restriction this session's sandbox hit in round 3, so it could not run the probe it was asked for. Resolved by direct controller reproduction rather than a round 5: created a real directory containing a literal apostrophe with `mkdir` (which the sandbox permits, unlike `mktemp -d` with a hostile template), ran the exact shipped idiom (`tmp` as a plain global, `trap 'rm -rf "$tmp"' EXIT`) against it on the precise `set -e` mid-function exit path this whole finding chain is about, and confirmed the directory removed after the process exited non-zero — no parse error, no quoting hazard. This is strictly stronger evidence than the reviewer's blocked attempt and closes the one open question with no new substance (8 → 10 → 1 fix-defect-plus-2-doc-nits → 0 is convergence, not a ratchet). **Gate 6 complete after four rounds.** |
 
 ## Gate 4 — adversarial plan review, first pass
 
@@ -193,8 +193,8 @@ The work therefore splits, mirroring the `P02-T13` umbrella convention:
 | Solves | The repository is unforkable | The submodule's work is not carried |
 | Change | `--ignore-submodules` filtering at three sites, accurate notice | Full recipe, recursive snapshot, `config_pins`, recursive verification |
 | Evidence | Validated 2026-08-17 against real child worktrees | Manual prototype only, 8 local depth-1 cells |
-| Gate 4 | Small enough that its need for a pass is an open question | Third pass required |
-| Size | Days | The ten-step plan below |
+| Gate 4 | Waived — evidence measured, not reasoned (see "Open items" below) | See the gate-4 row in the table at the top of this document for current status |
+| Size | Days | The eight-step plan below |
 
 The owner's carry-by-default decision is unchanged: `--with-submodules` remains
 the default when A6b ships. Only the sequencing changed, so that users stop
@@ -206,6 +206,64 @@ owner decision at split time. It is resolved in "All three blocking decisions
 are resolved" below: a typed `submodule_unrepresentable` refusal, shipped in
 A6a and gated on submodules not being carried, so A6b removes the limitation
 rather than inheriting it.
+
+## Re-validation against A6a's shipped code, 2026-08-21
+
+A6a merged (`origin/main` at `9956f4a`) since this design was last touched. Its
+actual implementation is more specific than what this design's "opt-out" row
+assumed, and the difference changes what A6b needs to build.
+
+**What A6a actually shipped, unconditionally, with no flag gating it:**
+
+- `--ignore-submodules=dirty` at three sites — `verify.py:114` (status
+  comparison), `content.py:245` (unstaged inventory listing), `cli.py:551`
+  (dry-run preview) — plus `repository.py:269` inside the unrepresentable-check.
+- `content.py` gained real infrastructure this design doc does not mention:
+  `gitlink_paths()` (shared submodule enumeration), `parse_porcelain_status()`
+  (rename-safe porcelain parsing — gate-6 pass 2 found the naive slice
+  fabricates paths from rename source records), and `suppressed_submodules()`
+  (a **per-status-code** comparison between `--ignore-submodules=none` and
+  `=dirty`, not the membership-set comparison this design doc never specified
+  and would have gotten wrong the same way the first attempt did).
+- `materialize.py`'s notice is `submodule_loss_notices()`, built on
+  `suppressed_submodules()`.
+- `repository.py`'s `validate_fork_guards(..., with_state=True)` raises
+  `submodule_unrepresentable` whenever an unstaged, modified (not deleted, not
+  conflicted) gitlink exists and `with_state` is true. **No `with_submodules`
+  parameter exists yet** — there is nothing else to gate it on.
+
+**Consequence for this design's "Flag" table.** The row
+`--no-with-submodules | ... | \`--ignore-submodules=all\` on both status calls
+and the unstaged inventory listing` is **superseded**. Building fresh `=all`
+filtering for the opt-out would discard the precision A6a already shipped —
+the per-status-code comparison that catches a submodule both staged and dirty
+at once, and the rename-safe parser. **A6b's opt-out path is not new code**:
+it is A6a's already-shipped, already-reviewed behavior, gated behind
+`with_submodules=False` instead of being unconditional. Concretely:
+
+- `verify.py:114`, `content.py:245`, `cli.py:551` — the existing
+  `--ignore-submodules=dirty` call becomes conditional
+  (`if not with_submodules`); when `with_submodules` is true, these sites drop
+  the filter entirely (strict comparison, no exemption, per this design's
+  existing "Verification: unchanged; strict, no exemption" cell — that cell
+  was already correct, just not yet wired to a flag because the flag doesn't
+  exist).
+- `repository.py`'s guard condition changes from "fires whenever `with_state`"
+  to "fires whenever `with_state` and not `with_submodules`" — matching the
+  docstring already in the code (`repository.py:254-256`: "A6b removes this
+  limitation for the default path... this guard must not fire").
+- `materialize.py`'s `submodule_loss_notices()` becomes conditional the same
+  way: called under `with_submodules=False`; under `with_submodules=True` a
+  successful carry either emits nothing or a distinct "carried" notice, not
+  this one.
+
+**This does not change the recipe** (init, name/path resolution, offline URL
+override, remote restoration, recursive snapshot, `config_pins`) — that part
+of the design was never about A6a's code and is unaffected. It changes
+implementation plan **step 6**: "gate the four existing
+`--ignore-submodules=dirty` call sites and the existing guard condition on the
+new flag" rather than "add new `=all` filtering", which was never built and
+should not be. Step 6 below reflects this; the earlier draft did not.
 
 ## Design
 
@@ -220,8 +278,8 @@ config key `with_submodules`, and appears in the JSON document beside
 
 | Mode | Carry | Verification |
 |---|---|---|
-| `--with-submodules` (default) | init + recursive transport per the recipe | unchanged; strict, no exemption |
-| `--no-with-submodules` | nothing; submodule directories stay cold | `--ignore-submodules=all` on both status calls and the unstaged inventory listing; notice names what was not carried |
+| `--with-submodules` (default) | init + recursive transport per the recipe | strict, no exemption — the four sites below drop their filter |
+| `--no-with-submodules` | working-tree state stays cold and uncarried; a staged gitlink advance still transports (it always did, via the ordinary staged-patch path) | **A6a's already-shipped behavior, gated rather than rebuilt** (see "Re-validation against A6a's shipped code" above): `--ignore-submodules=dirty` at `verify.py`, `content.py`, `cli.py`, `repository.py`'s guard; `suppressed_submodules()` names what was not carried |
 
 **The opt-out is "do not initialize or carry submodule working trees" — not
 "carry nothing"** (finding 8). Blanket `--ignore-submodules=all` would overstate
@@ -235,10 +293,14 @@ stops checking state the fork actually transported. Precisely:
   suppressed in the parent-vs-child comparison;
 - before filtering, the hidden submodule paths and their state classes are
   inventoried so the notice can name exactly what was dropped, rather than
-  falling silent;
+  falling silent — **this is exactly what `suppressed_submodules()` already
+  does**, comparing per status code rather than path membership so a submodule
+  both staged and dirty is not missed;
 - the `parent-untouched` bracket stays **unfiltered** — it is a different
   comparison (parent before vs parent after), and filtering it would hide a
-  clean-to-changed gitlink transition occurring during the fork.
+  clean-to-changed gitlink transition occurring during the fork. This bracket
+  (`pipeline.py:119`, `verify.py:158`) is not gated by `with_submodules` either
+  way, matching what A6a already does.
 
 Interaction with `--with-state`: `--no-with-state` implies no submodule carry
 (there is no state to carry); `--with-submodules` must not silently re-enable
@@ -334,9 +396,14 @@ later state: a fork that verifies against a moment that never existed as a whole
 
 Therefore: **before creating the worktree**, walk the parent recursively and
 freeze one plan per submodule — name↔path map, initialized-or-cold, HEAD, the
-carried inventory, the content state, and the nested plan beneath it. Carry and
-verification both consume that frozen plan; the parent is rechecked recursively
-after carry, extending the existing `parent-untouched` bracket one level down.
+**resolved `remote.origin.url`** (finding 4: recipe step 3 reads this "before
+the fork," and the frozen plan is the only thing that runs at that moment, so
+it is where the value must live — a helper that reads it afterward would be
+reading mutable parent configuration, the exact hazard step 3 exists to
+avoid), the carried inventory, the content state, and the nested plan beneath
+it. Carry and verification both consume that frozen plan; the parent is
+rechecked recursively after carry, extending the existing `parent-untouched`
+bracket one level down.
 A deterministic race test belongs in the matrix: mutate inner dirty bytes between
 creation and carry while the top-level status record is unchanged, and require
 the fork to fail rather than pass.
@@ -356,6 +423,109 @@ matrix gains rows for `diff.ignoreSubmodules`, `submodule.<name>.ignore`,
 `submodule.recurse`, and `status.submoduleSummary` set in repository
 configuration — none of these may be assumed to hold their defaults or to be
 cloned.
+
+**Implementation-time finding (2026-08-21, during the coverage audit
+preceding gate 6), corrected by gate 6 itself.** `SEMANTIC_PINS` originally
+shipped with only `diff.ignoreSubmodules`, applied to `carry_submodules` and
+`verify_submodules` but NOT to `snapshot_submodules`'s own internal
+`collect_inventory`/`capture_state` calls. The coverage-audit pass verified
+the `-c` pin loses to a command-line `--ignore-submodules` flag and to a
+per-submodule `submodule.<name>.ignore` config value (matching this
+section's own original warning), but concluded from that alone that the gap
+was "real but currently inert" because `snapshot_submodules`,
+`carry_submodules`, and `verify_submodules` all independently enumerate
+submodules via `.gitmodules`/the index, not via the vulnerable
+`collect_inventory` call. **That conclusion was wrong.** Gate 6 (finding 2)
+found the actual failure mode: with ambient `diff.ignoreSubmodules=all` set
+inside a submodule's own config and its inner submodule genuinely advanced,
+the UNPINNED snapshot's `plan.content` never recorded the advance, while
+carry (pinned) correctly transported it and verify (pinned) correctly
+detected it in the child — producing a false "newly carried" verification
+failure for a submodule carry did exactly the right thing on. The domain
+mismatch, not enumeration, was the real risk; the audit's own end-to-end
+test never actually drove the full snapshot→carry→verify pipeline, only the
+`collect_inventory` primitive directly, which is why it missed this. Fixed
+by threading `SEMANTIC_PINS` into `_snapshot_one`'s calls too, and — since
+the same masking can make the child's freshly-initialized submodule and the
+parent's own ambiently-configured one report genuinely different raw
+`git status` output even with correctly-carried content — into
+`pipeline.py`'s and `verify.py`'s own top-level `collect_inventory`/
+`capture_state`/status calls whenever submodules are carried. `T-VER-52` is
+the regression, driving the real pipeline. `submodule.recurse` was not
+independently probed and remains an open, disclosed risk.
+`status.submoduleSummary` only affects git's human-readable long-format
+summary text, not `--porcelain` output, so it cannot affect any
+machine-parsed call agent-fork makes.
+
+### Recursive verification (finding 2)
+
+"Add recursive rungs" named a requirement without specifying what a rung
+checks. That gap is real: two forks can agree on every top-level signal —
+status, inventory, `compare_states` — while a submodule inside them is
+verifiably wrong. Concretely: the parent's submodule sits at commit `Q`; the
+carry step in the child detaches it at the wrong commit, `R`, because the
+frozen snapshot or the checkout step has a bug. Top-level `git status` on both
+sides still reads ` M vendor/module` (or clean, if the top-level gitlink itself
+is unstaged either way) — nothing at the top level distinguishes `R` from `Q`.
+Without a rung that inspects the submodule's own HEAD, this ships silently.
+
+A rung is one check, scoped to one carried submodule, each independently
+triggerable by an injected defect so a test can prove the rung — not just the
+happy path — actually runs:
+
+1. **Initialized/cold parity** — the child is initialized if and only if the
+   frozen snapshot recorded the parent as initialized (cell `g`'s guarantee,
+   now checked rather than assumed).
+2. **HEAD identity** — `git -C <child>/<path> rev-parse HEAD` equals the
+   frozen snapshot's recorded parent submodule HEAD, exactly. This is the rung
+   that would have caught the `Q` vs `R` example above.
+3. **Detached state** — the child's submodule HEAD is detached, not attached
+   to a branch that could later diverge from the pinned commit.
+4. **Status parity** — `git -C <child>/<path> status --porcelain=v1` (under
+   the same semantic pins as capture) matches the frozen snapshot's recorded
+   parent-submodule status, the same comparison `verify_fork` already runs at
+   the top level, recursed one level.
+5. **Content parity** — the frozen inventory and content state for that
+   submodule (staged, unstaged, untracked, per recipe step 5's transport)
+   verify against the child exactly as `content-match` does at the top level.
+6. **Nested-plan completeness** — every submodule the frozen plan recorded at
+   this level has a corresponding rung result; a submodule present in the plan
+   but silently skipped during carry is a failure, not an omission.
+7. **Recursive parent-untouched** — after carry, the *parent's* submodule at
+   this path is rechecked against its own pre-fork snapshot, extending the
+   top-level `parent-untouched` bracket one level down, so carry cannot be the
+   thing that dirties the parent's submodule checkout.
+
+Recursion applies rungs 1–7 at each nested level the frozen plan reaches
+(finding `h`'s depth-1 case, generalized). A failure at any rung is a
+structured `Difference` scoped to that submodule's path, same shape as the
+top-level `content-match` differences, so `error.details.failed_checks` stays
+one flat, addressable list regardless of nesting depth.
+
+**Implementation-time note on rungs 4+5 (2026-08-21, before gate-6 round 2).**
+Rungs 4 and 5 above are described as two separate comparisons, the first a
+raw `git status --porcelain=v1` string match. The shipped implementation
+(`verify_submodules`, `src/agent_fork/submodules.py`) does not run that raw
+comparison; it reuses the same structural `compare_states(plan.content,
+child_content)` the top-level `content-match` rung already runs, one level
+down, folding 4 and 5 into a single call. This is a deliberate
+implementation choice, not an oversight: `compare_states` compares
+`ls-files --stage` index entries (which carry unmerged conflicts as distinct
+per-stage entries, not the porcelain `UU` marker) and per-path manifest
+digests, and is already exercised and trusted at the top level, so reusing
+it here avoids a second parallel parsing path. The accepted residual gap is
+whatever a raw porcelain line would show that this structural comparison
+would not — chiefly porcelain's own rename markers (`R  old -> new`), which
+`compare_states`'s `--no-renames`-derived model reports instead as a
+delete-of-old plus add-of-new; the practical difference is presentation, not
+missed detection, since both forms flag the same path pair as changed. This
+note supersedes the "same comparison ... recursed one level" framing above
+and the gate-6 absorption commit's characterization of this area.
+
+Test rows: inject each defect independently — wrong HEAD, cold when it should
+be warm, attached instead of detached, dirty content, a plan entry silently
+skipped, a parent submodule mutated by carry — and require the fork to fail
+with the rung that defect maps to, not just "something failed."
 
 ### Constraints established by probe, and their resolution
 
@@ -387,28 +557,52 @@ cloned.
 
 ### Notices
 
-- Copy mode: state what was carried, replacing the misleading "copied opaquely"
-  (`materialize.py:109`) — the current text fires while the child's directory is
-  empty.
-- Opt-out: name what was not carried.
+- **Copy mode — still to build.** State what was carried; no such notice exists
+  yet, since `submodule_loss_notices()` (`materialize.py:84`) only ever names
+  what was *not* carried.
+- **Opt-out — already shipped by A6a**, gated behind `with_submodules=False`
+  under the "Flag" table above rather than built here:
+  `submodule_loss_notices()` names what was not carried.
 - Depth: when a nested submodule is left cold, say so rather than implying full
-  recursion.
+  recursion — still to build, part of the copy-mode notice above.
 
 ## Implementation plan (TDD; subagent-driven)
 
-**Ordering rule** (gate-4 re-review 2026-08-20): the first draft activated
-recursive carrying at step 4, before the flag that disables it and the verifier
-that checks it existed — an interrupted implementation would have carried
-submodules with no opt-out and no recursive verification. Carrying is now the
-**last** behaviour change: every step before it is inert, so any prefix of this
-plan is a safe stopping point.
+**Ordering rule** (gate-4 re-review 2026-08-20, revised 2026-08-21 after gate-4
+pass 3 found the revision itself unsafe). The first draft activated recursive
+carrying at step 4, before its flag and verifier existed. The second draft
+split the fix across three steps — gate the old protection (6), wire the new
+protection (7), fix the notice (8) — which reintroduced the same defect in
+miniature: between steps 6 and 7, the default path had *neither* protection.
+Splitting a change that must land together is what created both holes, so the
+fix is the same both times: **the four pieces that must change together —
+gating A6a's existing filters/guard off, wiring carry on, adding recursive
+verification, and gating the notice — are now one step**, not three. Every step
+before it stays inert exactly as before; that step is the *only* one where the
+default (`with_submodules=True`) behaviour changes, and its own tests must all
+land green together, in one commit — no intermediate commit within it may leave
+the default path less protected than before the step started.
 
 1. **Test rows first.** Extend the `submodule()` state constructor
    (`tests/conftest.py:168`) to express the nine cells (dirty variants,
    uninitialized-in-parent, nested, staged-in-own-index, and
-   `j_renamed_submodule` where the config name differs from the path). Add G-MAT
-   and G-VER rows for each cell × both modes to `docs/testing/TEST-MATRIX.md`,
-   failing first.
+   `j_renamed_submodule` where the config name differs from the path), **plus
+   the seven axes finding 3 found scheduled nowhere**: a genuine remote URL
+   (not a local path — proves recipe step 3's offline override actually
+   engages rather than being masked by every prior fixture using a path
+   already), a relative `.gitmodules` URL, a configured
+   `submodule.<name>.update` policy (`none`, matching finding 2's original
+   repro), depth-2 dirt, ambient ignore configuration (`diff.ignoreSubmodules`,
+   `submodule.<name>.ignore`, `submodule.recurse`, `status.submoduleSummary`,
+   per "Semantic pins" above), ignored-file state inside a submodule
+   (`--with-ignored` interaction), and the deterministic mixed-time race from
+   "The recursive snapshot" above (mutate inner dirty bytes between creation
+   and carry while the top-level status record is unchanged; the fork must
+   fail). Sixteen cells total. Add G-MAT and G-VER rows for each cell × both
+   modes to `docs/testing/TEST-MATRIX.md`, failing first. **No later step may
+   complete while any of these sixteen lacks a row** — this replaces the
+   "Cells the matrix still owes" bullet in Open items below, which is now
+   satisfied by this list rather than left unscheduled.
 2. **`config_pins` at the chokepoint** — `run_git(..., config_pins=())`
    prepending `-c k=v`, threaded through `materialize`, `collect_inventory`, and
    `capture_state`. Enabling primitive; no caller passes pins yet, so behaviour
@@ -421,30 +615,86 @@ plan is a safe stopping point.
    unknown mapping key (`config.py:41-51`); `ForkRequest` (`pipeline.py:35-46`);
    the dry-run preview; `ForkOutput` and its JSON mode object
    (`output.py:26-57`); config get/set/show; completion and help text. The flag
-   is inert until step 7. Add precedence tests for `--no-with-state` against
+   is inert until step 6. Add precedence tests for `--no-with-state` against
    every explicit and configured `with_submodules` value.
 4. **Recursive snapshot** — resolve the frozen submodule plan in the parent
    before `create_worktree_at_anchor`, alongside the existing inventory and
-   status bracket (`pipeline.py:113-129`). Read-only: computed and returned,
+   status bracket (`pipeline.py:113-129`, the capture itself at `:119`). Read-only:
+   computed and returned,
    not yet consumed.
 5. **`submodules.py`** — the recipe and its recursion, taking the frozen plan
    plus `with_state` / `with_ignored` / `config_pins` / `env`, and returning
    carried paths, skipped paths, and notices. Unit-tested directly; not yet
    called by the pipeline.
-6. **Recursive verification** — rungs per carried submodule with the semantic
-   pins; opt-out filtering on `status_args` (`verify.py:103`) and the unstaged
-   inventory listing (`content.py:158`), leaving the staged path carried.
-   `pipeline.py:114` and `verify.py:146` are a matched pair for the
-   `parent-untouched` rung: that bracket stays unfiltered on both sides. With
-   nothing carrying yet, this verifies the status quo and must stay green.
-7. **Pipeline wiring — the behaviour change.** Carry after
-   `create_worktree_at_anchor`, before verification, consuming the frozen plan,
-   gated on the flag. The nine cells flip from red to green here.
-8. **Notices and JSON document** — `materialize.py:91`, `output.py`; including
-   the structured loss notice for the opt-out and the configuration-fidelity
-   limit from recipe step 3.
-9. **`scripts/check_git_matrix.sh`** — copy-mode rows.
-10. **Docs** — README, skill text, and the four prose copies of the recipe.
+6. **Activation — the one step where default behaviour changes, landed as one
+   commit.** Four things happen together; none is meaningful alone. Exact
+   predicates (gate-4 pass 4 finding 1 — the merge stated the relationship in
+   prose but never pinned the booleans an implementer actually writes):
+
+   | | Condition |
+   |---|---|
+   | A6a's existing protection (guard + three filters) | `with_state and not with_submodules` |
+   | Carry, and recursive verification | `with_state and with_submodules` |
+   | `with_state=False` | neither fires, matching A6a's existing carve-on — no state carried, nothing to protect or carry (`repository.py`'s docstring on `with_state`) |
+
+   - **Gate A6a's existing protection off for the carrying path.**
+     `--ignore-submodules=dirty` at `verify.py:114`, `content.py`'s unstaged
+     listing (~line 245), `cli.py:551`, and the guard condition in
+     `repository.py`'s `validate_fork_guards` (currently `if with_state`, per
+     `repository.py:346-348`) all ship unconditionally-on-`with_state` today.
+     Change each to `with_state and not with_submodules` — **and**, not a bare
+     replacement of the existing condition.
+   - **Wire carry on**, gated on `with_state and with_submodules`. Consume the
+     frozen plan (step 4) through the recipe (step 5), which returns carried
+     paths, skipped paths, and notices; carry after `create_worktree_at_anchor`,
+     before verification. The sixteen cells from step 1 flip from red to
+     green here — not nine; step 1 was expanded by finding 3's absorption.
+   - **Add the seven recursive verification rungs** specified under "Recursive
+     verification" above, gated on the same `with_state and with_submodules`
+     condition. Rung 6, nested-plan completeness, needs **both** inputs from
+     the two bullets above — the frozen plan (every submodule that should have
+     been carried) and the carry step's own `skipped paths` return value
+     (which ones actually were) — a rung that reads only the frozen plan
+     cannot detect a submodule the carry step silently skipped, which is
+     exactly the failure this rung exists to catch (gate-4 pass 4 finding 2).
+   - **Gate the notice, and restore what old step 8 specified before the
+     merge compressed it away** (gate-4 pass 4 finding 3): `output.py`'s
+     `ForkOutput` JSON document carries the notices produced here, same as any
+     other notice; `submodule_loss_notices()` (`materialize.py:84`) stays the
+     opt-out message, now conditional on `with_state and not with_submodules`;
+     the new "what was carried" notice (the "Copy mode — still to build"
+     bullet under "Notices" above) fires on a successful carry and **must
+     state the configuration-fidelity limit from recipe step 3** — only
+     `remote.origin.url` is restored, not fetch refspecs or
+     `submodule.<name>.active`.
+
+   `pipeline.py:119` and `verify.py:158` — the `parent-untouched` rung — stay
+   unfiltered on both sides throughout, unconditionally, matching what A6a
+   already does; this rung is not part of the four and does not change here.
+
+   Because these four land together, **no reviewed or merged commit boundary**
+   has a submodule protection gap (gate-4 pass 4 finding 4 — the earlier
+   wording, "no point inside this step," was false: the bullets above are
+   listed by concern, not by build order, and gating old protection off before
+   carry and verification exist is a real, permitted mid-step WIP state).
+   TDD's own discipline gives the safe internal order for free: write the
+   red tests for carry, recursive verification, and the new notice first;
+   implement and turn them green while the old protection is still active
+   (both protections briefly coexist, which is safe — belt and suspenders,
+   never a gap); only then flip the guard/filter condition to exclude
+   `with_submodules`, confirm every test in the sixteen-cell matrix (step 1)
+   is green under both flag values, and make one commit.
+7. **`scripts/check_git_matrix.sh`** — copy-mode rows against both system Git
+   and Flox Git, covering at minimum the `submodule.<name>.update=none`
+   variance from finding 2's original repro; worktree/submodule interaction has
+   already shown version-dependent behaviour once (finding 3's `--force`
+   requirement). **Clone-cost measurement, bounded**: fork a fixture with one
+   large submodule (≥50k objects or equivalent), record wall-clock delta versus
+   a no-submodules fork of the same parent size, and record the number as a
+   comment in this script — no numeric gate, since one data point is not a
+   regression budget, but a silent "acceptable" was finding 3's complaint and
+   an unrecorded number is the same failure in a different shape.
+8. **Docs** — README, skill text, and the four prose copies of the recipe.
 
 ## Open items
 
@@ -468,22 +718,21 @@ plan is a safe stopping point.
 3. **A6a's gate-4 adversarial pass is waived.** Its change is three call sites
    plus a notice and a guard, on evidence measured against real child worktrees
    rather than reasoned. Gate 6 — adversarial review of the implementation — is
-   unchanged and still applies. A6b's third gate-4 pass is still required.
+   unchanged and still applies. A6b's gate-4 review continues until a pass
+   returns clean; see the gate table at the top of this document for the
+   current pass count and outcome of each.
 
 
-- **Gate 4 third pass required before implementation starts.** Two passes have
-  returned NOT-READY. The second pass's two blockers are absorbed above, but its
-  full report — including the per-finding absorption audit of the first pass's
-  nine findings — was lost when its sandbox mounted the worktree read-only and
-  `apply_patch` was rejected. Only the two findings recorded in its job log were
-  recovered, so **no pass has yet confirmed that findings 1–9 are genuinely
-  absorbed rather than cosmetically reworded.** The third pass must return its
-  report as its final message rather than writing a file.
-- Cells the matrix still owes, per finding 5, before "production feasible" may be
-  claimed: renamed submodule with a genuine **remote** URL; relative
-  `.gitmodules` URL; a configured `submodule.<name>.update` policy; depth-2 dirt;
-  ambient ignore configuration; ignored-file state inside a submodule; and the
-  deterministic mixed-time race from finding 3.
+- **Gate 4 — additional pass required before implementation starts.** Current
+  status, live in the gate table above; do not hardcode a pass number here
+  (this bullet has drifted stale three times already from doing so). Pass 3
+  completed the audit the second pass's lost report could not: all nine
+  first-pass findings individually re-verified, eight confirmed genuinely
+  absorbed and one (8) reopened and fixed. Each pass since has required its
+  report as its final message, never a file — the loss that made pass 3's
+  audit necessary in the first place must not recur.
+- ~~Cells the matrix still owes~~ — **superseded**: these seven axes are now
+  required rows in implementation plan step 1, not a bullet with no owner.
 - The gate's probe scripts are session scaffolding, not repository artifacts;
   their permanent encoding is the test rows in plan step 1. Those rows must
   carry finding 6's correction (separate child worlds for raw removal, refusal,

@@ -17,7 +17,12 @@ from agent_fork.agents import (
     preflight_agent,
     preflight_git,
 )
-from agent_fork.content import capture_state, collect_inventory, sentinel_for
+from agent_fork.content import (
+    SkipRecord,
+    capture_state,
+    collect_inventory,
+    sentinel_for,
+)
 from agent_fork.errors import (
     PreconditionError,
     StrictSkipRefusedError,
@@ -42,6 +47,7 @@ from agent_fork.repository import (
     validate_fork_guards,
 )
 from agent_fork.rollback import run_with_rollback
+from agent_fork.submodules import SEMANTIC_PINS, carry_submodules, snapshot_submodules
 from agent_fork.text import escape_terminal_text
 from agent_fork.verify import verify_fork
 
@@ -55,6 +61,7 @@ class ForkRequest:
     agent: AgentContext | None
     with_state: bool = True
     with_ignored: bool = False
+    with_submodules: bool = True
     verify: bool = True
     force: bool = False
     strict: bool = False
@@ -153,6 +160,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         request.branch,
         request.destination,
         with_state=request.with_state,
+        with_submodules=request.with_submodules,
         env=env,
     )
     # Refuse a name this repository already has a fork of, here — before any
@@ -188,16 +196,37 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
     parent_status = run_git(
         request.parent, ["status", "--porcelain=v1", "-z"], env=env
     ).stdout
+    # SEMANTIC_PINS applies to the top-level capture too, not just the
+    # recursive submodule calls, whenever submodules are carried (gate-6
+    # finding 2): ambient config anywhere in a carried submodule's tree can
+    # otherwise make the top-level inventory see less than what carry and
+    # verify -- both pinned -- see afterward, producing a false difference.
+    top_level_pins = SEMANTIC_PINS if request.with_submodules else ()
     inventory = collect_inventory(
         request.parent,
         with_state=request.with_state,
         with_ignored=request.with_ignored,
+        with_submodules=request.with_submodules,
         env=env,
+        config_pins=top_level_pins,
     )
     parent_state = (
-        capture_state(request.parent, inventory, env=env)
+        capture_state(request.parent, inventory, env=env, config_pins=top_level_pins)
         if request.verify and request.with_state
         else None
+    )
+    # Resolved before the worktree exists — this is what makes it a snapshot
+    # rather than a live read (A6b step 4). Empty whenever submodules are not
+    # being carried, so carry and verification both stay no-ops below.
+    submodule_plans = (
+        snapshot_submodules(
+            request.parent,
+            with_state=request.with_state,
+            with_ignored=request.with_ignored,
+            env=env,
+        )
+        if request.with_state and request.with_submodules
+        else ()
     )
     creation = create_worktree_at_anchor(
         request.parent, request.branch, request.destination, env=env
@@ -211,20 +240,45 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             creation.path,
             with_state=request.with_state,
             with_ignored=request.with_ignored,
+            with_submodules=request.with_submodules,
             inventory=inventory,
+            config_pins=top_level_pins,
             skipped=tuple(skipped),
             env=env,
         )
         notices.extend(materialized.notices)
         skipped.extend(materialized.skipped)
+        verification_skipped = tuple(skipped)
+        submodule_skipped: tuple[str, ...] = ()
+        submodule_reasoned_skipped: tuple[str, ...] = ()
+        submodule_entry_skips: tuple[SkipRecord, ...] = ()
+        if request.with_state and request.with_submodules:
+            carried = carry_submodules(
+                request.parent,
+                creation.path,
+                submodule_plans,
+                with_state=request.with_state,
+                with_ignored=request.with_ignored,
+                env=env,
+            )
+            notices.extend(carried.notices)
+            skipped.extend(carried.entry_skips)
+            submodule_entry_skips = carried.entry_skips
+            submodule_skipped = carried.skipped
+            submodule_reasoned_skipped = carried.reasoned_skipped
         if request.verify:
             verify_fork(
                 creation,
                 with_state=request.with_state,
                 with_ignored=request.with_ignored,
+                with_submodules=request.with_submodules,
                 parent_status_before=parent_status,
                 parent_state_before=parent_state,
-                skipped=tuple(skipped),
+                submodule_plans=submodule_plans,
+                submodule_skipped=submodule_skipped,
+                submodule_reasoned_skipped=submodule_reasoned_skipped,
+                submodule_entry_skips=submodule_entry_skips,
+                skipped=verification_skipped,
                 env=env,
             )
         included = copy_worktree_includes(

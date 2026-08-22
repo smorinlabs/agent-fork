@@ -294,6 +294,7 @@ def test_validate_values_finding_names_key_value_allowed_and_source(repo_scenari
     resolved = ResolvedConfig(
         with_state=True,
         with_ignored=False,
+        with_submodules=True,
         branch_prefix="fork/",
         worktree_location="sibling",
         worktree_location_explicit=False,
@@ -333,6 +334,7 @@ def test_validate_values_returns_every_finding_not_just_the_first(repo_scenario)
     resolved = ResolvedConfig(
         with_state=True,
         with_ignored=False,
+        with_submodules=True,
         branch_prefix="-bad/",
         worktree_location="{bogus}/x",
         worktree_location_explicit=True,
@@ -410,6 +412,7 @@ def test_config_get_dotted_addressing_including_arrays(repo_scenario):
     base = ResolvedConfig(
         with_state=True,
         with_ignored=False,
+        with_submodules=True,
         branch_prefix="fork/",
         worktree_location="sibling",
         worktree_location_explicit=False,
@@ -445,6 +448,7 @@ def test_config_get_rejects_every_internal_attribute(repo_scenario):
     base = ResolvedConfig(
         with_state=True,
         with_ignored=False,
+        with_submodules=True,
         branch_prefix="fork/",
         worktree_location="sibling",
         worktree_location_explicit=False,
@@ -492,6 +496,7 @@ def test_unknown_key_is_escaped_in_get_and_set_error_messages(repo_scenario, tmp
     base = ResolvedConfig(
         with_state=True,
         with_ignored=False,
+        with_submodules=True,
         branch_prefix="fork/",
         worktree_location="sibling",
         worktree_location_explicit=False,
@@ -612,3 +617,167 @@ def test_setup_hook_keys_default_and_obey_precedence(repo_scenario):
         ).setup_hook_policy
         == "off"
     )
+
+
+@pytest.mark.matrix("T-CFG-40")
+def test_with_submodules_unset_defaults_true(repo_scenario):
+    """A6b step 3 — with_submodules unset resolves to True (owner decision)."""
+    from agent_fork.config import resolve_config
+
+    assert resolve_config().with_submodules is True
+
+
+@pytest.mark.matrix("T-CFG-41")
+def test_no_with_state_forces_with_submodules_false_regardless_of_order(
+    repo_scenario,
+):
+    """A6b step 3 — --no-with-state implies no submodule carry.
+
+    Mirrors the existing with_state/with_ignored coupling (T-CFG-01..03), and
+    is tested against *every* explicit and configured with_submodules value,
+    per the implementation plan's own requirement — an implicit rule that only
+    held for one ordering would be worse than no rule.
+    """
+    from agent_fork.config import resolve_config
+
+    # with_submodules explicit True, with_state False in the SAME source.
+    assert (
+        resolve_config(
+            sources=({"with_state": False, "with_submodules": True},)
+        ).with_submodules
+        is False
+    )
+    # with_state False first, with_submodules True in a LATER, higher-precedence
+    # source -- with_submodules must not silently re-enable state transport.
+    assert (
+        resolve_config(
+            sources=({"with_state": False},), flags={"with_submodules": True}
+        ).with_submodules
+        is False
+    )
+    # with_submodules True first, with_state False arriving later still wins.
+    assert (
+        resolve_config(
+            sources=({"with_submodules": True},), flags={"with_state": False}
+        ).with_submodules
+        is False
+    )
+    # with_submodules explicitly False plus with_state False: still False,
+    # for the ordinary reason (both agree), not just the implication.
+    assert (
+        resolve_config(
+            sources=({"with_state": False, "with_submodules": False},)
+        ).with_submodules
+        is False
+    )
+
+
+@pytest.mark.matrix("T-CFG-42")
+def test_with_submodules_true_does_not_imply_with_state(repo_scenario):
+    """A6b step 3 — the coupling is deliberately one-directional.
+
+    `--with-ignored` implies `--with-state` (T-CFG-03); `--with-submodules`
+    must NOT — the design doc calls this out explicitly, because silently
+    re-enabling state transport from a flag about submodules would be a
+    surprising side effect on unrelated state.
+    """
+    from agent_fork.config import resolve_config
+
+    resolved = resolve_config(sources=({"with_state": False, "with_submodules": True},))
+    assert resolved.with_state is False
+    assert resolved.with_submodules is False  # still forced off by with_state
+
+
+@pytest.mark.matrix("T-CFG-43")
+def test_with_submodules_flag_wins_over_config_source(repo_scenario):
+    """A6b step 3 — explicit flags outrank configured sources, same as with_state."""
+    from agent_fork.config import resolve_config
+
+    resolved = resolve_config(
+        sources=({"with_submodules": False},), flags={"with_submodules": True}
+    )
+    assert resolved.with_submodules is True
+
+
+@pytest.mark.matrix("T-CFG-44")
+def test_with_submodules_round_trips_through_config_file(repo_scenario):
+    """A6b step 3 — `[fork] with_submodules` loads like the other bools."""
+    from agent_fork.config import ConfigError, load_config, resolve_config
+
+    world = repo_scenario()
+    path = world.parent_path / "agent-fork_config.toml"
+    path.write_text("[fork]\nwith_submodules = false\n")
+    loaded = load_config(path)
+    assert resolve_config(sources=(loaded,)).with_submodules is False
+
+    bad = world.parent_path / "bad.toml"
+    bad.write_text('[fork]\nwith_submodules = "yes"\n')
+    with pytest.raises(ConfigError, match="must be boolean"):
+        load_config(bad)
+
+
+@pytest.mark.matrix("T-CFG-45")
+def test_with_state_restored_by_a_later_source_restores_with_submodules_default(
+    repo_scenario,
+):
+    """Gate-6 finding 4 -- a LOWER-precedence with_state=False must not
+    permanently zero with_submodules once a HIGHER-precedence source
+    re-enables with_state. The prior implementation destructively reset
+    with_submodules to False inside the with_state branch, and nothing
+    restored it when a later source only touched with_state -- an explicit
+    `--with-state` meant to override a config file's with_state=false
+    silently left submodule carrying off, contrary to the documented
+    default.
+    """
+    from agent_fork.config import resolve_config
+
+    resolved = resolve_config(
+        sources=({"with_state": False},), flags={"with_state": True}
+    )
+    assert resolved.with_state is True
+    assert resolved.with_submodules is True
+
+
+@pytest.mark.matrix("T-CFG-46")
+def test_with_submodules_is_a_registered_config_key(repo_scenario):
+    """Gate-6 round 2 finding 3 -- A11 introduced `KEY_SPECS`, the registry
+    `config_get`/`config_set` resolve every key through, but never gained an
+    entry for `with_submodules` (it did not exist on `main` yet when A11
+    shipped). Both the bare and dotted forms of a documented, effective
+    config key must resolve, not raise `unknown config key`.
+    """
+    from agent_fork.config import (
+        ConfigError,
+        ResolvedConfig,
+        config_get,
+        set_user_value,
+    )
+
+    base = ResolvedConfig(
+        with_state=True,
+        with_ignored=False,
+        with_submodules=True,
+        branch_prefix="fork/",
+        worktree_location="sibling",
+        worktree_location_explicit=False,
+        agent_mode="auto",
+        verify=True,
+        copy=False,
+        output="text",
+        config_path=None,
+        claude_extra_args=(),
+        codex_extra_args=(),
+        codex_session_name_resolution=False,
+        setup_hook_policy="tracked",
+        setup_hook_timeout=300,
+    )
+    assert config_get(base, "with_submodules") == "true"
+    assert config_get(base, "fork.with_submodules") == "true"
+
+    path = repo_scenario().parent_path / "cfg.toml"
+    set_user_value(path, "with_submodules", "false")
+    assert path.read_text().strip() == "[fork]\nwith_submodules = false"
+    set_user_value(path, "fork.with_submodules", "true")
+    assert path.read_text().strip() == "[fork]\nwith_submodules = true"
+    with pytest.raises(ConfigError):
+        config_get(base, "with_submodule")

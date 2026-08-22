@@ -27,6 +27,7 @@ def test_renamed_codex_identity_is_additive_in_json():
         anchor_commit="a" * 40,
         with_state=False,
         with_ignored=False,
+        with_submodules=False,
         verification={"enabled": True, "passed": True},
         command=f"codex fork {PARENT} -C /tmp/child",
         notices=("resolved Codex session name 'hello'",),
@@ -372,7 +373,11 @@ def test_json_success_object_carries_req17_minimum_fields(repo_scenario):
     assert set(document["fork"]) >= {"branch", "worktree", "anchor_commit", "mode"}
     assert document["fork"]["branch"] == "fork/schema"
     assert Path(document["fork"]["worktree"]).is_dir()
-    assert document["fork"]["mode"] == {"with_state": True, "with_ignored": False}
+    assert document["fork"]["mode"] == {
+        "with_state": True,
+        "with_ignored": False,
+        "with_submodules": True,
+    }
     assert document["verification"] == {"enabled": True, "passed": True}
     assert document["command"].endswith("--fork-session -n schema")
     assert document["notices"] == []
@@ -956,3 +961,93 @@ def test_successful_skip_notice_uses_stderr_once_and_stays_in_json(repo_scenario
         {"path": "locked.txt", "reason": "unreadable", "phase": "capture"}
     ]
     assert machine.stderr.decode().count(notice) == 1
+
+
+@pytest.mark.matrix("T-OUT-33")
+def test_cold_submodule_content_has_exact_json_details(repo_scenario):
+    """The cold-content refusal identifies bounded, qualified entries."""
+    from agent_fork.errors import PreconditionError
+    from agent_fork.output import render_error
+
+    repo_scenario()
+    error = PreconditionError(
+        "submodule_cold_content",
+        "cold submodule directory contains content",
+        details={
+            "submodule": "vendor/submodule",
+            "entries": ["vendor/submodule/.hidden", "vendor/submodule/loose.txt"],
+            "count": 2,
+        },
+    )
+    assert json.loads(render_error(error, machine=True)) == {
+        "error": {
+            "code": "submodule_cold_content",
+            "message": "cold submodule directory contains content",
+            "details": {
+                "submodule": "vendor/submodule",
+                "entries": [
+                    "vendor/submodule/.hidden",
+                    "vendor/submodule/loose.txt",
+                ],
+                "count": 2,
+            },
+        }
+    }
+
+
+@pytest.mark.matrix("T-OUT-34")
+def test_unsafe_submodule_transport_has_exact_json_details(repo_scenario):
+    """The transport refusal exposes the matching prefix, not the target URL."""
+    from agent_fork.errors import PreconditionError
+    from agent_fork.output import render_error
+
+    repo_scenario()
+    source = "/repo/vendor/submodule"
+    error = PreconditionError(
+        "submodule_transport_unsafe",
+        "ambient Git URL rewrite matches the local submodule source",
+        details={
+            "submodule": "vendor/submodule",
+            "source": source,
+            "rewrite_prefix": source,
+        },
+    )
+    assert json.loads(render_error(error, machine=True)) == {
+        "error": {
+            "code": "submodule_transport_unsafe",
+            "message": "ambient Git URL rewrite matches the local submodule source",
+            "details": {
+                "submodule": "vendor/submodule",
+                "source": source,
+                "rewrite_prefix": source,
+            },
+        }
+    }
+
+
+@pytest.mark.matrix("T-OUT-35")
+def test_recursive_skip_uses_qualified_json_and_stderr_path(repo_scenario):
+    """A successful recursive skip crosses the CLI boundary exactly once."""
+    from conftest import run_cli, submodule
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="untracked"),))
+    locked = world.parent_path / "vendor/submodule/loose.txt"
+    os.chmod(locked, 0)
+    try:
+        completed = run_cli(
+            ["fork", "recursive-skip-json", "--no-agent", "--json"],
+            world.env,
+            world.parent_path,
+        )
+    finally:
+        os.chmod(locked, 0o644)
+
+    assert completed.returncode == 0
+    document = json.loads(completed.stdout)
+    qualified = "vendor/submodule/loose.txt"
+    notice = f"skipped entry, not carried: {qualified}"
+    assert document["notices"].count(notice) == 1
+    assert document["skipped"] == [
+        {"path": qualified, "reason": "unreadable", "phase": "capture"}
+    ]
+    assert completed.stderr.decode().count(notice) == 1

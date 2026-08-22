@@ -48,6 +48,7 @@ class ForkOutput:
     anchor_commit: str
     with_state: bool
     with_ignored: bool
+    with_submodules: bool
     verification: dict[str, bool]
     command: str
     notices: tuple[str, ...] = ()
@@ -70,6 +71,7 @@ class ForkOutput:
                 "mode": {
                     "with_state": self.with_state,
                     "with_ignored": self.with_ignored,
+                    "with_submodules": self.with_submodules,
                 },
             },
             "verification": self.verification,

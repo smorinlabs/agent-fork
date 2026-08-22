@@ -443,3 +443,41 @@ def test_harness_git_floor_gate():
         )
         is not None
     )
+
+
+@pytest.mark.matrix("T-FIX-35")
+def test_submodule_url_rewrite_preserves_earlier_staged_state(repo_scenario):
+    """A URL rewrite commits only `.gitmodules`, never unrelated index state.
+
+    Combining a staged file with a URL-rewritten dirty submodule exercises both
+    failure modes from PR #67's fixture review: the earlier staged file must
+    survive, and `_dirty_submodule` must still have an uncommitted gitlink to
+    commit before applying the requested dirt.
+    """
+    from conftest import staged, submodule
+
+    world = repo_scenario(
+        "plain@main",
+        states=(
+            staged(add="staged.txt"),
+            submodule(dirty="modified", url_kind="relative"),
+        ),
+    )
+    staged_paths = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(world.parent_path),
+            "diff",
+            "--cached",
+            "--name-only",
+            "-z",
+        ],
+        env=world.env,
+        capture_output=True,
+        check=True,
+    ).stdout.split(b"\0")
+    assert {path for path in staged_paths if path} == {b"staged.txt"}
+    assert (
+        world.parent_path / "vendor/submodule/tracked.txt"
+    ).read_text() == "submodule modified\n"

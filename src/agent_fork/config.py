@@ -29,6 +29,7 @@ XDG_RELATIVE_PATH = Path("agent-fork/agent-fork_config.toml")
 _FORK_KEYS = {
     "with_state",
     "with_ignored",
+    "with_submodules",
     "branch_prefix",
     "worktree_location",
     "agent_mode",
@@ -38,7 +39,7 @@ _FORK_KEYS = {
     "setup_hook_policy",
     "setup_hook_timeout",
 }
-_BOOL_KEYS = {"with_state", "with_ignored", "verify", "copy"}
+_BOOL_KEYS = {"with_state", "with_ignored", "with_submodules", "verify", "copy"}
 _GIT_REF_ILLEGAL_SUBSTRINGS = ("~", "^", ":", "?", "*", "[", "\\", "..", "@{")
 
 
@@ -138,6 +139,7 @@ class ConfigFinding:
 KEY_SPECS: tuple[KeySpec, ...] = (
     KeySpec("fork.with_state", "with_state", "fork", "bool"),
     KeySpec("fork.with_ignored", "with_ignored", "fork", "bool"),
+    KeySpec("fork.with_submodules", "with_submodules", "fork", "bool"),
     KeySpec(
         "fork.branch_prefix",
         "branch_prefix",
@@ -390,6 +392,7 @@ def resolve_config(
 
     with_state = True
     with_ignored = False
+    with_submodules = True
     branch_prefix = DEFAULT_BRANCH_PREFIX
     worktree_location = DEFAULT_WORKTREE_LOCATION
     worktree_location_explicit = False
@@ -409,10 +412,24 @@ def resolve_config(
             with_state = source.with_state
             if not source.with_state:
                 with_ignored = False
+                # with_submodules is deliberately NOT reset here: the final
+                # `with_submodules and with_state` AND below already turns it
+                # off whenever with_state stays off. Resetting it here too was
+                # destructive across sources -- a later, higher-precedence
+                # source that only re-enables with_state (without touching
+                # with_submodules) must see with_submodules return to its own
+                # independently resolved value, not a value this branch
+                # permanently zeroed (gate-6 finding 4).
         if source.with_ignored is not None:
             with_ignored = source.with_ignored
             if source.with_ignored:
                 with_state = True
+        if source.with_submodules is not None:
+            with_submodules = source.with_submodules
+            # Deliberately asymmetric with with_ignored: with_submodules must
+            # not silently re-enable state transport (A6 design doc, "Flag").
+            # --no-with-state stays authoritative even if a later source sets
+            # with_submodules=True.
         if source.branch_prefix is not None:
             branch_prefix = source.branch_prefix.strip() or DEFAULT_BRANCH_PREFIX
             provenance["branch_prefix"] = label
@@ -452,6 +469,7 @@ def resolve_config(
     resolved = ResolvedConfig(
         with_state=with_state,
         with_ignored=with_ignored,
+        with_submodules=with_submodules and with_state,
         branch_prefix=branch_prefix,
         worktree_location=worktree_location,
         worktree_location_explicit=worktree_location_explicit,

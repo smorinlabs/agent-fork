@@ -375,18 +375,41 @@ def test_cli_forwards_the_no_state_mode_to_the_submodule_guard(repo_scenario):
     T-GRD-23 calls `validate_fork_guards(with_state=False)` directly, so it stays
     green even if neither the CLI nor the pipeline forwards the mode. This row
     runs the real console script, so removing either forwarding turns it red.
+
+    `--no-with-submodules` is required on the refusal leg since A6b (owner
+    decision 2026-08-17): under the *default* flags this case now carries
+    successfully instead of refusing — T-GRD-27 pins that. This row's own
+    job is narrower and unchanged by A6b: prove the CLI forwards both modes
+    to the guard, which needs the guard to actually fire at least once.
     """
     from conftest import run_cli
 
     world = repo_scenario("plain@main", states=(submodule(dirty="advanced"),))
     refused = run_cli(
-        ["fork", "guarded", "--no-agent", "-o", "json"], world.env, world.parent_path
+        [
+            "fork",
+            "guarded",
+            "--no-agent",
+            "--no-with-submodules",
+            "-o",
+            "json",
+        ],
+        world.env,
+        world.parent_path,
     )
     assert refused.returncode == 5
     assert b"submodule_unrepresentable" in refused.stderr
 
     allowed = run_cli(
-        ["fork", "nostate", "--no-agent", "--no-with-state", "-o", "json"],
+        [
+            "fork",
+            "nostate",
+            "--no-agent",
+            "--no-with-state",
+            "--no-with-submodules",
+            "-o",
+            "json",
+        ],
         world.env,
         world.parent_path,
     )
@@ -395,13 +418,51 @@ def test_cli_forwards_the_no_state_mode_to_the_submodule_guard(repo_scenario):
 
 @pytest.mark.matrix("T-CLI-37")
 def test_dry_run_counts_and_notices_match_what_the_fork_will_carry(repo_scenario):
-    """Gate-6 finding 2 — the preview must describe the fork that will happen.
+    """Gate-6 finding 2 (A6a) — the preview must describe the fork that will
+    happen. Scoped to `--no-with-submodules` (A6b's opt-out): under A6b's own
+    default, the preview counts and carries the submodule instead, covered
+    separately by T-CLI-39/T-GRD-29 — this test's original claim survives
+    only for the path where submodules stay opaque.
 
     The dry-run counts came from an unfiltered `git diff --name-only` while the
     real inventory filters submodule working-tree state, so a dirty submodule
     was previewed as one unstaged path that the fork then did not carry, with no
     warning. A preview that over-reports is worse than a bare count: it is the
     one place a user checks before committing to the operation.
+    """
+    import json
+
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="modified"),))
+    completed = run_cli(
+        [
+            "fork",
+            "preview",
+            "--no-agent",
+            "--no-with-submodules",
+            "--dry-run",
+            "-o",
+            "json",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+    document = json.loads(completed.stdout)
+
+    assert document["plan"]["files_to_carry"]["unstaged"] == 0
+    assert any("vendor/submodule" in notice for notice in document["notices"])
+
+
+@pytest.mark.matrix("T-CLI-69")
+def test_dry_run_counts_the_submodule_under_the_default_with_submodules(
+    repo_scenario,
+):
+    """Gate-6 finding 3 — dry-run's own unstaged count hardcoded
+    `--ignore-submodules=dirty` unconditionally, unaware of `with_submodules`
+    at all, so the preview undercounted under A6b's own default: a fork that
+    WOULD carry the submodule previewed as if it would not.
     """
     import json
 
@@ -416,8 +477,53 @@ def test_dry_run_counts_and_notices_match_what_the_fork_will_carry(repo_scenario
     assert completed.returncode == 0, completed.stderr.decode()
     document = json.loads(completed.stdout)
 
-    assert document["plan"]["files_to_carry"]["unstaged"] == 0
-    assert any("vendor/submodule" in notice for notice in document["notices"])
+    assert document["plan"]["files_to_carry"]["unstaged"] == 1
+    assert not any("not carried" in notice for notice in document["notices"]), (
+        "the default preview must not claim loss for what it will actually carry"
+    )
+
+
+@pytest.mark.matrix("T-CLI-70")
+def test_dry_run_staged_count_is_not_hidden_by_a_per_submodule_ignore_config(
+    repo_scenario,
+):
+    """Gate-6 round 2 finding 4's second half. `materialize()` and
+    `collect_inventory()` both now add an explicit `--ignore-submodules=none`
+    to their staged/unstaged listings whenever `with_submodules` is true
+    (confirmed empirically: `submodule.<name>.ignore=all` local config
+    silently drops a staged gitlink advance from `diff --cached --name-only`,
+    and only the explicit flag, never the `-c diff.ignoreSubmodules=none`
+    pin, restores it). The dry-run preview builds its own, separate count
+    args (`cli.py`) rather than reusing `collect_inventory` -- it needed the
+    identical fix, or the preview would undercount exactly what the real
+    fork (now fixed) correctly carries.
+    """
+    import json
+    import subprocess
+
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="advanced-staged"),))
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(world.parent_path),
+            "config",
+            "submodule.vendor/submodule.ignore",
+            "all",
+        ],
+        env=world.env,
+        check=True,
+    )
+    completed = run_cli(
+        ["fork", "preview", "--no-agent", "--dry-run", "-o", "json"],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+    document = json.loads(completed.stdout)
+    assert document["plan"]["files_to_carry"]["staged"] == 1
 
 
 @pytest.mark.matrix("T-CLI-38")

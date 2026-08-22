@@ -13,6 +13,7 @@ class ConfigValues:
 
     with_state: bool | None = None
     with_ignored: bool | None = None
+    with_submodules: bool | None = None
     branch_prefix: str | None = None
     worktree_location: str | None = None
     agent_mode: str | None = None
@@ -33,6 +34,7 @@ class ResolvedConfig:
 
     with_state: bool
     with_ignored: bool
+    with_submodules: bool
     branch_prefix: str
     worktree_location: str
     worktree_location_explicit: bool
