@@ -206,7 +206,7 @@ def test_recursive_verification_catches_a_wrong_submodule_head(repo_scenario):
     assert "submodule-head" in kinds
 
 
-@pytest.mark.matrix("T-OUT-24")
+@pytest.mark.matrix("T-OUT-29")
 def test_json_output_carries_with_submodules_and_the_carry_notice(repo_scenario):
     """The flag's resolved value and the carry outcome both reach the JSON document."""
     from conftest import run_cli

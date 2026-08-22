@@ -109,7 +109,7 @@ def test_setup_hook_failure_notice_escapes_hook_output(repo_scenario, tmp_path):
     This one needs no hostile filename: the hook is a program the repository
     ships, so its stdout and stderr are directly attacker-chosen.
     """
-    from agent_fork.include import run_setup_hook
+    from agent_fork.include import SetupHookPolicy, run_setup_hook
 
     world = repo_scenario()
     child = tmp_path / "child"
@@ -118,7 +118,16 @@ def test_setup_hook_failure_notice_escapes_hook_output(repo_scenario, tmp_path):
     hook.write_text(f"#!/bin/sh\nprintf 'boom{ESC}[2J\\n' >&2\nexit 3\n")
     hook.chmod(0o755)
 
-    notices = run_setup_hook(world.parent_path, child, env=world.env)
+    # `child` is a bare directory, not a worktree, so the eligibility plumbing
+    # cannot answer; `any` runs the hook regardless, which is what this row asserts.
+    result = run_setup_hook(
+        world.parent_path,
+        child,
+        anchor="HEAD",
+        policy=SetupHookPolicy(mode="any", timeout_seconds=300),
+        env=world.env,
+    )
+    notices = result.notices
 
     assert len(notices) == 1
     assert "exit 3" in notices[0]

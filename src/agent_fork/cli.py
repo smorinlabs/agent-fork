@@ -26,6 +26,24 @@ def _user_config_path(environment: dict[str, str]) -> Path:
     return xdg_path(environment, "XDG_CONFIG_HOME", ".config", *XDG_RELATIVE_PATH.parts)
 
 
+def _machine_error_output(args, environment: dict[str, str]) -> bool:
+    """Decide human vs. machine rendering for an error raised by `main()`.
+
+    An explicit `-o`/`--json` flag decides outright, full stop — including
+    when it says "text" and `AGENT_FORK_OUTPUT` says "json". Only when no
+    explicit flag was given at all does a valid `AGENT_FORK_OUTPUT` act as a
+    fallback signal, covering the case where resolution failed on a
+    *different* key before the per-command output mutations above ever ran
+    (F16). Consulting the environment unconditionally would let it override
+    an explicit flag it has no precedence to override.
+    """
+    explicit_json = bool(getattr(args, "json", False))
+    explicit_output = getattr(args, "output", None)
+    if explicit_json or explicit_output is not None:
+        return explicit_json or explicit_output == "json"
+    return environment.get("AGENT_FORK_OUTPUT") == "json"
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-fork",
@@ -176,6 +194,26 @@ def _parser() -> argparse.ArgumentParser:
         help="Verify the completed fork (default: enabled)",
     )
     fork.add_argument(
+        "--setup-hook-policy",
+        choices=("tracked", "any", "off"),
+        default=None,
+        help=(
+            "Repository setup-hook policy: tracked runs it only when it is "
+            "committed at the fork anchor and unchanged on disk, any runs it "
+            "regardless, off never runs it (default: tracked)"
+        ),
+    )
+    fork.add_argument(
+        "--setup-hook-timeout",
+        type=int,
+        metavar="SECONDS",
+        default=None,
+        help=(
+            "Seconds the repository setup hook may run before its process "
+            "group is terminated (default: 300)"
+        ),
+    )
+    fork.add_argument(
         "--force", action="store_true", help="Override only the Git-version floor"
     )
     fork.add_argument(
@@ -210,7 +248,7 @@ def _parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    output_options(session)
+    output_options(session, default=None)
     session_actions = session.add_subparsers(dest="session_action")
     session_validate = session_actions.add_parser(
         "validate", allow_abbrev=False, help="Assert detected session facts"
@@ -258,7 +296,25 @@ def _parser() -> argparse.ArgumentParser:
         help="List forks created by agent-fork",
         description="List registered forks in deterministic creation order.",
     )
-    output_options(listing)
+    output_options(listing, default=None)
+    pruning = commands.add_parser(
+        "prune",
+        allow_abbrev=False,
+        help="Remove registry records that are gone or cannot identify their fork",
+        description=(
+            "Clear registry records whose worktree no longer exists, and "
+            "records written before agent-fork recorded which repository a "
+            "fork belongs to, which can no longer identify one. Only the "
+            "registry is changed; no worktree or branch is touched."
+        ),
+    )
+    pruning.add_argument(
+        "--dry-run", action="store_true", help="Show what would be removed"
+    )
+    pruning.add_argument(
+        "--yes", action="store_true", help="Confirm removal non-interactively"
+    )
+    output_options(pruning, default=None)
     cleanup = commands.add_parser(
         "cleanup",
         allow_abbrev=False,
@@ -298,13 +354,13 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Inspect safety and print the removal plan without changing anything",
     )
-    output_options(cleanup)
+    output_options(cleanup, default=None)
     doctor = commands.add_parser(
         "doctor",
         allow_abbrev=False,
         help="Diagnose Git, agent, config, and XDG readiness",
     )
-    output_options(doctor)
+    output_options(doctor, default=None)
     doctor_mode = doctor.add_mutually_exclusive_group()
     doctor_mode.add_argument("--require-agent", action="store_true")
     doctor_mode.add_argument("--no-agent", action="store_true")
@@ -325,7 +381,7 @@ def _parser() -> argparse.ArgumentParser:
     viewer = actions.add_parser(
         "view", allow_abbrev=False, help="Show effective configuration"
     )
-    output_options(viewer)
+    output_options(viewer, default=None)
     getter = actions.add_parser(
         "get", allow_abbrev=False, help="Get one effective configuration value"
     )
@@ -365,6 +421,42 @@ def _path_for_name(info, config, name, branch, environment, args=None, cwd=None)
         base_dir=args.worktree_base_dir,
         worktree_name=args.worktree_name,
     )
+
+
+def _setup_hook_plan(parent_path, anchor, config, environment) -> dict[str, object]:
+    """Predict the setup-hook step for `--dry-run`, without mutating anything.
+
+    Evaluated parent-side against the resolved anchor, because `materialize()`
+    has not run yet. `prediction: true` says so in the document rather than
+    implying certainty about the child that does not exist yet.
+    """
+    from agent_fork.include import SETUP_HOOK_RELATIVE_PATH, setup_hook_eligibility
+
+    hook = parent_path / SETUP_HOOK_RELATIVE_PATH
+    try:
+        hook.lstat()
+        present = True
+    except OSError:
+        present = False
+    if config.setup_hook_policy == "off":
+        eligibility, reason, would_run = "unchecked", None, False
+    elif not present:
+        eligibility, reason, would_run = "absent", None, False
+    else:
+        eligibility, reason = setup_hook_eligibility(
+            parent_path, anchor, env=environment
+        )
+        would_run = config.setup_hook_policy == "any" or eligibility == "eligible"
+    return {
+        "path": SETUP_HOOK_RELATIVE_PATH,
+        "present": present,
+        "policy": config.setup_hook_policy,
+        "eligibility": eligibility,
+        "would_run": would_run,
+        "reason": reason,
+        "timeout_seconds": config.setup_hook_timeout,
+        "prediction": True,
+    }
 
 
 def _fork_cli(args, environment: dict[str, str]) -> int:
@@ -414,12 +506,41 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
                 else None
             ),
             "codex_session_name_resolution": args.codex_session_name_resolution,
+            "setup_hook_policy": args.setup_hook_policy,
+            "setup_hook_timeout": args.setup_hook_timeout,
         }.items()
         if value is not None
     }
-    config = resolve_discovered_config(
-        cwd, environment, explicit_path=args.config, flags=flags
+    # Resolving the output mode and publishing it are one critical section, held
+    # under a blocked mask. `main()`'s exception boundary otherwise sees only the
+    # raw flags and renders a human error for a fork put into JSON mode by
+    # `AGENT_FORK_OUTPUT`, breaking R7.8's one-JSON-object-on-stderr contract
+    # exactly when it matters, on the interrupt path. Position alone cannot close
+    # that: these are three statements and CPython runs signal handlers between
+    # bytecodes, so an interrupt landing between the resolution and the
+    # assignment unwinds with nothing published. Blocking exactly the pair
+    # `rollback.run_with_rollback()` handles defers such a signal — it is not
+    # dropped — to the `SIG_SETMASK` below, which restores whatever mask the
+    # caller had rather than assuming it was empty. The section covers reading
+    # local configuration files and two assignments; nothing in it waits.
+    restore_mask = signal.pthread_sigmask(
+        signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM}
     )
+    try:
+        config = resolve_discovered_config(
+            cwd, environment, explicit_path=args.config, flags=flags
+        )
+        # Two publications, both inside the critical section. `args.output` is
+        # A11's mechanism, read by every downstream `output_kind = args.output`
+        # and by `_machine_error_output()`; `_resolved_machine` is A12's, read
+        # by `main()`'s `_machine()` closure, which prefers it outright.
+        args.output = "json" if args.json else (args.output or config.output)
+        args._resolved_machine = args.output == "json"
+    finally:
+        # A `ConfigError` raised inside leaves `_resolved_machine` unpublished,
+        # which is correct: no resolved mode exists yet, so the boundary's raw-
+        # flag/environment fallback is all there is to go on.
+        signal.pthread_sigmask(signal.SIG_SETMASK, restore_mask)
     context = resolve_agent_mode(
         config.agent_mode,
         environment,
@@ -490,17 +611,22 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         name = sanitize_name(args.name)
     identity = naming_plan(name, branch_prefix=config.branch_prefix)
     branch = args.branch or identity.branch
-    if args.branch:
-        valid = run_git(
-            parent_path,
-            ["check-ref-format", "--branch", branch],
-            env=environment,
-            check=False,
-        )
-        if valid.returncode != 0:
-            from agent_fork.errors import PreconditionError
+    # Runs for every branch, not only an explicit --branch: branch_prefix's
+    # own composed-sample validation (branch_prefix_reason(), a "x"-suffixed
+    # check at config-resolution time) is necessary but not sufficient — a
+    # prefix and a real sanitized name can compose into an illegal ref at
+    # their boundary even when both check out independently (A11 Gate-4
+    # finding F7, e.g. a prefix ending "foo.loc" plus a name starting "k").
+    valid = run_git(
+        parent_path,
+        ["check-ref-format", "--branch", branch],
+        env=environment,
+        check=False,
+    )
+    if valid.returncode != 0:
+        from agent_fork.errors import PreconditionError
 
-            raise PreconditionError("invalid_branch", f"invalid branch name: {branch}")
+        raise PreconditionError("invalid_branch", f"invalid branch name: {branch}")
     destination = (
         args.worktree_dir.expanduser().resolve()
         if args.worktree_dir is not None
@@ -513,7 +639,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         if context is not None
         else ()
     )
-    output_kind = "json" if args.json else (args.output or config.output)
+    output_kind = args.output
 
     if args.dry_run:
         if context is not None:
@@ -569,9 +695,13 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
                     else ()
                 )
             ),
+            _setup_hook_plan(parent_path, anchor, config, environment),
         )
         print(dry.render(output_kind))
         return 0
+
+    def announce(line: str) -> None:
+        print(line, file=sys.stderr)
 
     result = fork(
         ForkRequest(
@@ -587,9 +717,28 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             force=args.force,
             extra_args=extra_args,
             codex_session_name_resolution=config.codex_session_name_resolution,
+            setup_hook_policy=config.setup_hook_policy,
+            setup_hook_timeout=config.setup_hook_timeout,
+            # Suppressed in machine mode: stderr is reserved there for exactly
+            # one JSON error object, which plain progress text would break.
+            progress=None if output_kind == "json" else announce,
         ),
         env=environment,
     )
+    hook = result.setup_hook
+    if output_kind != "json" and hook.status == "ran":
+        # Axis C1: human mode always gets the one-line status through
+        # `announce`, and the bounded tails as well when the hook failed, timed
+        # out, or `--debug` asked for diagnostics. The tails arrive already
+        # escaped and already bounded by `include.py`; re-cutting or re-escaping
+        # them here would either lose content or double-escape it.
+        if hook.timed_out or hook.exit_code != 0 or args.debug:
+            for stream, tail in (
+                ("stdout", hook.stdout_tail),
+                ("stderr", hook.stderr_tail),
+            ):
+                if tail:
+                    print(f"setup hook {stream}: {tail}", file=sys.stderr)
     notices = list(result.notices)
     if config.copy:
         notices.extend(copy_to_clipboard(result.launch.command))
@@ -610,6 +759,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         verification={"enabled": config.verify, "passed": config.verify},
         command=result.launch.command,
         notices=tuple(notices),
+        setup_hook=result.setup_hook.document(),
     )
     print(presented.render(output_kind))
     for notice in notices:
@@ -656,6 +806,17 @@ def main(argv: list[str] | None = None) -> int:
         if not args.all and args.record_all:
             parser.error("--record-all requires --all")
     environment = dict(os.environ)
+    from agent_fork.rollback import OperationInterrupted
+
+    def _machine() -> bool:
+        # `_fork_cli()` publishes the fully resolved mode once it has one.
+        # Everything that fails before resolution falls back to A11's
+        # flag-then-environment rule, which is all there is to go on there.
+        resolved = getattr(args, "_resolved_machine", None)
+        if resolved is not None:
+            return resolved
+        return _machine_error_output(args, environment)
+
     try:
         if args.verbose and not args.quiet:
             print(f"agent-fork: command={args.command or 'help'}", file=sys.stderr)
@@ -693,8 +854,18 @@ def main(argv: list[str] | None = None) -> int:
                 if args.no_agent
                 else None
             )
-            checks = run_doctor(Path.cwd(), environment, agent_mode=doctor_mode)
-            machine = args.json or args.output == "json"
+            # Lock in the explicit flag (if any) before resolving, so it can
+            # override an invalid lower-precedence AGENT_FORK_OUTPUT — and so
+            # any error raised after this point still renders per this
+            # decision, via the mutated args.output the exception handler
+            # below reads.
+            args.output = "json" if args.json else args.output
+            checks, resolved_output = run_doctor(
+                Path.cwd(), environment, agent_mode=doctor_mode, output=args.output
+            )
+            args.output = args.output or resolved_output
+            output_kind = args.output
+            machine = output_kind == "json"
             if machine:
                 print(
                     json_line(
@@ -727,17 +898,58 @@ def main(argv: list[str] | None = None) -> int:
                 validate_session,
             )
 
+            # Lock in the explicit flag (if any) before resolving, so it can
+            # override an invalid lower-precedence AGENT_FORK_OUTPUT — and so
+            # any error raised after this point still renders per this
+            # decision, via the mutated args.output the exception handler
+            # below reads.
+            args.output = "json" if args.json else args.output
+            resolved_session_config = resolve_discovered_config(
+                Path.cwd(),
+                environment,
+                explicit_path=args.config,
+                flags={"output": args.output} if args.output else None,
+                require_repo=False,
+            )
+            args.output = args.output or resolved_session_config.output
+            output_kind = args.output
+            machine = output_kind == "json"
             if args.session_action == "claude-parent":
                 from agent_fork.claude_lineage_inference import (
                     ClaudeLineageCorpus,
+                    CorpusLimitError,
+                    map_timeout_to_limit_error,
                     to_record,
                 )
                 from agent_fork.errors import (
                     AgentSignalIncompleteError,
                     ClaudeParentError,
+                    ClaudeParentIncompleteAnalysisError,
                     ClaudeParentNotRecordableError,
                     ClaudeParentPartialRecordError,
                 )
+
+                def _incomplete_analysis_document(error, *, session_id=None):
+                    return {
+                        "agent": "claude",
+                        "session_id": session_id,
+                        "relationship": {"status": "incomplete"},
+                        "limit": {
+                            "name": error.limit,
+                            "allowed": error.allowed,
+                            "observed": error.observed,
+                            "scope": error.scope,
+                        },
+                        "recorded": False,
+                        "remediation": (
+                            "the Claude transcript corpus exceeds agent-fork's bounded "
+                            "analysis limit; archive or relocate older project "
+                            "transcripts under ~/.claude/projects, then rerun. "
+                            "agent-fork does not record a parent inferred from an "
+                            "incomplete corpus."
+                        ),
+                    }
+
                 from agent_fork.lineage import (
                     find_lineage,
                     read_lineage,
@@ -745,12 +957,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 from agent_fork.lineage_inference_store import (
                     add_inference,
+                    find_inference,
                     read_inferences,
+                    remove_index_freshness,
                     remove_inference,
                 )
 
                 action = args.claude_parent_action
-                machine = args.json or args.output == "json"
 
                 def emit(document):
                     if machine:
@@ -767,7 +980,11 @@ def main(argv: list[str] | None = None) -> int:
                                 print("  ".join(str(value) for value in fields))
                         else:
                             for key, value in document.items():
-                                print(f"{key}: {terminal_text(value)}")
+                                if isinstance(value, list):
+                                    for entry in value:
+                                        print(f"{key}: {terminal_text(entry)}")
+                                else:
+                                    print(f"{key}: {terminal_text(value)}")
 
                 def records():
                     values = []
@@ -832,8 +1049,22 @@ def main(argv: list[str] | None = None) -> int:
                             f"source: {terminal_text(selected['source'])}",
                             file=sys.stderr,
                         )
+                        if selected["source"] == "inferred":
+                            will_remove_freshness = True
+                        else:
+                            will_remove_freshness = (
+                                find_inference(args.session_id, env=environment) is None
+                            )
+                        removed_bits = [f"the {selected['source']} record"]
+                        if will_remove_freshness:
+                            removed_bits.append("its corroborating freshness entry")
                         print(
-                            "This does not delete Claude transcripts or Git resources.",
+                            f"This will remove {' and '.join(removed_bits)}.",
+                            file=sys.stderr,
+                        )
+                        print(
+                            "This will not remove Claude transcripts, Git "
+                            "resources, or the shared transcript screen cache.",
                             file=sys.stderr,
                         )
                         if selected["source"] == "planned":
@@ -846,15 +1077,63 @@ def main(argv: list[str] | None = None) -> int:
                         if sys.stdin.readline().strip().lower() not in {"y", "yes"}:
                             print("Claude parent delete cancelled", file=sys.stderr)
                             return 2
-                    if found[0]["source"] == "planned":
-                        remove_lineage("claude", args.session_id, env=environment)
-                    else:
+                    delete_notices = []
+
+                    def _remove_freshness_entry_tolerantly(session_id):
+                        # An advisory, unrelated cache/state fault must never
+                        # block removing the user's own primary record.
+                        try:
+                            return remove_index_freshness(session_id, env=environment)
+                        except ValueError:
+                            delete_notices.append(
+                                "could not confirm freshness-entry removal: the "
+                                "freshness index is unreadable"
+                            )
+                            return False
+
+                    if found[0]["source"] == "inferred":
+                        removed_freshness_entry = _remove_freshness_entry_tolerantly(
+                            args.session_id
+                        )
                         remove_inference(args.session_id, env=environment)
+                        retained_planned_record = (
+                            find_lineage("claude", args.session_id, env=environment)
+                            is not None
+                        )
+                        retained_inferred_record = False
+                    else:
+                        surviving_inferred = find_inference(
+                            args.session_id, env=environment
+                        )
+                        if surviving_inferred is None:
+                            removed_freshness_entry = (
+                                _remove_freshness_entry_tolerantly(args.session_id)
+                            )
+                        else:
+                            removed_freshness_entry = False
+                            delete_notices.append(
+                                "freshness entry retained: an inferred record for "
+                                "this child still relies on it"
+                            )
+                        remove_lineage("claude", args.session_id, env=environment)
+                        retained_planned_record = False
+                        retained_inferred_record = surviving_inferred is not None
+                    delete_notices.append(
+                        "shared transcript screen cache retained at "
+                        "~/.cache/agent-fork/claude-lineage-index-v3/; it holds no "
+                        "parent conclusion and is rebuilt on demand"
+                    )
                     emit(
                         {
                             "deleted": True,
                             "session_id": args.session_id,
                             "source": found[0]["source"],
+                            "removed_record": found[0]["source"],
+                            "removed_freshness_entry": removed_freshness_entry,
+                            "retained_planned_record": retained_planned_record,
+                            "retained_inferred_record": retained_inferred_record,
+                            "retained_screen_cache": True,
+                            "notices": delete_notices,
                         }
                     )
                     return 0
@@ -881,7 +1160,13 @@ def main(argv: list[str] | None = None) -> int:
                     ids = [assessment.context.parent_session_id]
                 elif args.session_id:
                     ids = [args.session_id]
-                corpus = ClaudeLineageCorpus(environment)
+                try:
+                    corpus = ClaudeLineageCorpus(environment)
+                except CorpusLimitError as error:
+                    raise ClaudeParentIncompleteAnalysisError(
+                        str(error),
+                        details={"analysis": _incomplete_analysis_document(error)},
+                    ) from error
                 if args.all:
                     ids = [
                         p.stem
@@ -896,7 +1181,9 @@ def main(argv: list[str] | None = None) -> int:
                     from agent_fork.bulk_output import BulkSpool
 
                     bulk_spool = BulkSpool()
+                limit_breach_targets = 0
                 for sid in ids:
+                    freshness_failures_before = corpus.work.freshness_write_failures
                     try:
                         result = corpus.infer_one(sid)
                         recorded = False
@@ -910,6 +1197,34 @@ def main(argv: list[str] | None = None) -> int:
                                 recorded = True
                                 recorded_count += 1
                         document = {**result.document(), "recorded": recorded}
+                        this_target_freshness_failed = (
+                            corpus.work.freshness_write_failures
+                            > freshness_failures_before
+                        )
+                        if recorded and this_target_freshness_failed:
+                            existing_notices = document["notices"]
+                            assert isinstance(existing_notices, list)
+                            document["notices"] = [
+                                *existing_notices,
+                                "the record was written but will report "
+                                "freshness_unknown until the freshness index "
+                                "becomes writable",
+                            ]
+                        if bulk_spool is None:
+                            documents.append(document)
+                        else:
+                            bulk_spool.append(document)
+                    except (CorpusLimitError, TimeoutError) as error:
+                        failures += 1
+                        limit_breach_targets += 1
+                        limit_error = (
+                            error
+                            if isinstance(error, CorpusLimitError)
+                            else map_timeout_to_limit_error(error, corpus.limits)
+                        )
+                        document = _incomplete_analysis_document(
+                            limit_error, session_id=sid
+                        )
                         if bulk_spool is None:
                             documents.append(document)
                         else:
@@ -969,6 +1284,14 @@ def main(argv: list[str] | None = None) -> int:
                         "summary": {"total": len(documents), "failed": failures},
                     }
                 )
+                if failures and limit_breach_targets:
+                    # non-`--all` path: exactly one target, and its failure
+                    # was specifically a corpus/candidate/time limit breach —
+                    # surface the typed code rather than a generic one.
+                    raise ClaudeParentIncompleteAnalysisError(
+                        "Claude transcript corpus exceeded a bounded analysis limit",
+                        details={"analysis": analysis},
+                    )
                 if failures and (args.record or args.record_all):
                     record_error = (
                         ClaudeParentNotRecordableError
@@ -991,7 +1314,6 @@ def main(argv: list[str] | None = None) -> int:
                 emit(analysis)
                 return 0
             inspection = inspect_session(environment, cwd=Path.cwd())
-            machine = args.json or args.output == "json"
             if args.session_action == "validate":
                 has_parent = (
                     True
@@ -1044,6 +1366,30 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     )
                 print(f"lineage: {terminal_text(inspection.lineage_status)}")
+                pi = inspection.parent_inference
+                if pi.status not in {"not_consulted", "absent"}:
+                    if pi.status == "superseded":
+                        print(f"parent inference: {terminal_text(pi.status)}")
+                    else:
+                        detail_bits = []
+                        if pi.analyzed_at is not None:
+                            detail_bits.append(
+                                f"analyzed {terminal_text(pi.analyzed_at)}"
+                            )
+                        if pi.changed_sources:
+                            detail_bits.append(
+                                f"{', '.join(pi.changed_sources)} transcript changed"
+                            )
+                        detail = f"  ({'; '.join(detail_bits)})" if detail_bits else ""
+                        parent_id = (
+                            terminal_text(pi.parent_session_id)
+                            if pi.parent_session_id is not None
+                            else "-"
+                        )
+                        print(
+                            f"parent inference: {terminal_text(pi.status)} "
+                            f"{parent_id}{detail}"
+                        )
             for notice in inspection.notices:
                 print(f"notice: {terminal_text(notice)}")
             print(f"directory: {terminal_text(inspection.directory)}")
@@ -1101,9 +1447,59 @@ def main(argv: list[str] | None = None) -> int:
                 state = "exists" if transcript.exists else "missing"
                 print(f"transcript: {terminal_text(transcript.path)} ({state})")
             return 0
+        if args.command == "prune":
+            from agent_fork.prune import apply_prune, plan_prune, render
+
+            machine = args.json or args.output == "json"
+            plan = plan_prune(env=environment)
+            if args.dry_run:
+                if machine:
+                    from agent_fork.output import json_line
+
+                    print(json_line({"pruned": False, **plan.document()}))
+                else:
+                    for line in render(plan, dry_run=True):
+                        print(line)
+                return 0
+            if plan.missing and not args.yes:
+                names = ", ".join(entry.name for entry in plan.missing)
+                print(
+                    f"Remove {len(plan.missing)} registry record(s) ({names})? [y/N] ",
+                    end="",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                if sys.stdin.readline().strip().lower() not in {"y", "yes"}:
+                    print("prune cancelled", file=sys.stderr)
+                    return 2
+            applied = apply_prune(plan, env=environment)
+            if machine:
+                from agent_fork.output import json_line
+
+                print(json_line({"pruned": True, **applied.document()}))
+            else:
+                for line in render(applied, dry_run=False):
+                    print(line)
+            return 0
         if args.command == "cleanup":
             from agent_fork.cleanup import cleanup, resolve_cleanup_target
 
+            # Lock in the explicit flag (if any) before resolving, so it can
+            # override an invalid lower-precedence AGENT_FORK_OUTPUT — and so
+            # any error raised after this point still renders per this
+            # decision, via the mutated args.output the exception handler
+            # below reads.
+            args.output = "json" if args.json else args.output
+            resolved_cleanup_config = resolve_discovered_config(
+                Path.cwd(),
+                environment,
+                explicit_path=args.config,
+                flags={"output": args.output} if args.output else None,
+                require_repo=False,
+            )
+            args.output = args.output or resolved_cleanup_config.output
+            output_kind = args.output
+            machine = output_kind == "json"
             plan = resolve_cleanup_target(
                 args.target, cwd=Path.cwd(), env=environment, force=args.force
             )
@@ -1133,7 +1529,6 @@ def main(argv: list[str] | None = None) -> int:
                 keep_branch=args.keep_branch,
                 dry_run=args.dry_run,
             )
-            machine = args.json or args.output == "json"
             if machine:
                 from agent_fork.output import json_line
 
@@ -1143,6 +1538,7 @@ def main(argv: list[str] | None = None) -> int:
                     "keep_branch": args.keep_branch,
                     "dry_run": args.dry_run,
                     "notices": list(result.notices),
+                    "retained_metadata": result.retained_metadata,
                 }
                 if args.dry_run:
                     document["details"] = result.details.document()
@@ -1162,8 +1558,23 @@ def main(argv: list[str] | None = None) -> int:
             from agent_fork.registry import read_registry
             from agent_fork.text import escape_terminal_text
 
+            # Lock in the explicit flag (if any) before resolving, so it can
+            # override an invalid lower-precedence AGENT_FORK_OUTPUT — and so
+            # any error raised after this point still renders per this
+            # decision, via the mutated args.output the exception handler
+            # below reads.
+            args.output = "json" if args.json else args.output
+            resolved_list_config = resolve_discovered_config(
+                Path.cwd(),
+                environment,
+                explicit_path=args.config,
+                flags={"output": args.output} if args.output else None,
+                require_repo=False,
+            )
+            args.output = args.output or resolved_list_config.output
+            output_kind = args.output
             entries = read_registry(env=environment)
-            if args.json or args.output == "json":
+            if output_kind == "json":
                 print(
                     json_line(
                         {
@@ -1189,13 +1600,32 @@ def main(argv: list[str] | None = None) -> int:
             set_user_value(path, args.key, args.value)
             return 0
         if args.command == "config":
+            # Only `config view` carries an explicit -o/--json flag; lock it
+            # in before resolving so it can override an invalid
+            # lower-precedence AGENT_FORK_OUTPUT, and so any error raised
+            # after this point still renders per this decision, via the
+            # mutated args.output the exception handler below reads.
+            # `validate`/`get` have no such flag and correctly get no rescue.
+            view_output_flag = (
+                (
+                    "json"
+                    if getattr(args, "json", False)
+                    else getattr(args, "output", None)
+                )
+                if args.config_action == "view"
+                else None
+            )
             resolved = resolve_discovered_config(
-                Path.cwd(), environment, explicit_path=args.config
+                Path.cwd(),
+                environment,
+                explicit_path=args.config,
+                flags={"output": view_output_flag} if view_output_flag else None,
             )
             if args.config_action == "validate":
                 print("config valid")
                 return 0
             if args.config_action == "view":
+                args.output = view_output_flag or resolved.output
                 document = {
                     "with_state": resolved.with_state,
                     "with_ignored": resolved.with_ignored,
@@ -1206,6 +1636,8 @@ def main(argv: list[str] | None = None) -> int:
                     "verify": resolved.verify,
                     "copy": resolved.copy,
                     "output": resolved.output,
+                    "setup_hook_policy": resolved.setup_hook_policy,
+                    "setup_hook_timeout": resolved.setup_hook_timeout,
                     "agents": {
                         "claude": {"extra_args": list(resolved.claude_extra_args)},
                         "codex": {
@@ -1216,7 +1648,8 @@ def main(argv: list[str] | None = None) -> int:
                         },
                     },
                 }
-                if args.json or args.output == "json":
+                output_kind = args.output
+                if output_kind == "json":
                     from agent_fork.output import json_line
 
                     print(json_line(document))
@@ -1225,24 +1658,32 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"{key} = {value}")
                 return 0
             if args.config_action == "get":
-                aliases = {
-                    "agents.codex.session_name_resolution": (
-                        resolved.codex_session_name_resolution
-                    )
-                }
-                if args.key in aliases:
-                    value = aliases[args.key]
-                elif hasattr(resolved, args.key):
-                    value = getattr(resolved, args.key)
-                else:
-                    raise ConfigError(f"unknown config key: {args.key}")
-                print(str(value).lower() if isinstance(value, bool) else value)
+                from agent_fork.config import config_get
+
+                print(config_get(resolved, args.key))
                 return 0
+    except OperationInterrupted as error:
+        # `OperationInterrupted` derives from BaseException so pipeline-internal
+        # `except Exception` handlers cannot swallow it; that is also why it
+        # escaped `main()` uncaught before A12, producing a traceback and exit 1
+        # instead of the 130/143 REQ-22 and README already promise.
+        from agent_fork.errors import INTERRUPT_ERRORS
+        from agent_fork.output import render_error
+
+        translated = INTERRUPT_ERRORS[error.signum]("interrupted after rollback")
+        print(render_error(translated, machine=_machine()), file=sys.stderr)
+        return translated.exit_code
+    except KeyboardInterrupt:
+        # Outside the `run_with_rollback()` window — preflight, naming, dry-run —
+        # nothing exists to roll back and Python's default handler applies.
+        from agent_fork.errors import InterruptedBySigintError
+        from agent_fork.output import render_error
+
+        interrupted = InterruptedBySigintError("interrupted before any mutation")
+        print(render_error(interrupted, machine=_machine()), file=sys.stderr)
+        return interrupted.exit_code
     except ConfigError as error:
-        machine = (
-            bool(getattr(args, "json", False))
-            or getattr(args, "output", None) == "json"
-        )
+        machine = _machine()
         if machine:
             from agent_fork.output import render_error
 
@@ -1256,10 +1697,7 @@ def main(argv: list[str] | None = None) -> int:
         from agent_fork.errors import AgentForkError
         from agent_fork.output import render_error
 
-        machine = (
-            bool(getattr(args, "json", False))
-            or getattr(args, "output", None) == "json"
-        )
+        machine = _machine()
         if args.debug and not machine:
             traceback.print_exc()
         print(render_error(error, machine=machine), file=sys.stderr)

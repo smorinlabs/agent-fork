@@ -10,8 +10,8 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · agent-signal = absent | incomplete-marker | incomplete-id | detected-claude | detected-codex | ambiguous-partial-marker | ambiguous-partial-id | ambiguous-complete · agent-mode = auto | strict | git-only · backend = git (jj reserved, no v1 values).
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
-- Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
-- Total rows: 458 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density).
+- Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04, T-RBK-08/09, T-RBK-10, T-RBK-11, T-INC-16, T-INC-17, T-CLI-63, T-CLI-64, and T-OUT-28 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
+- Total rows: 575 (20 groups; recount whenever a group's table changes — see spec §4's ~120–150 estimate, superseded by approved per-group density). A6a (merged via PR #58) added 45 rows; A10 (merged via PR #63) added 55 rows. A11 (2026-08-20) added 30 rows on top of the pre-A6a 413-row baseline: T-CFG-24..36 (13), T-LOC-19..24 (6), T-CLI-51..60 (10, renumbered a second time — first from the design doc's original T-CLI-36..45 to T-CLI-39..48 to resolve a collision with A6a's own T-CLI-36..38, then to T-CLI-51..60 when a second sync found A10 (merged in between) had independently claimed T-CLI-39..50 — this is a fast-moving trunk; renumbering a fresh branch's own unmerged IDs at merge time is not a violation of "never renumbered", which protects already-landed IDs), T-OUT-24 (1). Rows T-CFG-35, T-LOC-23, T-CLI-57..60 were added during Gate 6 (post-implementation adversarial review) to cover findings that review surfaced, not the original Gate-4 plan — T-CLI-59 closes a regression introduced by T-CLI-58's own fix; T-LOC-23 and T-CLI-60 close two further findings from a second Gate-6 verification round. T-CFG-36 and T-LOC-24 close two escaping gaps a PR #62 bot review found (`config.py`'s and `location.py`'s own direct `ConfigError` raises bypassed the `ConfigFinding.render()` convention); T-LOC-23's fallback assertion was also hardened to no longer depend on the runner's own passwd database (same review round). A12 (2026-08-21) added 32 rows on top of A11's 543: T-INC-08..21 (14), T-OUT-25..28 (4), T-CLI-61..67 (7), T-CFG-37..39 (3), T-RBK-08..11 (4). Its T-CFG, T-CLI, and T-OUT rows were renumbered at merge time by the same convention A11 followed — A11 landed first via PR #62 and had independently claimed T-CFG-24..36, T-CLI-51..60, and T-OUT-24, so this branch's unmerged T-CFG-24..26, T-CLI-51..56, and T-OUT-24..27 shifted by a fixed +13, +10, and +1 respectively, preserving relative order. T-INC and T-RBK needed no shift: A11 touched neither prefix. Rows T-CLI-64..67, T-OUT-27, T-OUT-28, and T-RBK-11 were added during Gate 6 (post-implementation adversarial review) across five rounds, not the original Gate-4 plan — T-CLI-65 closes the window T-CLI-64's own fix left open, T-CLI-66 closes the signal-between-bytecodes race T-CLI-65's fix narrowed but did not eliminate, and T-RBK-11/T-CLI-67 close two findings from an independent CodeRabbit review of the merged PR (#65).
 - Blocked rows carry pending stubs; counted by CHECK1 coverage like live rows; CHECK2 lifecycle invariants apply to live rows only (spec §7.2).
 - Mapping rows (`row_status: n/a`, e.g. T-EXP-05) use `n/a` in their Tier and Axes columns — bookkeeping rows, never stubbed.
 - When the first group flips to `tdd`: tighten CHECK2's exempt-reason handling to a whitelist (`retired:` prefix + requires_real_cli) — under-enforcement is harmless while all groups are pending, load-bearing after.
@@ -44,18 +44,34 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 | T-CFG-15 | agent-mode precedence is CLI > environment > config > `auto` | baseline | U | live | REQ-45; D16 |
 | T-CFG-16 | invalid configured agent mode is rejected as `config_error` | baseline | U | live | REQ-45; D16 |
 | T-CFG-17 | Codex session-name resolution defaults on and obeys CLI > config precedence | agent=codex | U | live | REQ-46; D17 |
-| T-CFG-18 | output defaults to `text`; only `text` and `json` are valid effective values; an explicit fork output overrides an invalid lower-precedence `AGENT_FORK_OUTPUT` value | baseline | U | live | P02 A13(b); REQ-14; R5.1 |
+| T-CFG-18 | output defaults to `text`; only `text` and `json` are valid effective values (message names key/value/allowed/source, A11); an explicit fork output overrides an invalid lower-precedence `AGENT_FORK_OUTPUT` value | baseline | U | live | P02 A11/A13(b); REQ-14; R5.1 |
 | T-CFG-19 | shared XDG resolver uses an explicit base and needs no `HOME` | baseline | U | live | REQ-41 |
 | T-CFG-20 | shared XDG resolver expands the `HOME` default rather than emitting a literal tilde | baseline | U | live | REQ-41 |
 | T-CFG-21 | shared XDG resolver returns the base itself when no trailing segments are given | baseline | U | live | REQ-41 |
 | T-CFG-22 | an empty XDG value counts as unset per the specification, so state never resolves relative to the current working directory | baseline | U | live | REQ-41 |
 | T-CFG-23 | an empty `HOME` counts as unset too — `env.get("HOME", "~")` returns the empty string when the variable is set but empty, so the default never applies | baseline | U | live | REQ-41 |
-| T-CFG-24 | A6b step 3 — `with_submodules` unset resolves to `True` (owner decision 2026-08-17) | baseline | U | live | A6 design doc §Flag |
-| T-CFG-25 | A6b step 3 — `--no-with-state` forces `with_submodules=False` regardless of ordering, tested against every explicit and configured value | baseline | U | live | A6 design doc, implementation plan step 3 |
-| T-CFG-26 | A6b step 3 — `with_submodules=True` does not imply `with_state=True`; the coupling is deliberately one-directional, unlike `with_ignored` | baseline | U | live | A6 design doc §Flag |
-| T-CFG-27 | A6b step 3 — an explicit `with_submodules` flag outranks a configured source, matching `with_state`'s precedence | baseline | U | live | A6 design doc, implementation plan step 3 |
-| T-CFG-28 | A6b step 3 — `[fork] with_submodules` round-trips through a config file and validates as boolean | baseline | U | live | A6 design doc, implementation plan step 3 |
-| T-CFG-29 | Gate-6 finding 4 — a lower-precedence `with_state=false` does not permanently zero `with_submodules`; a later, higher-precedence source that only re-enables `with_state` restores the independently resolved default | baseline | U | live | gate-6 finding 4 |
+| T-CFG-24 | `[fork].output` is accepted by the loader and resolves through the normal precedence chain (decision 4, ratified ACCEPT) | baseline | U | live | P02 A11; REQ-14; D7 |
+| T-CFG-25 | `validate_values()` names the exact key, value, allowed forms, and winning source for one finding | baseline | U | live | P02 A11 |
+| T-CFG-26 | `validate_values()` returns every finding for a multi-bad-key configuration, not just the first | baseline | U | live | P02 A11 |
+| T-CFG-27 | an invalid `branch_prefix` composed-sample corpus is rejected, including a leading `-` | baseline | U | live | P02 A11 |
+| T-CFG-28 | a `branch_prefix` legal only once composed (e.g. `"topic."`) remains valid; whitespace-only still falls back to the default | baseline | U | live | P02 A11 |
+| T-CFG-29 | the pure `branch_prefix_reason()` predicate agrees with real `git check-ref-format --branch` on a composed-sample corpus | baseline | F | live | P02 A11 |
+| T-CFG-30 | dotted `config get` addresses both agents' `extra_args` and `session_name_resolution`; arrays render as round-trip-parseable TOML literals | baseline | U | live | P02 A11 |
+| T-CFG-31 | every internal-only attribute the former `hasattr` fallback leaked is rejected — `config_path`, `mode`, `worktree_location_explicit`, `claude_extra_args`, `codex_extra_args`, and the bare `codex_session_name_resolution` | baseline | U | live | P02 A11 |
+| T-CFG-32 | `config set` on an array key refuses, naming the exact resolved TOML file and table/key to hand-edit | baseline | U | live | P02 A11 |
+| T-CFG-33 | an invalid `config set` value refuses before `path.parent.mkdir()`, not merely before the write — no directory created, existing file byte-unchanged | baseline | U | live | P02 A11 |
+| T-CFG-34 | a pre-existing invalid value elsewhere in the file does not block `config set` on an unrelated, valid key | baseline | U | live | P02 A11 |
+| T-CFG-35 | `config set output` round-trips through `config validate`/`config get` (decision 4, ratified ACCEPT) | baseline | C | live | P02 A11 |
+| T-CFG-36 | an unknown key — a raw CLI argument — is escaped in `config_get()`'s and `set_user_value()`'s "unknown config key" message, not interpolated raw (PR #62 review finding) | baseline | U | live | P02 A11 |
+| T-CFG-37 | A12 — `setup_hook_policy` defaults to `tracked` and `setup_hook_timeout` to 300 seconds; an explicit flag beats a config value; `off` dominates every lower-precedence source | baseline | U | live | P02 A12; REQ-12; REQ-13 |
+| T-CFG-38 | A12 — `config set` / `config get` round-trip both hook keys, the enum as a quoted string and the timeout as an unquoted integer, without disturbing an existing unrelated key | baseline | C | live | P02 A12; REQUIREMENTS §3.2 |
+| T-CFG-39 | A12 / A11 guard — a zero, negative, string, or boolean `setup_hook_timeout` and an out-of-enum `setup_hook_policy` are all rejected as `ConfigError` at `config validate` and `load_config()` time, with exit 2, never validating clean and crashing at `fork` time | baseline | C | live | P02 A12; P02 A11; REQ-12; R6.1 |
+| T-CFG-40 | A6b step 3 — `with_submodules` unset resolves to `True` (owner decision 2026-08-17) | baseline | U | live | A6 design doc §Flag |
+| T-CFG-41 | A6b step 3 — `--no-with-state` forces `with_submodules=False` regardless of ordering, tested against every explicit and configured value | baseline | U | live | A6 design doc, implementation plan step 3 |
+| T-CFG-42 | A6b step 3 — `with_submodules=True` does not imply `with_state=True`; the coupling is deliberately one-directional, unlike `with_ignored` | baseline | U | live | A6 design doc §Flag |
+| T-CFG-43 | A6b step 3 — an explicit `with_submodules` flag outranks a configured source, matching `with_state`'s precedence | baseline | U | live | A6 design doc, implementation plan step 3 |
+| T-CFG-44 | A6b step 3 — `[fork] with_submodules` round-trips through a config file and validates as boolean | baseline | U | live | A6 design doc, implementation plan step 3 |
+| T-CFG-45 | Gate-6 finding 4 — a lower-precedence `with_state=false` does not permanently zero `with_submodules`; a later, higher-precedence source that only re-enables `with_state` restores the independently resolved default | baseline | U | live | gate-6 finding 4 |
 
 ---
 
@@ -242,7 +258,7 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 | T-LOC-01 | `sibling` default path derivation — worktree placed at `<repo>-<branch>` | baseline | U | live | D5; RESEARCH §2.4 |
 | T-LOC-02 | `central` location — worktree placed under the XDG data path `~/.local/share/agent-fork/worktrees/<repo>/<slug>` | baseline | U | live | D5 |
 | T-LOC-03 | `subdirectory` location — worktree placed at `<root>/.worktrees/<slug>` | baseline | U | live | D5 |
-| T-LOC-04 | path template resolves each placeholder — `{repo-name}` → repo basename, `{repo-root}` → parent dir of root, `{branch}` → fork branch slug — asserted individually in one templated location | baseline | U | live | D5; RESEARCH §2.4 |
+| T-LOC-04 | path template resolves each supported placeholder — `{repo-root}` → parent dir of root, `{repo-name}` → repo basename, `{branch}`/`{branch-escaped}` — asserted individually. Amended by A11: `{session-id}` is no longer renderable; its rejection is T-LOC-20 | baseline | U | live | D5; RESEARCH §2.4; P02 A11 |
 | T-LOC-05 | explicit `worktree_location` config value suppresses the mirror-parent heuristic | baseline | U | live | D5 |
 | T-LOC-06 | mirror-parent heuristic — parent is a linked worktree → fork mirrors the parent's observed placement pattern | topology=linked-worktree | F | live | D5; RESEARCH §4 |
 | T-LOC-07 | bare-at-root placement override — fork worktree placed as a child of the bare dir | topology=bare@bare | F | live | D5; RESEARCH §2.4 |
@@ -257,6 +273,12 @@ Varying axes: topology (bare-at-root override row); otherwise baseline pinned.
 | T-LOC-16 | bare-at-root result accepts partial override after derivation | topology=bare@bare | F | live | D15; REQ-44 |
 | T-LOC-17 | symlinked base resolves once and remains contained | baseline | F | live | D15; REQ-44 |
 | T-LOC-18 | explicit worktree leaf rejects control characters, so a newline-bearing name is refused before any mutation rather than failing verification afterwards | baseline | U | live | P02 A13(d); REQ-44 |
+| T-LOC-19 | template grammar rejects unknown field names, positional/auto-numbered fields, conversions, non-empty format specs, and indexing subscripts before any rendering | baseline | U | live | P02 A11 |
+| T-LOC-20 | `{session-id}` is permanently rejected, naming the key, value, and reason (A8 closed WILL NOT FIX; no successor tracked) | baseline | U | live | P02 A11 |
+| T-LOC-21 | an empty render, a CWD-relative render, a `..`-escaping render, control characters, and an unresolvable `~user` form are all rejected | baseline | U | live | P02 A11 |
+| T-LOC-22 | every template the widened grammar accepts renders without raising — absolute literals, a leading `{repo-root}` field, and a bare `~/` prefix | baseline | U | live | P02 A11 |
+| T-LOC-23 | a present-but-empty `HOME` is rejected for a `~`-leading template (matching `xdg.py`'s empty-counts-as-unset convention), while a genuinely absent `HOME` still falls back to the pwd database (Gate-6 second-pass finding); the fallback half is independent of the runner's own passwd database (PR #62 review finding) | baseline | U | live | P02 A11 |
+| T-LOC-24 | an unknown placeholder name — attacker/repo-controlled text parsed straight out of the template — is escaped in the raised `ConfigError`, not interpolated raw (PR #62 review finding) | baseline | U | live | P02 A11 |
 
 ---
 
@@ -404,6 +426,10 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 | T-RBK-05 | producer-pipe-failure, verify on — fake `git` where `diff --cached` exits 1 with empty stdout → materialize fails, rollback runs, exit 1 | baseline | F | live | REQ-22; spec §5; spec §6.6 |
 | T-RBK-06 | producer-pipe-failure, verify off (`--no-verify`) — same fake failure → still fails, rollback runs, exit 1 | baseline | F | live | REQ-22; spec §5; spec §6.6 |
 | T-RBK-07 | interrupted Git cleanup observes an already-exited process before a redundant process-group signal, preserving the original interruption instead of masking it with macOS `EPERM` | baseline | U | live | REQ-22; macOS process-group regression |
+| T-RBK-08 | A12 Gate-1 fact 6 — SIGINT while the setup hook runs → exit 130, clean rollback, and no surviving process from the hook's group (its backgrounded grandchild is not reparented to PID 1) | baseline | F | live | REQ-22; P02 A12 |
+| T-RBK-09 | A12 Gate-1 fact 6 — SIGTERM while the setup hook runs → exit 143, with the same rollback and process-group reaping guarantees | baseline | F | live | REQ-22; P02 A12 |
+| T-RBK-10 | A12 gate-6 — `terminate_active_setup_hook()` signals the hook's process group even after its leader has exited, so a SIGTERM-ignoring group member is still SIGKILLed instead of being skipped | baseline | F | live | REQ-22; P02 A12 gate-6 |
+| T-RBK-11 | A12 gate-6 review (CodeRabbit) — `terminate_active_setup_hook()` runs the full SIGTERM-then-SIGKILL reap ladder rather than sending SIGKILL directly, so a live hook that traps SIGTERM to clean up actually gets the chance; complements T-RBK-10's SIGTERM-ignoring-survivor case | baseline | F | live | REQ-22; P02 A12 gate-6 (CodeRabbit, PR #65) |
 
 ---
 
@@ -429,6 +455,29 @@ Varying axes: none of the shared four vary (baseline pinned); concurrency scenar
 | T-REG-11 | no temporary file survives a successful atomic write | baseline | U | live | REQ-41 |
 | T-REG-12 | temporary file is removed when serialization fails mid-write | baseline | U | live | REQ-41 |
 | T-REG-13 | `fsync=False` still writes the document and still applies owner-only mode — the disposable-cache path | baseline | U | live | REQ-41 |
+| T-REG-14 | same fork name created in two repositories under one registry → both records survive; neither clobbers the other | baseline | F | live | REQ-41 (A3); A3 repro 1 |
+| T-REG-15 | `cleanup <name>` from a repository that has no such fork → `cleanup_registry_stale`, the other repository's worktree is never targeted or deleted and no removal plan names it, registry unchanged | baseline | F | live | REQ-31 (A3); A3 repro 2 |
+| T-REG-16 | auto-named forks in two repositories on the same branch and day derive one name → both records survive | baseline | F | live | REQ-41 (A3); A3 repro 3 |
+| T-REG-17 | after an auto-name collision, `cleanup` plans against the invoking repository's own worktree, never the other's | baseline | F | live | REQ-31 (A3); A3 repro 4 |
+| T-REG-18 | staleness — worktree removed by hand → `cleanup` refuses with `cleanup_registry_stale` and keeps the record, instead of failing on a raw Git error against the missing path | baseline | F | live | REQ-31 (A3); overlaps A7 |
+| T-REG-19 | staleness — recorded path is live but on a different branch → the pair does not match, `cleanup` refuses | baseline | F | live | REQ-31 (A3) |
+| T-REG-20 | `prune` removes records whose worktree path does not exist and leaves live ones; `--dry-run` writes nothing | baseline | F | live | REQ-31 (A3); absorbs A7's prune |
+| T-REG-21 | `prune` keeps and reports a record whose path another repository's live worktree now occupies | baseline | F | live | REQ-31 (A3) |
+| T-REG-22 | `prune` on a healthy registry reports nothing to remove and changes nothing | baseline | F | live | REQ-31 (A3) |
+| T-REG-23 | a v1 record carrying no repository authorizes nothing — cleanup by name refuses, the worktree is untouched, and `prune` clears the record without touching disk | baseline | F | live | REQ-41 (A3); migration; gate-6 r3 |
+| T-REG-24 | forking does **not** backfill a repository onto a v1 record; matching a live pair is not proof of ownership, so the record stays null while the file rewrites as v2 | baseline | F | live | REQ-41 (A3); migration; gate-6 r3 |
+| T-REG-25 | path reuse on the same branch by another repository → cleanup refuses; that repository's worktree and branch both survive. Anchors the destructive commands to the invoking repository, not the record's stored path | baseline | F | live | REQ-31 (A3); gate-6 P0 |
+| T-REG-26 | `--force` does not override the stale refusal — it extends targeting and overrides dirty/unpushed only, never ownership | baseline | F | live | REQ-31 (A3); gate-6 P0 |
+| T-REG-27 | a registered fork is cleanable by absolute path from outside any repository; an explicit path is fresh input and anchors the repository | baseline | F | live | REQ-31 (A3); gate-6 P1 |
+| T-REG-28 | `prune` reports path reuse as displaced even when the occupying worktree carries the same branch name | baseline | F | live | REQ-31a (A3); gate-6 P2 |
+| T-REG-29 | a record naming another repository cannot authorize deletion even when invoked from the repository that now holds its path and branch — the stored repository vetoes, though it never authorizes | baseline | F | live | REQ-31 (A3); gate-6 r2 P0 |
+| T-REG-30 | `--force` extends targeting without skipping confirmation — a listed path whose directory another repository now occupies is refused, not deleted | baseline | F | live | REQ-31 (A3); gate-6 r3 |
+| T-REG-31 | forking a name whose live fork is already registered refuses with `conflict_fork_registered` rather than displacing the record and orphaning its worktree | baseline | F | live | REQ-41 (A3); gate-6 r6 |
+| T-REG-32 | `prune` clears a v1 record without touching its worktree, after which the now-unregistered fork is removable by explicit path with `--force` | baseline | F | live | REQ-31a (A3); gate-6 r4 |
+| T-REG-33 | forking replaces a record whose worktree is gone: it describes nothing, so replacing it orphans nothing | baseline | F | live | REQ-41 (A3); gate-6 r6 |
+| T-REG-34 | the same-name conflict is refused at preflight — before any worktree, include copy, or setup hook has run, since a rollback cannot reverse a hook's side effects | baseline | F | live | REQ-41 (A3); refuse-when-live review |
+| T-REG-35 | `prune` removes only the records the user was shown; one that becomes prunable after the prompt is left for the next run | baseline | F | live | REQ-31a (A3); PR #64 review |
+| T-REG-36 | `prune` escapes registry-sourced name, branch, and path before rendering them to a terminal | baseline | F | live | REQ-31a (A3); PR #64 review |
 
 ---
 
@@ -469,6 +518,15 @@ the group.
 | T-CLN-22 | `--allow-dirty` and `--allow-unpushed` never override the invoking-cwd refusal | baseline | C | live | issue #16 section 3; REQ-32; DESIGN-DECISIONS D12 |
 | T-CLN-23 | Human cleanup diagnostics escape terminal control bytes in Git-controlled paths and commit subjects while JSON preserves the values | baseline | C | live | PR #17 late security review; issue #16 sections 1 and 4; REQ-17 |
 | T-CLN-24 | unpushed-commit refusal with no configured remote explains remote setup; JSON preserves the existing error code and `details` object | baseline | C | live | P02 A13(f); REQ-17; REQ-32 |
+| T-CLN-25 | real and dry-run cleanup of a fork with a lineage claim discloses the retained claim, inferred record, freshness entry, store paths, and the exact source-qualified removal command, and removes none of them | freshness=A10 | C | live | P02 A10; REQ-32 |
+| T-CLN-26 | cleanup of a target with no matching lineage claim, and cleanup when a lineage-store read fails, both succeed with the neutral notice and empty `retained_metadata` | freshness=A10 | C | live | P02 A10; REQ-32 |
+| T-CLN-27 | `retained_metadata` reaches machine output: `cleanup --json` emits it alongside `notices`, proving the hand-assembled CLI document was extended and not only the `CleanupResult` dataclass | freshness=A10 | C | live | P02 A10; REQ-17 |
+| T-CLN-28 | removal commands are per record and source-qualified; a child holding both a planned claim and an inferred record produces two command lines, neither omitting `--source`; store-derived notices are escaped | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLN-29 | a control character embedded in a stored session ID reaches machine (JSON) `retained_metadata` output raw, but never appears as a raw byte in human notice text — a genuinely load-bearing escaping proof, unlike a plain-UUID fixture | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLN-30 | a freshness entry that exists only at the legacy `XDG_CACHE_HOME` location (not yet migrated) is disclosed as retained at that location, not misreported as living at the new `XDG_STATE_HOME` path | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLN-31 | a structurally invalid freshness-index file degrades cleanup disclosure to the neutral empty `retained_metadata` plus its own notice, never a crash and never a partial, misleading result | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLN-32 | a hostile session ID (embedded newline and shell metacharacters) in a generated removal command round-trips through `shlex` as one safely-quoted argument, never letting the command break out of its argument position | freshness=A10 | C | live | P02 A10 gate-6; REQ-17 |
+| T-CLN-33 | an unreadable freshness index nulls only the freshness half of disclosure; an unrelated, independently-readable retained lineage claim is still disclosed, not suppressed by the freshness fault | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
 
 ---
 
@@ -487,6 +545,20 @@ Varying axes: none of the shared four vary (baseline pinned).
 | T-INC-04 | hook failure → non-fatal, stderr notice, fork still succeeds | baseline | F | live | REQ-24; RESEARCH §2.1 step 12 |
 | T-INC-05 | pipeline order — include/hook run after verify; their filesystem changes are excluded from the verify comparison | baseline | F | live | spec §5 |
 | T-INC-07 | issue #32 — the setup-hook failure notice escapes hook stdout/stderr, which the repository controls directly | baseline | F | live | issue #32 |
+| T-INC-08 | A12 — a hook committed at the fork anchor and byte-identical on disk is `eligible` and runs (`status=ran`, exit 0) | baseline | F | live | P02 A12; REQ-24 |
+| T-INC-09 | A12 Gate-1 fact 1 — an index-untracked hook carried into the child is skipped under the default `tracked` policy (`eligibility=untracked`), and the notice names `--setup-hook-policy any` | baseline | F | live | P02 A12; REQ-24 |
+| T-INC-10 | A12 — a hook committed at the anchor but modified in the working tree is `modified` and skipped, decided by byte comparison rather than `git status` (the A1 lesson) | baseline | F | live | P02 A12; A1 |
+| T-INC-11 | A12 — `--setup-hook-policy any` runs an untracked or modified hook while still reporting the observed eligibility rather than masking it | baseline | F | live | P02 A12 |
+| T-INC-12 | A12 — a hook recorded as mode `120000` in the anchor tree, and separately a hook that is a symlink on disk, are both `not_a_regular_blob` and skipped | baseline | F | live | P02 A12 |
+| T-INC-13 | A12 — `--setup-hook-policy off` evaluates no eligibility and spawns no process (`status=disabled`) | baseline | F | live | P02 A12 |
+| T-INC-14 | A12 Gate-1 fact 3 — successful stdout/stderr are retained as bounded tails with pre-bound byte totals and a `truncated` flag | baseline | F | live | P02 A12 |
+| T-INC-15 | A12 — success-path hook output is escaped, extending T-INC-07's guarantee beyond the failure path | baseline | F | live | P02 A12; issue #32 |
+| T-INC-16 | A12 Gate-1 fact 2 — a hook exceeding its timeout is killed with its whole process group (its backgrounded grandchild is gone), `timed_out=true`, and the fork still succeeds | baseline | F | live | P02 A12 |
+| T-INC-17 | A12 gate-6 — a hook that exits 0 after detaching a `setsid()` process keeping its pipes open ends in seconds rather than at the timeout, reports `timed_out=false` with its real exit code, and discloses `descendants_cleared=false` | baseline | F | live | P02 A12 gate-6 |
+| T-INC-18 | A12 gate-6 round 3 — a hook process group observed empty once is retired for good: neither the reap ladder's SIGKILL escalation nor `terminate_active_setup_hook()` signals that PID again, so a reused PID cannot be killed | baseline | F | live | P02 A12 gate-6 round 3; REQ-22 |
+| T-INC-19 | A12 gate-6 round 3 — SIGINT/SIGTERM are blocked across the spawn-and-register critical section, so a signal raised while `Popen` is returning is deferred until the hook is in `_ACTIVE` and is then reaped, not leaked; the caller's mask is restored afterwards | baseline | F | live | P02 A12 gate-6 round 3; REQ-22 |
+| T-INC-20 | A12 gate-6 round 3 — the hook itself runs with SIGINT and SIGTERM unblocked: the spawn-time mask is inherited across fork and survives exec, so it is restored in the child or the reap ladder's SIGTERM could never be delivered | baseline | F | live | P02 A12 gate-6 round 3; REQ-24 |
+| T-INC-21 | A12 gate-6 round 5 — a hook group whose leader is still running is still probed with `killpg(pgid, 0)` before being signalled: round 4's attempt to skip the probe when `Popen.poll()` answered `None` treated "status unknown" (which CPython also returns under concurrent-`waitpid` lock contention) as proof of a live leader, a false safety claim reverted here (Known limit 9 covers the reaped-leader race that remains) | baseline | F | live | P02 A12 gate-6 round 5; REQ-24 |
 
 ---
 
@@ -547,7 +619,12 @@ Varying axes: agent (claude/codex, must vary per §4 — `cwd_prompt_expected` d
 | T-OUT-21 | `fork --dry-run -o json` and `fork --dry-run --json` emit the same parseable preview object with every planned mutation and perform no mutation | baseline | C | live | REQ-17; REQ-18; issue #14; R4.2; R8.6 |
 | T-OUT-22 | `agent_signal_incomplete` is cataloged at exit 3 and emits exact non-secret `status`, `present`, and `missing` machine details | agent-signal=incomplete-marker | C | live | P02 A9; REQ-17; R7.8; R7.12 |
 | T-OUT-23 | bidirectional formatting characters are escaped by the renderer and rejected by the command-safety predicate, which share one control set | baseline | U | live | REQ-17 |
-| T-OUT-24 | A6b step 6 — `-o json` reports the resolved `with_submodules` flag under `fork.mode` and the carry outcome in `notices[]` | baseline | F | live | A6 design doc |
+| T-OUT-24 | an invalid `AGENT_FORK_OUTPUT` produces empty stdout across every command that resolves configuration, never a partial human-formatted success | baseline | C | live | P02 A11 |
+| T-OUT-25 | A12 — `fork --json` stdout stays exactly one parseable line carrying the whole `setup_hook` object with no progress text, while `text` mode narrates the hook on stderr and leaves stdout unchanged | baseline | C | live | P02 A12; REQ-17; R7.1/R7.6/R7.8 |
+| T-OUT-26 | A12 — `interrupted_sigint` (130) and `interrupted_sigterm` (143) are cataloged stable codes with exactly one class each, keeping T-OUT-14's catalog-exactness invariant green | baseline | C | live | P02 A12; REQ-22; R7.12 |
+| T-OUT-27 | A12 Axis C1 — human output echoes the bounded, already-escaped `stdout_tail`/`stderr_tail` to stderr when the hook failed and when `--debug` is set, and echoes nothing for a quiet success | baseline | C | live | P02 A12; R7.1; R7.6 |
+| T-OUT-28 | A12 Axis C1 — the same echo on the timeout branch: the timeout line plus the tail of what the hook printed before it was killed, with the fork still succeeding | baseline | C | live | P02 A12; R7.1; R7.6 |
+| T-OUT-29 | A6b step 6 — `-o json` reports the resolved `with_submodules` flag under `fork.mode` and the carry outcome in `notices[]` | baseline | F | live | A6 design doc |
 
 ---
 
@@ -591,14 +668,43 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-29 | automatic real fork refuses incomplete Claude input with exit 3 and exact JSON details | agent-signal=incomplete-marker; agent-mode=auto | C | live | P02 A9; REQ-17; REQ-45 |
 | T-CLI-30 | strict real fork refuses incomplete Claude input with exit 3 and exact JSON details | agent-signal=incomplete-id; agent-mode=strict | C | live | P02 A9; REQ-17; REQ-45 |
 | T-CLI-31 | automatic incomplete dry-run refusal emits one stderr JSON error and creates no Git or Agent Fork artifact | agent-signal=incomplete-marker; agent-mode=auto | C | live | P02 A9; REQ-18; REQ-29; R8.6 |
-| T-CLI-32 | every output parser accepts only `text` and `json`; all human-result defaults equal explicit `text`; `table` is rejected; completions omit it; invalid environment output follows each command's existing config-resolution contract | baseline | C | live | P02 A13(b); REQ-10; R4.2; R5.1 |
+| T-CLI-32 | every output parser accepts only `text` and `json`; every route defaults to `None`, not just `fork` (A11, F8); `table` is rejected; completions omit it; `list`/`session`/`cleanup` reject an invalid `AGENT_FORK_OUTPUT` identically to every other consumer instead of ignoring it | baseline | C | live | P02 A11/A13(b); REQ-10; R4.2; R5.1 |
 | T-CLI-33 | every option argparse declares for each subcommand reaches the completion vocabulary — the parity invariant that replaces hand-maintained option lists | baseline | U | live | REQ-10 |
 | T-CLI-34 | every subcommand argparse declares reaches the completion vocabulary | baseline | U | live | REQ-10 |
 | T-CLI-35 | completion output choices are exactly those the parser accepts, so a removed alias cannot linger in completions | baseline | U | live | P02 A13(b); REQ-10 |
 | T-CLI-36 | A6a gate-6 — the console script forwards `--no-with-state` to the submodule guard, so the refusal and its remedy are proven through the real CLI rather than a direct call | baseline | F | live | A6 gate-6 finding 5 |
 | T-CLI-37 | A6a gate-6 — dry-run counts and notices describe the fork that will actually happen: a dirty submodule previews as zero unstaged paths and carries a loss notice | baseline | F | live | A6 gate-6 finding 2 |
 | T-CLI-38 | A6a gate-6 — `submodule_unrepresentable` appears in the README row for its own exit status, parsed from the table rather than searched for anywhere in the file | baseline | F | live | A6 gate-6 finding 7, narrowed in pass 2 |
-| T-CLI-39 | Gate-6 finding 3 — dry-run's own unstaged count hardcoded `--ignore-submodules=dirty` unconditionally, undercounting a submodule under the tool's own `with_submodules` default | baseline | F | live | gate-6 finding 3 |
+| T-CLI-39 | human and JSON session output report `last_known_good` and `freshness_unknown` parent inference, with the exact rerun notice, the `parent inference:` line immediately after `lineage:`, and no corpus discovery, cache write, or freshness write | freshness=A10 | C | live | P02 A10; REQ-32 |
+| T-CLI-40 | `delete --source inferred` reports every additive field and removes the freshness entry; `delete --source planned` with a surviving inferred record retains the freshness entry and says so | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLI-41 | exceeding a whole-corpus limit (`max_files`) under `--current`, `--session-id`, `--all`, and `--record` exits 3 as `claude_parent_incomplete_analysis` with one JSON error and no spool, inference, freshness, or registry write | freshness=A10 | C | live | P02 A10; REQ-17; REQ-18; R6.1 |
+| T-CLI-42 | `delete --source inferred` removes the freshness entry before the record; a fault injected after the freshness removal leaves the record readable as `freshness_unknown`, never `current` | freshness=A10 | C | live | P02 A10; REQ-32 |
+| T-CLI-43 | a per-target limit (`max_candidates`) tripped on one of several `--all` targets yields that target's own typed incomplete-analysis document inside the bulk output while an unaffected target completes its own analysis with no error and no "incomplete" status, and the bulk spool closes cleanly with a valid summary | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
+| T-CLI-44 | an already-expired shared `max_seconds` deadline under `--all` reports `scope: "corpus"` (not `"target"`) for every affected target, since it is one shared clock, and the batch still exits cleanly with a valid summary | freshness=A10 | C | live | P02 A10; REQ-17; REQ-48 |
+| T-CLI-45 | a freshness-index write failure increments `work.freshness_write_failures`; the CLI appends the rerun notice only on a `--record` run that actually recorded, never on a preview run | freshness=A10 | C | live | P02 A10; REQ-17 |
+| T-CLI-46 | a per-target limit (`max_candidates`) breaching inside `infer_one()` for a single, non-`--all` target still surfaces the typed `claude_parent_incomplete_analysis` code end to end, not a generic not-recordable/unavailable class | freshness=A10 | C | live | P02 A10; REQ-17; REQ-48 |
+| T-CLI-47 | `delete --source inferred` on a child holding both a planned claim and an inferred record reports `retained_planned_record: true`, and a follow-up `list` confirms the planned claim genuinely still exists | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
+| T-CLI-48 | the freshness-write-failure notice reflects only whether THIS target's write failed under `--all --record-all`, not whether the corpus-wide counter is merely nonzero: two independently recordable targets, only the first's write fails, only the first's document carries the notice | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
+| T-CLI-49 | `analyzed_at` on the human `parent inference:` line is escaped through `terminal_text` like its neighbors on the same line; JSON output keeps the raw value | freshness=A10 | C | live | P02 A10 gate-6; REQ-17 |
+| T-CLI-50 | a corrupted freshness index at the target's location does not block `delete`: the primary record is still removed and the command still exits 0, with `removed_freshness_entry: false` and a "could not confirm" notice | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
+| T-CLI-51 | a bogus `worktree_location` template is rejected identically by `config validate`, `fork --dry-run`, and real `fork` | baseline | C | live | P02 A11 |
+| T-CLI-52 | a `{session-id}` `worktree_location` template is rejected identically by `config validate`, `fork --dry-run`, and real `fork` | baseline | C | live | P02 A11 |
+| T-CLI-53 | an invalid composed `branch_prefix` is rejected identically by `config validate`, `fork --dry-run`, and real `fork` | baseline | C | live | P02 A11 |
+| T-CLI-54 | the real-fork refusal case creates no branch, worktree, registry, lineage, or cache artifact | baseline | C | live | P02 A11 |
+| T-CLI-55 | `doctor` reports every finding for a multi-bad-key configuration joined onto one line, and exits 0 for a valid configuration | baseline | C | live | P02 A11 |
+| T-CLI-56 | `config view` honors a valid `AGENT_FORK_OUTPUT=json` with no explicit flag | baseline | C | live | P02 A11 |
+| T-CLI-57 | a `branch_prefix` ending `.loc` composed with a name starting `k` (`foo.lock`) passes `config validate`/`doctor` but is refused at fork time — the required, not optional, completion of the `branch_prefix` contract (T11h/F7) | baseline | C | live | P02 A11 |
+| T-CLI-58 | a valid `AGENT_FORK_OUTPUT=json` keeps rendering errors as JSON even when a *different*, unrelated key is what actually fails to resolve (F16/Gate-6) | baseline | C | live | P02 A11 |
+| T-CLI-59 | an explicit `-o text` still beats a valid `AGENT_FORK_OUTPUT=json` on an error path, including one from an unrelated key (Gate-6 second-pass regression in T-CLI-58's own fix) | baseline | C | live | P02 A11 |
+| T-CLI-60 | `doctor` honors a valid `AGENT_FORK_OUTPUT=json` when a *different*, unrelated key is what fails to resolve, instead of falling back to plain text (Gate-6 second-pass finding) | baseline | C | live | P02 A11 |
+| T-CLI-61 | A12 — `fork --dry-run` discloses the setup hook in human and JSON for all four states (eligible, ineligible, absent, disabled), with `prediction: true`, `mutation_performed: false`, and no branch or worktree created | baseline | C | live | P02 A12; REQ-24; R8.6 |
+| T-CLI-62 | A12 — `doctor` carries a `repository setup hook` row for all five states; its `ok` is false, and `doctor`'s exit code nonzero, only when a present hook is ineligible under the default `tracked` policy | baseline | C | live | P02 A12; REQ-24; R9.10 |
+| T-CLI-63 | A12 Gate-1 fact 7 — a real SIGINT during the setup hook makes `main()` return 130 with a rendered error rather than a traceback and exit 1; `--json` prints exactly one JSON error object with code `interrupted_sigint` | baseline | C | live | REQ-22; P02 A12 |
+| T-CLI-64 | A12 gate-6 — an interrupt under `AGENT_FORK_OUTPUT=json` with no `--json` flag still renders exactly one JSON error object on stderr, because the boundary reads the resolved output mode rather than the raw arguments | baseline | C | live | R7.8; REQ-22; P02 A12 gate-6 |
+| T-CLI-65 | A12 gate-6 round 3 — the same guarantee holds for an interrupt *before* the hook step (raised from `inspect_repository()`), because the resolved mode is published as soon as configuration resolves rather than just before the hook runs | baseline | C | live | R7.8; REQ-22; P02 A12 gate-6 round 3 |
+| T-CLI-66 | A12 gate-6 round 4 — SIGINT/SIGTERM are blocked across the resolve-and-publish critical section, so a signal raised between `resolve_discovered_config()` returning and `args._resolved_machine` being assigned is deferred until after the assignment and still renders one JSON error object; the caller's mask is restored afterwards | baseline | C | live | R7.8; REQ-22; P02 A12 gate-6 round 4 |
+| T-CLI-67 | A12 gate-6 review (CodeRabbit) — `doctor`'s `unchecked` eligibility (a read/parse failure, not a provenance verdict) is composed as an explicit read-failure detail rather than run straight into the other reasons' "present but ..." wording, under both `tracked` (fails) and `any` (passes) | baseline | C | live | R9.10; P02 A12 gate-6 (CodeRabbit, PR #65) |
+| T-CLI-68 | Gate-6 finding 3 — dry-run's own unstaged count hardcoded `--ignore-submodules=dirty` unconditionally, undercounting a submodule under the tool's own `with_submodules` default | baseline | F | live | gate-6 finding 3 |
 
 ---
 
@@ -658,6 +764,9 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 | T-SES-45 | a Codex `thread/read` result with an unsupported schema raises the existing typed unavailable failure | agent=codex | U | live | P02 A13(c); REQ-47 |
 | T-SES-46 | CLI inspection distinguishes valid no-parent from current-thread failure; parent-name failure preserves the resolved parent ID and marks only its name unavailable | agent=codex | C | live | P02 A13(c); REQ-47 |
 | T-SES-47 | unavailable parent evidence satisfies neither parent-presence assertion, while agent-only and current-session-only assertions remain independent of lineage availability | agent=codex | C | live | P02 A13(c); REQ-47 |
+| T-SES-48 | a stale-source inference produces `parent_inference.status == "last_known_good"` with the recorded parent ID, while `parent_session` stays null and `lineage.status` stays `not_found` | freshness=A10 | U | live | P02 A10; REQ-47; REQ-48 |
+| T-SES-49 | `parent_inference` is present for all seven statuses with the exact field shape, coexists with `transcript`, and nulls `parent_session_id`/`analyzed_at`/`changed_sources` for `superseded` while keeping `freshness == "stale_algorithm"` | freshness=A10 | U | live | P02 A10; REQ-47; REQ-48 |
+| T-SES-50 | `session validate --has-parent` fails for `last_known_good` and `freshness_unknown` records and passes only once a re-inference makes the record `current` | freshness=A10 | U | live | P02 A10; REQ-47; REQ-48 |
 
 ---
 
@@ -709,6 +818,37 @@ Varying axes: relationship (parent/child/sibling/unrelated), cache (cold/warm), 
 | T-CPI-37 | `read_lineage` normalizes a malformed store to the typed `invalid agent-fork lineage store` error | baseline | U | live | REQ-48 |
 | T-CPI-38 | `add_lineage` normalizes the same malformed store to the same typed error, so every entry point shares one contract | baseline | U | live | REQ-48 |
 | T-CPI-39 | invalid UTF-8 bytes normalize to the same typed error rather than escaping as a decoder-specific `UnicodeDecodeError` | baseline | U | live | REQ-48 |
+| T-CPI-40 | the full freshness status/evidence mapping table, one row per status, including `changed_sources` for target-only, parent, and mixed source mismatches | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-41 | deleting the freshness index at both the state and legacy locations yields `freshness_unknown`, not `current_at_last_analysis` — the gate-1 revival repro | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-42 | a state index whose `targets` lacks this child, or an invalid/symlinked/oversized index, yields `freshness_unknown` when no legacy entry exists | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-43 | appending one blank line to the target transcript yields `stale_sources` with `changed_sources == ("target",)`; the record stays readable | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-44 | `remove_index_freshness` removes only the named key from the state path, leaves other entries intact, never unlinks either file, and preserves mode `0o600` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-45 | a record with more source fingerprints than `MAX_SOURCE_FINGERPRINTS` is rejected as an invalid store | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-46 | three successive transcript appends plus re-inference leave exactly one flat `{stem}.json` screen-cache shard | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-47 | the bounded sweep removes a flat legacy v2 tree once under its own safety check (immediate children only, never recursing into a nested subdirectory), removes orphan and aged shards, respects the marker interval, and never removes a live in-flight temp file or the `.sweep` marker itself | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-48 | each of `max_files`, `max_entries`, `max_total_bytes`, and `max_candidates` raises `CorpusLimitError` with the exact `limit`, `allowed`, `observed`, and `scope` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-49 | a freshness-index write failure increments `freshness_write_failures` in addition to the unchanged `cache_write_failures` aggregate | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-50 | `index_freshness_path` resolves under `XDG_STATE_HOME`; `update_index_freshness` writes the state entry and removes only this child's key from the legacy file, which still exists afterward | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-51 | `assess_inference` falls back to a legacy-only entry when the state file is entirely absent, evaluating it identically to a state-path hit | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-52 | `remove_index_freshness` removes the entry from whichever location holds it, and from both when present in both, returning `True` whenever either changed | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-53 | the per-entry migration repro: a state file holding other children's entries but not this child's still falls back to this child's legacy entry rather than reporting `freshness_unknown` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-54 | `update_index_freshness` for one child leaves every other child's legacy entry byte-identical; a pop that empties `targets` rewrites the file to an actual empty dict (`{}`), never unlinking it | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-55 | with an entry for the same child in both locations, reads use the state-path entry, writes leave only the state-path entry, and deletes remove both | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-56 | `update_index_freshness` and `remove_index_freshness` acquire the state-path lock before the legacy-path lock and release in reverse order, on every path touching both files | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-57 | `infer_one` raises `TimeoutError` at its `max_seconds` deadline guard, and the CLI-boundary mapping function turns it into the structured `max_seconds`/`corpus` shape (one shared clock, unlike the genuinely per-target `max_candidates`) | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-58 | `_read_targets` rejects a non-dict top-level JSON document (array or string) at either the state or legacy freshness path, degrading `assess_inference` to `freshness_unknown` and `remove_index_freshness` to its own typed `ValueError` rather than crashing with `AttributeError` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-59 | a source-fingerprint entry with no `:` separator resolves `assess_inference` to `stale_sources` with `changed_sources == ("other",)` rather than raising `UnboundLocalError` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-60 | a broken symlink at the state or legacy freshness path is treated as structurally invalid (`freshness_unknown`), not as an absent, empty store | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-61 | a legacy `v2` cache root containing only flat shard files is fully removed in one pass | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-62 | the cache sweep's `CACHE_SWEEP_MAX_ENTRIES` bound stops the underlying directory scan itself rather than materializing every entry first | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-63 | the cache sweep's byte cap evicts the oldest shard first when total shard bytes exceed `CACHE_MAX_BYTES` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-64 | the cache sweep removes a shard older than `CACHE_MAX_AGE_SECONDS` | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-65 | a symlinked or foreign-owned legacy `v2` root is left completely untouched even though the `v3` root independently passed its own safety check | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-66 | the `.sweep` marker's name-based exemption from deletion is load-bearing on its own, independent of a freshly refreshed mtime | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-67 | a `.sweep` marker replaced with a symlink to a file outside the cache root is never stat'd or written through | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-68 | a shard-write failure increments only the pre-existing `cache_write_failures` aggregate, never the new `freshness_write_failures` counter | freshness=A10 | U | live | P02 A10; REQ-48 |
+| T-CPI-69 | a source-fingerprint path containing an embedded NUL byte (raising `ValueError` from `Path.stat()`, not `OSError`) resolves `assess_inference` to `stale_sources` rather than raising | freshness=A10 | U | live | P02 A10 gate-6; REQ-48 |
+| T-CPI-70 | a `.sweep` marker replaced with a named pipe (FIFO) never blocks the sweep waiting for a reader that will never arrive; bounded in a subprocess so a regression fails loudly instead of hanging | freshness=A10 | U | live | P02 A10 gate-6; REQ-48 |
 
 ---
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 from dataclasses import dataclass
 
 
@@ -31,6 +32,9 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
     "claude_parent_partial_record": ErrorSpec(
         3, "one or more Claude parent results were not recordable"
     ),
+    "claude_parent_incomplete_analysis": ErrorSpec(
+        3, "Claude transcript corpus exceeded a bounded analysis limit"
+    ),
     "cleanup_target_unknown": ErrorSpec(3, "cleanup target is not registered or found"),
     "submodule_unrepresentable": ErrorSpec(
         5, "submodule checkout differs from the commit recorded in the index"
@@ -49,6 +53,19 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
     "cleanup_target_is_cwd": ErrorSpec(5, "cleanup target contains the invoking cwd"),
     "cleanup_dirty_worktree": ErrorSpec(5, "cleanup target has uncommitted changes"),
     "cleanup_unpushed_commits": ErrorSpec(5, "cleanup target has unpushed commits"),
+    "conflict_fork_registered": ErrorSpec(
+        5, "a live fork of this name is already registered for this repository"
+    ),
+    "cleanup_registry_stale": ErrorSpec(
+        5, "registry record does not match this repository's live worktrees"
+    ),
+    "cleanup_registry_ambiguous": ErrorSpec(
+        5, "several registry records claim the same target"
+    ),
+    # One code per exit code, never one code with a per-instance exit code: the
+    # catalog's one-code-one-exit-code invariant is what T-OUT-14/T-OUT-15 pin.
+    "interrupted_sigint": ErrorSpec(130, "interrupted by SIGINT after rollback"),
+    "interrupted_sigterm": ErrorSpec(143, "interrupted by SIGTERM after rollback"),
 }
 
 
@@ -191,3 +208,32 @@ class ClaudeParentPartialRecordError(ClaudeParentError):
 
     def __init__(self, message: str, **kwargs):
         super().__init__(message, code=self.code, **kwargs)
+
+
+class ClaudeParentIncompleteAnalysisError(ClaudeParentError):
+    code = "claude_parent_incomplete_analysis"
+
+    def __init__(self, message: str, **kwargs):
+        super().__init__(message, code=self.code, **kwargs)
+
+
+class InterruptedBySigintError(AgentForkError):
+    """SIGINT reached the CLI mid-pipeline and rollback has completed."""
+
+    code = "interrupted_sigint"
+    exit_code = 130
+
+
+class InterruptedBySigtermError(AgentForkError):
+    """SIGTERM reached the CLI mid-pipeline and rollback has completed."""
+
+    code = "interrupted_sigterm"
+    exit_code = 143
+
+
+# `rollback.run_with_rollback()` installs handlers for exactly these two
+# signals, so `OperationInterrupted.signum` is always one of them.
+INTERRUPT_ERRORS: dict[int, type[AgentForkError]] = {
+    signal.SIGINT: InterruptedBySigintError,
+    signal.SIGTERM: InterruptedBySigtermError,
+}

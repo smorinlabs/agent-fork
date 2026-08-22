@@ -114,7 +114,8 @@ and never substitute hand-written Git for the CLI.
 
 A CLI that runs and then reports an environment problem is a different case.
 Preserve its exact output and suggest `agent-fork doctor`, which checks Git,
-the agent CLIs, configuration validity, and XDG paths.
+the agent CLIs, configuration validity, XDG paths, and whether this
+repository's setup hook would run.
 
 ## Classify the request
 

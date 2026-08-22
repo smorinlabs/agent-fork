@@ -5,7 +5,8 @@ from __future__ import annotations
 import shlex
 import subprocess
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,12 +18,20 @@ from agent_fork.agents import (
     preflight_git,
 )
 from agent_fork.content import capture_state, collect_inventory
+from agent_fork.errors import PreconditionError
 from agent_fork.git import run_git
-from agent_fork.include import copy_worktree_includes, run_setup_hook
+from agent_fork.include import (
+    DEFAULT_SETUP_HOOK_POLICY,
+    DEFAULT_SETUP_HOOK_TIMEOUT,
+    SetupHookPolicy,
+    SetupHookResult,
+    copy_worktree_includes,
+    run_setup_hook,
+)
 from agent_fork.lineage import LineageClaim, add_lineage
 from agent_fork.materialize import materialize
 from agent_fork.models import RegistryEntry
-from agent_fork.registry import add_entry, remove_entry
+from agent_fork.registry import add_entry, occupied_fork, remove_entry
 from agent_fork.repository import (
     WorktreeCreation,
     create_worktree_at_anchor,
@@ -30,6 +39,7 @@ from agent_fork.repository import (
 )
 from agent_fork.rollback import run_with_rollback
 from agent_fork.submodules import SEMANTIC_PINS, carry_submodules, snapshot_submodules
+from agent_fork.text import escape_terminal_text
 from agent_fork.verify import verify_fork
 
 
@@ -51,6 +61,9 @@ class ForkRequest:
     git_version_output: str | None = None
     child_session_id: str | None = None
     codex_session_name_resolution: bool = True
+    setup_hook_policy: str = DEFAULT_SETUP_HOOK_POLICY
+    setup_hook_timeout: int = DEFAULT_SETUP_HOOK_TIMEOUT
+    progress: Callable[[str], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +73,7 @@ class ForkResult:
     notices: tuple[str, ...]
     verification: bool
     included: tuple[str, ...]
+    setup_hook: SetupHookResult
     agent: AgentContext | None = None
     parent_session_name: str | None = None
 
@@ -94,7 +108,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
     if agent_check is not None:
         notices.extend(agent_check.notices)
     resolved_agent = agent_check.context if agent_check is not None else request.agent
-    validate_fork_guards(
+    info = validate_fork_guards(
         request.parent,
         request.branch,
         request.destination,
@@ -102,6 +116,19 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         with_submodules=request.with_submodules,
         env=env,
     )
+    # Refuse a name this repository already has a fork of, here — before any
+    # worktree, include copy, or setup hook has run. `add_entry` checks again
+    # under the registry lock, because another fork can register in between,
+    # but by then the hook has already had its side effects, which a rollback
+    # cannot reverse. A refusal the user can act on has to come first.
+    occupied = occupied_fork(request.name, info.common_dir, env=env)
+    if occupied is not None:
+        raise PreconditionError(
+            "conflict_fork_registered",
+            f"fork {request.name!r} is already registered for this repository "
+            f"at {escape_terminal_text(occupied.worktree)}; remove it first, "
+            "or choose another name",
+        )
     planned_child_id = (
         request.child_session_id or str(uuid.uuid4())
         if resolved_agent is not None and resolved_agent.agent == "claude"
@@ -158,7 +185,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         request.parent, request.branch, request.destination, env=env
     )
 
-    def finish() -> tuple[tuple[str, ...], tuple[str, ...]]:
+    def finish() -> tuple[tuple[str, ...], SetupHookResult]:
         materialized = materialize(
             request.parent,
             creation.path,
@@ -195,18 +222,27 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             )
         included = copy_worktree_includes(request.parent, creation.path, env=env)
         notices.extend(included.notices)
-        hook_notices = run_setup_hook(request.parent, creation.path, env=env)
-        notices.extend(hook_notices)
-        add_entry(
-            RegistryEntry.create(
-                name=request.name,
-                branch=request.branch,
-                worktree=creation.path,
-                agent=resolved_agent.agent if resolved_agent is not None else None,
-                mode="agent" if resolved_agent is not None else "git-only",
+        setup_hook = run_setup_hook(
+            request.parent,
+            creation.path,
+            anchor=creation.anchor,
+            policy=SetupHookPolicy(
+                mode=request.setup_hook_policy,
+                timeout_seconds=request.setup_hook_timeout,
             ),
             env=env,
+            progress=request.progress,
         )
+        notices.extend(setup_hook.notices)
+        entry = RegistryEntry.create(
+            name=request.name,
+            branch=request.branch,
+            worktree=creation.path,
+            agent=resolved_agent.agent if resolved_agent is not None else None,
+            mode="agent" if resolved_agent is not None else "git-only",
+            repository=creation.common_dir,
+        )
+        add_entry(entry, env=env)
         if (
             resolved_agent is not None
             and resolved_agent.agent == "claude"
@@ -225,17 +261,26 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                     env=env,
                 )
             except Exception:
-                remove_entry(request.name, env=env)
+                # Remove exactly the record this call wrote. Nothing else is
+                # needed: `add_entry` refuses rather than displacing a live
+                # fork, so there is no earlier record to put back. Removal is
+                # a compare-and-swap, so a record already taken by a cleanup
+                # or replaced by a later fork is left alone. Compensation is
+                # best-effort by design — whatever goes wrong here, the
+                # failure that triggered it is the one worth reporting.
+                with suppress(Exception):
+                    remove_entry(entry.token(), env=env)
                 raise
-        return included.copied, hook_notices
+        return included.copied, setup_hook
 
-    included, _ = run_with_rollback(creation, finish, env=env)
+    included, setup_hook = run_with_rollback(creation, finish, env=env)
     return ForkResult(
         creation,
         launch,
         tuple(notices),
         request.verify,
         included,
+        setup_hook,
         resolved_agent,
         agent_check.parent_session_name if agent_check is not None else None,
     )

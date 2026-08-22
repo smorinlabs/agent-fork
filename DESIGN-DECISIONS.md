@@ -29,6 +29,7 @@
 | D19 | Claude parent inference | **Explicit opt-in structural inference; sharded screening cache; inferred evidence remains separate from planned claims** | ★ owner-approved 2026-08-11 |
 | D20 | Direct companion skill | **Delegate to existing session/fork commands; CLI owns automatic topic-branch naming** | ★ owner-approved 2026-08-11 |
 | D21 | Read-only session fork command | **Ordinary inspection constructs the native command; exact skill shortcut prints only it** | ★ owner-approved 2026-08-14 |
+| D22 | Repository setup-hook execution policy | **Provenance-gated by default, bounded in its own process group, disclosed before it runs, skipped rather than refused** | ★ owner-approved 2026-08-20 |
 
 ## Decisions in detail
 
@@ -65,7 +66,7 @@ Default targets: only registry-recorded forks. Guards (exit 5): uncommitted chan
 ### D13 — `cleanup` keeps its name (`ch-11-a` ★)
 The R2.1 waiver in `CONFORMANCE.md` stands, now marked confirmed. `prune`-style sweeping, if ever wanted, becomes `cleanup --all`, not a new verb.
 
-### D7 — Final v1 config schema (`ch-12-a` ★, amended by D5 note + D11)
+### D7 — Final v1 config schema (`ch-12-a` ★, amended by D5 note + D11; `output` added by A11 2026-08-20)
 
 ```toml
 # .agent-fork/agent-fork_config.toml (project) · $XDG_CONFIG_HOME/agent-fork/… (user)
@@ -77,6 +78,7 @@ worktree_location = "sibling"   # sibling | central | subdirectory | <path templ
 verify            = true
 copy              = false
 agent_mode         = "auto"      # auto | strict | git-only
+output             = "text"      # text | json
 
 [agents.claude]
 extra_args = []                 # e.g. ["--model", "opus"] — appended to the emitted command
@@ -84,7 +86,7 @@ extra_args = []                 # e.g. ["--model", "opus"] — appended to the e
 extra_args = []
 ```
 
-Dropped from agent-deck's `[fork]`: `docker`, the `worktree` toggle, `inherit_from_parent` (no meaning in a standalone CLI). Every `[fork]` key mirrors a flag (R3.8 parity); `[agents.*]` is config-only by design (no flag equivalent in v1).
+Dropped from agent-deck's `[fork]`: `docker`, the `worktree` toggle, `inherit_from_parent` (no meaning in a standalone CLI). Every `[fork]` key mirrors a flag (R3.8 parity); `[agents.*]` is config-only by design (no flag equivalent in v1). **A11 (2026-08-20, owner-ratified ACCEPT):** `output` joined the schema on the same R3.8/REQ-14 parity grounds — it previously had an `AGENT_FORK_OUTPUT` environment equivalent and a `-o/--output` flag but no `[fork]` counterpart, the sole exception to that parity rule.
 
 ### D11 — Extra-args passthrough ships in v1 (`ch-13-b` ⚠ went against)
 `[agents.<name>] extra_args` (array of strings) is appended to that agent's emitted launch command. Constraints: each element individually shell-quoted at emission (no string-splitting, no interpolation); values appear in `--dry-run` and `-o json` output (`command` field reflects them); tests cover the quoting boundary (spaces, quotes, `$`, `;`). *Consequence for testing:* launch-template tests assert the fixed prefix byte-for-byte plus a quoted-suffix property, rather than the whole line as a constant.
@@ -176,6 +178,61 @@ status. Safe commands are shell-quoted and emitted byte-exact; unsafe controls
 are never printed. Inspection remains free of Git mutation, filesystem writes,
 registry/lineage changes, clipboard access, network access, and command
 execution.
+
+### D22 — Repository setup-hook execution policy (owner-approved 2026-08-20)
+
+`.agent-fork/worktree-setup.sh` lives in the repository being forked, so its
+content is supplied by that repository and only its execution mechanism belongs
+to `agent-fork` — the `npm`/`postinstall` division. Before A12 it ran
+unconditionally, unbounded, and undisclosed. Four choices settle how it runs
+now. Design document:
+`docs/superpowers/plans/2026-08-18-p02-a12-setup-hook-execution.md`.
+
+**Default `tracked`, not "run whatever is there".** The hook runs only when it
+is committed in the fork anchor's tree as a regular blob *and* the bytes in the
+new worktree are identical to that blob. Eligibility is evaluated in the child,
+immediately before execution, because `materialize()` carries the parent's
+uncommitted state across — a parent-side check would clear a committed copy
+while the child executes a modified one. Raw committed bytes are compared to raw
+on-disk bytes rather than `git hash-object` output, which applies the path's
+clean filter and could make differing bytes hash equal, and rather than
+`git status` emptiness, which A1 disproved as a byte-equality oracle. The gate
+is a *provenance* control: it stops a cloned repository from silently running
+new, unreviewed code on the next fork. It is not a sandbox, and a malicious
+committed hook runs exactly as before.
+
+**Skipped, not refused.** `REQ-24` is a `SHOULD`, so an ineligible hook must not
+be able to fail a fork; that would contradict both the requirement and
+`T-INC-04`. Skipping is loud — a notice, a structured reason, a `doctor` row —
+and recoverable, either by committing the hook or by passing
+`--setup-hook-policy any`, which runs it while still reporting the observed
+eligibility rather than masking it.
+
+**One three-way flag, not paired booleans.** `--setup-hook-policy
+{tracked,any,off}` with the `[fork] setup_hook_policy` twin, chosen over an
+`--allow-unreviewed-setup-hook` flag paired with `--setup-hook`/
+`--no-setup-hook`. The consequence is that there is no literal
+`--no-setup-hook`; the equivalent is `--setup-hook-policy off`, which stops the
+step before eligibility is even evaluated.
+
+**Bounded at 300 seconds in its own process group.** The default favors
+tolerance for heavy dependency installs over catching a hang faster. Execution
+uses `start_new_session=True`, so a timeout or a signal terminates the hook *and
+everything it spawned* rather than orphaning descendants under PID 1; the
+SIGTERM→SIGKILL ladder is the same one `run_git()` already uses. There is
+deliberately no "no timeout" value: an unbounded hook is the fault this decision
+exists to close. A timeout bounds *duration*, never *blast radius* — a hook
+killed at 300 s may already have pushed a branch or rewritten shared
+configuration, and none of that is undone. Every user-facing string says so.
+
+**Disclosed, and `doctor` may fail.** `fork --dry-run` predicts the step
+parent-side (marked `prediction: true`), `fork --json` always carries a
+`setup_hook` object including a bounded 4096-byte tail of the hook's own output
+on success as well as failure, and `doctor` reports the same facts against
+`HEAD`. A present-but-ineligible hook makes the `doctor` check fail. This is a
+deliberate widening of what `doctor`'s exit code means — until now every failure
+was machine readiness, and this one is repository working-tree state — chosen
+because a hook that will silently not run is a real problem the user should see.
 
 ## Resulting v1 surface (consolidated)
 

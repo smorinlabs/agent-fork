@@ -1087,8 +1087,13 @@ class PtyResult:
     tty: bytes
 
 
-def pty_run(args: list[str], env: dict[str, str], tty_fd: int):
-    """Per-fd pty harness: only tty_fd on pty, others piped; ONLCR cleared (§6.6)."""
+def pty_run(args: list[str], env: dict[str, str], tty_fd: int, cwd: Path | None = None):
+    """Per-fd pty harness: only tty_fd on pty, others piped; ONLCR cleared (§6.6).
+
+    `cwd` matters for any command that confirms registry records against the
+    invoking repository's live worktrees; without it the child inherits the
+    test runner's directory.
+    """
     if tty_fd not in {0, 1, 2}:
         raise ValueError("tty_fd must be 0, 1, or 2")
     master, slave = os.openpty()
@@ -1103,6 +1108,7 @@ def pty_run(args: list[str], env: dict[str, str], tty_fd: int):
     process = subprocess.Popen(
         [str(executable), *args],
         env=env,
+        cwd=None if cwd is None else str(cwd),
         stdin=stdin,
         stdout=stdout,
         stderr=stderr,
