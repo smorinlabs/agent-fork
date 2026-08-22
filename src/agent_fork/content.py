@@ -112,8 +112,8 @@ class SkipRecord:
     sentinel: tuple[int, int, int, int, int, int]
 
 
-def sentinel_for(root: Path, relative: str) -> tuple[int, int, int, int, int, int]:
-    info = (root / relative).lstat()
+def sentinel_from_stat(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    """Return the immutable metadata bracket for one successful ``lstat``."""
     return (
         info.st_dev,
         info.st_ino,
@@ -122,6 +122,10 @@ def sentinel_for(root: Path, relative: str) -> tuple[int, int, int, int, int, in
         info.st_mtime_ns,
         info.st_ctime_ns,
     )
+
+
+def sentinel_for(root: Path, relative: str) -> tuple[int, int, int, int, int, int]:
+    return sentinel_from_stat((root / relative).lstat())
 
 
 @dataclass(frozen=True)
@@ -347,10 +351,19 @@ def _manifest_entry(root: Path, relative: str, *, tracked: bool) -> ManifestEntr
             ) from error
         return ManifestEntry(relative, tracked, "absent", 0, "", "")
     mode = stat.S_IMODE(info.st_mode)
+    sentinel = sentinel_from_stat(info)
     if stat.S_ISLNK(info.st_mode):
-        return ManifestEntry(
-            relative, tracked, "symlink", mode, "", os.readlink(target)
-        )
+        try:
+            link_target = os.readlink(target)
+        except OSError as error:
+            raise EntryUnreadableError(
+                f"cannot read carried entry: {escape_terminal_text(relative)}",
+                path=relative,
+                reason="tracked" if tracked else "unreadable",
+                phase="capture",
+                sentinel=sentinel,
+            ) from error
+        return ManifestEntry(relative, tracked, "symlink", mode, "", link_target)
     if stat.S_ISREG(info.st_mode):
         try:
             digest = _digest(target)
@@ -358,8 +371,9 @@ def _manifest_entry(root: Path, relative: str, *, tracked: bool) -> ManifestEntr
             raise EntryUnreadableError(
                 f"cannot read carried entry: {escape_terminal_text(relative)}",
                 path=relative,
-                reason="unreadable",
+                reason="tracked" if tracked else "unreadable",
                 phase="capture",
+                sentinel=sentinel,
             ) from error
         return ManifestEntry(relative, tracked, "file", mode, digest, "")
     return ManifestEntry(relative, tracked, "other", mode, "", "")
@@ -369,6 +383,7 @@ def capture_state(
     root: Path,
     inventory: Inventory | Iterable[str],
     *,
+    known_skipped: Iterable[object] = (),
     env: Mapping[str, str] | None = None,
 ) -> CarriedState:
     """Snapshot index and working-tree facts for ``inventory`` inside ``root``."""
@@ -384,39 +399,46 @@ def capture_state(
     if isinstance(inventory, Inventory):
         skippable = {*inventory.untracked, *inventory.ignored} - tracked
         blockers = inventory.deletions
+    known_paths = {str(getattr(record, "path", record)) for record in known_skipped}
 
     entries: list[ManifestEntry] = []
     skipped: list[SkipRecord] = []
     for relative in paths:
-        if relative in gitlinks:
+        if relative in gitlinks or relative in known_paths:
             continue
         try:
             entries.append(_manifest_entry(root, relative, tracked=relative in tracked))
         except EntryUnreadableError as error:
-            entry = error.details["entry"]
+            details = error.details
+            if details is None:
+                raise AssertionError("entry_unreadable must carry details") from error
+            entry = details["entry"]
             reason = entry.get("reason", "") if isinstance(entry, dict) else ""
             # Three preconditions, all required. A tracked path never skips
             # because a rename's endpoints land in different listings; a failed
             # lstat never skips because no sentinel could be recorded; and no
             # path skips while a deletion is carried, for the same
             # split-endpoint reason (P02 A5).
-            if reason != "unreadable" or relative not in skippable:
+            if (
+                reason != "unreadable"
+                or relative not in skippable
+                or error.sentinel is None
+            ):
                 raise
             if blockers:
                 raise EntryUnreadableError(
                     "cannot skip a carried entry while the fork carries a "
                     f"deletion: {escape_terminal_text(relative)}",
                     path=relative,
-                    reason="skip-blocked-by-deletion",
+                    reason="unreadable",
                     phase="capture",
                     deletion_blockers=blockers,
                 ) from error
             skipped.append(
-                SkipRecord(
-                    relative, "unreadable", "capture", sentinel_for(root, relative)
-                )
+                SkipRecord(relative, "unreadable", "capture", error.sentinel)
             )
-    carried_paths = tuple(p for p in paths if p not in {r.path for r in skipped})
+    omitted = known_paths | {record.path for record in skipped}
+    carried_paths = tuple(path for path in paths if path not in omitted)
     return CarriedState(carried_paths, index, tuple(entries), tuple(skipped))
 
 

@@ -146,6 +146,7 @@ def verify_fork(
                 with_ignored=with_ignored,
                 env=env,
             ),
+            known_skipped=skipped,
             env=env,
         )
         drift = compare_states(parent_state_before, parent_after)
@@ -157,6 +158,7 @@ def verify_fork(
                 with_ignored=with_ignored,
                 env=env,
             ),
+            known_skipped=skipped,
             env=env,
         )
         content = compare_states(parent_state_before, child_state)

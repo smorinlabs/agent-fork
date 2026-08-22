@@ -11,9 +11,12 @@ from pathlib import Path
 
 from agent_fork.content import (
     Inventory,
+    SkipRecord,
     collect_inventory,
+    sentinel_from_stat,
     suppressed_submodules,
 )
+from agent_fork.errors import EntryUnreadableError
 from agent_fork.git import GitCommandError, run_git
 from agent_fork.text import escape_terminal_text
 
@@ -30,6 +33,7 @@ class MaterializeResult:
     copied_ignored: int
     intent_to_add: tuple[str, ...]
     notices: tuple[str, ...]
+    skipped: tuple[SkipRecord, ...] = ()
 
 
 def _safe_destination(root: Path, relative: str) -> Path:
@@ -42,25 +46,89 @@ def _safe_destination(root: Path, relative: str) -> Path:
     return candidate
 
 
-def _copy_entry(parent: Path, child: Path, relative: str) -> None:
-    source = parent / relative
-    destination = _safe_destination(child, relative)
-    info = source.lstat()
+def _skip_copy(
+    relative: str,
+    reason: str,
+    info: os.stat_result,
+    deletion_blockers: tuple[str, ...],
+) -> SkipRecord:
+    if deletion_blockers:
+        raise EntryUnreadableError(
+            "cannot skip a carried entry while the fork carries a deletion: "
+            f"{escape_terminal_text(relative)}",
+            path=relative,
+            reason="unreadable",
+            phase="materialize",
+            deletion_blockers=deletion_blockers,
+        )
+    return SkipRecord(relative, reason, "materialize", sentinel_from_stat(info))
+
+
+def _prepare_destination(destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.is_symlink() or destination.exists():
         if destination.is_dir() and not destination.is_symlink():
             shutil.rmtree(destination)
         else:
             destination.unlink()
+
+
+def _copy_entry(
+    parent: Path,
+    child: Path,
+    relative: str,
+    *,
+    deletion_blockers: tuple[str, ...],
+) -> SkipRecord | None:
+    source = parent / relative
+    destination = _safe_destination(child, relative)
+    try:
+        info = source.lstat()
+    except OSError as error:
+        raise EntryUnreadableError(
+            f"cannot stat carried entry: {escape_terminal_text(relative)}",
+            path=relative,
+            reason="lstat-failed",
+            phase="materialize",
+            deletion_blockers=deletion_blockers,
+        ) from error
     if stat.S_ISLNK(info.st_mode):
-        destination.symlink_to(os.readlink(source))
-    elif stat.S_ISREG(info.st_mode):
-        shutil.copyfile(source, destination, follow_symlinks=False)
-        os.chmod(destination, stat.S_IMODE(info.st_mode), follow_symlinks=False)
-    else:
-        raise MaterializeError(
-            f"unsupported untracked file type: {escape_terminal_text(relative)}"
-        )
+        try:
+            target = os.readlink(source)
+        except OSError:
+            return _skip_copy(relative, "unreadable", info, deletion_blockers)
+        _prepare_destination(destination)
+        destination.symlink_to(target)
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        return _skip_copy(relative, "unsupported-type", info, deletion_blockers)
+
+    # Open and read the source separately from destination operations. A source
+    # failure qualifies for the A5 skip; a child mkdir/open/write failure is a
+    # materialization failure and must never be mislabeled as an unreadable
+    # parent entry.
+    try:
+        source_file = source.open("rb")
+    except OSError:
+        return _skip_copy(relative, "unreadable", info, deletion_blockers)
+    _prepare_destination(destination)
+    source_error: OSError | None = None
+    with source_file:
+        with destination.open("wb") as destination_file:
+            while True:
+                try:
+                    chunk = source_file.read(1 << 20)
+                except OSError as error:
+                    source_error = error
+                    break
+                if not chunk:
+                    break
+                destination_file.write(chunk)
+    if source_error is not None:
+        destination.unlink()
+        return _skip_copy(relative, "unreadable", info, deletion_blockers)
+    os.chmod(destination, stat.S_IMODE(info.st_mode), follow_symlinks=False)
+    return None
 
 
 def _apply_patch(
@@ -205,9 +273,17 @@ def materialize(
         unstaged_applied = _apply_patch(child, unstaged, [], env=env)
 
         skipped_paths = {getattr(record, "path", record) for record in skipped}
+        newly_skipped: list[SkipRecord] = []
         untracked = [p for p in inventory.untracked if p not in skipped_paths]
         for path in untracked:
-            _copy_entry(parent, child, path)
+            record = _copy_entry(
+                parent,
+                child,
+                path,
+                deletion_blockers=inventory.deletions,
+            )
+            if record is not None:
+                newly_skipped.append(record)
 
         ignored: list[str] = []
         if with_ignored:
@@ -215,15 +291,26 @@ def materialize(
             untracked_set = set(untracked)
             for path in ignored:
                 if path not in untracked_set:
-                    _copy_entry(parent, child, path)
+                    record = _copy_entry(
+                        parent,
+                        child,
+                        path,
+                        deletion_blockers=inventory.deletions,
+                    )
+                    if record is not None:
+                        newly_skipped.append(record)
     except (GitCommandError, OSError) as error:
         raise MaterializeError(str(error)) from error
 
     return MaterializeResult(
         staged_patch=staged_applied,
         unstaged_patch=unstaged_applied,
-        copied_untracked=len(untracked),
-        copied_ignored=len(ignored),
+        copied_untracked=len(untracked)
+        - sum(record.path in untracked for record in newly_skipped),
+        copied_ignored=len(ignored)
+        - sum(record.path in ignored for record in newly_skipped),
         intent_to_add=tuple(ita_paths),
-        notices=submodule_loss_notices(parent, env=env) + _skip_notices(skipped),
+        notices=submodule_loss_notices(parent, env=env)
+        + _skip_notices((*skipped, *newly_skipped)),
+        skipped=tuple(newly_skipped),
     )

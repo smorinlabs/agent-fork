@@ -1880,3 +1880,19 @@ def test_a_signal_while_the_output_mode_resolves_is_deferred_until_it_is_publish
             "message": "interrupted before any mutation",
         }
     }
+
+
+@pytest.mark.matrix("T-CLI-68")
+def test_strict_skip_policy_is_an_explicit_fork_flag(repo_scenario):
+    """A5 keeps strict skip refusal on the invocation, not in configuration."""
+    from agent_fork.cli import _parser
+    from conftest import run_cli
+
+    parser = _parser()
+    assert parser.parse_args(["fork", "child"]).strict is False
+    assert parser.parse_args(["fork", "child", "--strict"]).strict is True
+
+    world = repo_scenario()
+    help_result = run_cli(["help", "fork"], world.env, world.parent_path)
+    assert help_result.returncode == 0 and help_result.stderr == b""
+    assert b"--strict" in help_result.stdout

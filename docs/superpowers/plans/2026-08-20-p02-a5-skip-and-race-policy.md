@@ -1,10 +1,8 @@
 # P02-A5 — Skip policy for bad entries, and the parent-change race
 
-**Status:** gate 1 **open**. The probe matrix is executed and recorded, and
-seven Codex second-lens passes have run; new defects per pass were 1, 3, 2, 2,
-1, 0, and the seventh reopened two documentation defects. Gate 3 design is
-recorded below. Gate 4 has a plan, reviewed once and **not yet ready**. Gates
-5 and 6 not started.
+**Status:** gates 1–6 complete locally; publication is pending. Gate 6 absorbed
+four implementation defects and the missing evidence rows. The final
+repository gate passed with 681 tests, 1 expected skip, and 20 deselections.
 
 **Register entry:** A5 in
 [P02](../../../projects/P02-agent-fork-fault-remediation.md).
@@ -580,13 +578,15 @@ scenario rows come only after the plumbing they exercise exists.
 
 ### Row numbering
 
-`T-MAT-30..38`, `T-VER-40..43`, `T-INC-08..09`, `T-OUT-25..27`, `T-CLI-61`.
-**Refreshed 2026-08-20 after a third merge:** `main` had taken `T-OUT-24` and
-`T-CLI-51..60`. `T-MAT-33` and `T-MAT-34` are already implemented and registered.
-`T-VER-44` was withdrawn: it duplicated existing `T-VER-26`, the deletion
-positive guard, which this item **reuses as its regression anchor** rather
-than restating. Re-check every group's next free number immediately before
-writing tests; `main` moved twice during this item and collided twice.
+`T-MAT-30..38`, `T-VER-40..45`, `T-INC-22..24`, `T-OUT-29..31`, `T-CLI-68`.
+**Refreshed 2026-08-21 after the A12 merge:** `main` had taken `T-INC-08..21`,
+`T-OUT-25..28`, and `T-CLI-61..67`. `T-MAT-33` and `T-MAT-34` were already
+implemented and registered.
+The plan's original `T-VER-44` was withdrawn because it duplicated existing
+deletion guard `T-VER-26`. Gate 6 later assigned the now-free `T-VER-44` to the
+same-`lstat` sentinel defect. Re-check every group's next free number
+immediately before writing tests; `main` moved twice during this item and
+collided twice.
 
 ### Step 0 — contract amendments and catalog, before any behaviour
 
@@ -667,7 +667,7 @@ hook, before `add_entry`.
 | Row | Asserts |
 |---|---|
 | `T-VER-42` | A skipped file mutated **after verification, by the setup hook** fails the fork at finalization |
-| `T-MAT-30` | A same-size rewrite with restored mtime is caught by `st_ctime_ns` alone, which is why that field is in the tuple |
+| `T-VER-45` | A same-size rewrite with restored mtime is caught by `st_ctime_ns` alone, which is why that field is in the tuple |
 
 ### Step 6 — strict, aggregation, and the error contracts (`cli.py`, `errors.py`)
 
@@ -683,11 +683,11 @@ error.
 
 | Row | Asserts |
 |---|---|
-| `T-CLI-61` | `--strict` parses and appears in help; no precedence claim |
+| `T-CLI-68` | `--strict` parses and appears in help; no precedence claim |
 | `T-MAT-31` | Two unreadable untracked files are both named, byte-wise ordered, in one error |
-| `T-INC-09` | Under `--strict`, an unreadable `.worktreeinclude` match raises `strict_skip_refused` and rolls back, proving cross-phase aggregation reaches include |
-| `T-OUT-25` | `strict_skip_refused` JSON `details` matches its schema exactly |
-| `T-OUT-26` | `entry_unreadable` JSON `details` matches its schema, with ordered `deletion_blockers` |
+| `T-INC-23` | Under `--strict`, an unreadable `.worktreeinclude` match raises `strict_skip_refused` and rolls back, proving cross-phase aggregation reaches include |
+| `T-OUT-29` | `strict_skip_refused` JSON `details` matches its schema exactly |
+| `T-OUT-30` | `entry_unreadable` JSON `details` matches its schema, with ordered `deletion_blockers` |
 
 ### Step 7 — end-to-end behaviour, once the plumbing exists
 
@@ -696,8 +696,8 @@ exercise had been built.
 
 | Row | Asserts |
 |---|---|
-| `T-INC-08` | An unreadable `.worktreeinclude` match is skipped with a notice; the fork succeeds |
-| `T-OUT-27` | A successful fork with skips: notices absent from stdout, on stderr **exactly once**, and retained in JSON `notices[]`, per A13's contract |
+| `T-INC-22` | An unreadable `.worktreeinclude` match is skipped with a notice; the fork succeeds |
+| `T-OUT-31` | A successful fork with skips: notices absent from stdout, on stderr **exactly once**, and retained in JSON `notices[]`, per A13's contract |
 | `T-MAT-37` | `--strict --with-ignored`: ignored capture, ignored transport, and `.worktreeinclude`'s independent re-enumeration are distinct gated paths and each must reach the aggregate |
 | `T-MAT-38` | `--no-verify` with a materialize-time skip, where initial capture is bypassed entirely |
 
@@ -706,6 +706,25 @@ exercise had been built.
 `TEST-MATRIX.md` rows registered and the total recounted, or
 `just check-matrix` fails. `README.md` catalog and the `skipped[]` result
 field. Both accepted known limits documented where users meet them.
+
+## Gate 6 — adversarial implementation review
+
+Executed 2026-08-21 over the complete A5 branch, including steps 0–5 inherited
+from the handoff. The review found four implementation defects:
+
+1. Capture recorded a skipped path's sentinel with a second `lstat`, so a
+   target swap between the failed read and that call could become the baseline.
+2. Verification re-opened paths already skipped during capture.
+3. `entry_unreadable.details.entry.reason` used values outside its documented
+   stable vocabulary for tracked and deletion-blocked paths.
+4. An unreadable ignored path matched by `.worktreeinclude` was re-opened,
+   recorded twice, and announced twice under `--with-ignored`.
+
+All four were reproduced RED before repair. Gate 6 also filled evidence gaps
+left by the earlier implementation: `T-MAT-32`, `T-MAT-36`, `T-VER-40`,
+`T-VER-41`, `T-VER-43`, and final-sentinel rows `T-VER-44..45`. `T-INC-24`
+protects the duplicate-reporting repair. The focused rows and the full
+repository gate pass; the exact full-gate result is recorded in the status.
 
 ### Not in this plan
 

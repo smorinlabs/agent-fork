@@ -743,3 +743,90 @@ def test_a_live_leader_is_still_probed_before_being_signalled(monkeypatch):
         (_FakeHookProcess.pid, int(signal.SIGTERM)),
     ]
     assert group.emptied is False
+
+
+@pytest.mark.matrix("T-INC-23")
+def test_strict_include_skip_raises_once_and_rolls_back(repo_scenario):
+    """An unreadable include joins strict aggregation before registration."""
+    from dataclasses import replace
+
+    from agent_fork.errors import StrictSkipRefusedError
+    from agent_fork.pipeline import fork
+    from agent_fork.registry import find_candidates
+
+    world = repo_scenario()
+    (world.parent_path / ".gitignore").write_text("locked.env\n")
+    _commit_support(world, include="locked.env\n")
+    locked = world.parent_path / "locked.env"
+    locked.write_text("TOKEN=secret\n")
+    os.chmod(locked, 0)
+    request = replace(_request(world, name="strict-include"), strict=True)
+    try:
+        with pytest.raises(StrictSkipRefusedError) as caught:
+            fork(request, env=world.env)
+    finally:
+        os.chmod(locked, 0o644)
+
+    assert caught.value.details == {
+        "skipped": [{"path": "locked.env", "reason": "unreadable", "phase": "include"}],
+        "count": 1,
+    }
+    assert not request.destination.exists()
+    assert not find_candidates("strict-include", env=world.env)
+
+
+@pytest.mark.matrix("T-INC-22")
+def test_unreadable_include_is_skipped_with_one_notice(repo_scenario):
+    """The default include policy succeeds while naming the omitted path."""
+    from agent_fork.pipeline import fork
+    from agent_fork.registry import find_candidates
+
+    world = repo_scenario()
+    (world.parent_path / ".gitignore").write_text("locked.env\n")
+    _commit_support(world, include="locked.env\n")
+    locked = world.parent_path / "locked.env"
+    locked.write_text("TOKEN=secret\n")
+    os.chmod(locked, 0)
+    try:
+        result = fork(_request(world, name="include-unreadable"), env=world.env)
+    finally:
+        os.chmod(locked, 0o644)
+
+    assert result.included == ()
+    assert result.skipped == (
+        {"path": "locked.env", "reason": "unreadable", "phase": "include"},
+    )
+    assert sum("locked.env" in notice for notice in result.notices) == 1
+    assert result.creation.path.exists()
+    assert find_candidates("include-unreadable", env=world.env)
+
+
+@pytest.mark.matrix("T-INC-24")
+def test_include_does_not_repeat_an_existing_capture_skip(repo_scenario):
+    """One ignored path produces one skip record and one notice.
+
+    ``--with-ignored`` makes capture observe ignored paths before the
+    post-verification include phase. A path already skipped there must not be
+    reopened, recorded a second time, or announced twice merely because it
+    also matches ``.worktreeinclude``.
+    """
+    from agent_fork.pipeline import fork
+
+    world = repo_scenario()
+    (world.parent_path / ".gitignore").write_text("locked.env\n")
+    _commit_support(world, include="locked.env\n")
+    locked = world.parent_path / "locked.env"
+    locked.write_text("TOKEN=secret\n")
+    os.chmod(locked, 0)
+    try:
+        result = fork(
+            _request(world, name="include-known-skip", with_ignored=True),
+            env=world.env,
+        )
+    finally:
+        os.chmod(locked, 0o644)
+
+    assert result.skipped == (
+        {"path": "locked.env", "reason": "unreadable", "phase": "capture"},
+    )
+    assert sum("locked.env" in notice for notice in result.notices) == 1
