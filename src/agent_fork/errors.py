@@ -77,6 +77,7 @@ class AgentForkError(Exception):
 
     code = "runtime_error"
     exit_code = 1
+    details: dict[str, object] | None = None
 
 
 class AgentDetectionError(AgentForkError):

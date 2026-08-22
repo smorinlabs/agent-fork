@@ -111,31 +111,42 @@ def run_git(
 ) -> GitResult:
     """Invoke `git` by name on every call so current PATH shims are observable."""
     command = ("git", "-C", str(cwd), *args)
-    process = subprocess.Popen(
-        command,
-        env=without_config_injection(env),
-        stdin=subprocess.PIPE if input_bytes is not None else None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
+    process: subprocess.Popen[bytes] | None = None
+    previous_mask = signal.pthread_sigmask(
+        signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM}
     )
-    _ACTIVE.process = process
+    restore_mask = True
     try:
+        process = subprocess.Popen(
+            command,
+            env=without_config_injection(env),
+            stdin=subprocess.PIPE if input_bytes is not None else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        _ACTIVE.process = process
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        restore_mask = False
         stdout, stderr = process.communicate(input=input_bytes)
     except BaseException:
-        signal_process_group(process, signal.SIGTERM)
-        try:
-            process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            signal_process_group(process, signal.SIGKILL)
+        if process is not None:
+            signal_process_group(process, signal.SIGTERM)
             try:
                 process.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                pass
+                signal_process_group(process, signal.SIGKILL)
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
         raise
     finally:
-        if getattr(_ACTIVE, "process", None) is process:
+        if restore_mask:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        if process is not None and getattr(_ACTIVE, "process", None) is process:
             _ACTIVE.process = None
+    assert process is not None
     result = GitResult(
         args=tuple(args),
         returncode=process.returncode,

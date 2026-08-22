@@ -1667,7 +1667,11 @@ def main(argv: list[str] | None = None) -> int:
         from agent_fork.errors import INTERRUPT_ERRORS
         from agent_fork.output import render_error
 
-        translated = INTERRUPT_ERRORS[error.signum]("interrupted after rollback")
+        translated = INTERRUPT_ERRORS[error.signum](str(error))
+        translated.details = {
+            "exit_code": error.exit_code,
+            "signal": error.signal_name,
+        }
         print(render_error(translated, machine=_machine()), file=sys.stderr)
         return translated.exit_code
     except KeyboardInterrupt:
