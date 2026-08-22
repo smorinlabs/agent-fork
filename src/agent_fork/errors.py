@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import signal
+from collections.abc import Iterable
 from dataclasses import dataclass
+
+from agent_fork.text import escape_terminal_text
 
 
 @dataclass(frozen=True)
@@ -15,6 +18,10 @@ class ErrorSpec:
 ERROR_CATALOG: dict[str, ErrorSpec] = {
     "runtime_error": ErrorSpec(1, "unexpected runtime or materialization failure"),
     "verify_failed": ErrorSpec(1, "fork verification failed"),
+    "entry_unreadable": ErrorSpec(
+        1, "a carried entry could not be read and could not be skipped"
+    ),
+    "strict_skip_refused": ErrorSpec(1, "--strict refused a fork with skipped entries"),
     "registry_busy": ErrorSpec(1, "registry lock wait expired"),
     "config_error": ErrorSpec(2, "configuration is invalid or unsupported"),
     "agent_not_detected": ErrorSpec(3, "agent identity is missing or ambiguous"),
@@ -146,6 +153,81 @@ class VerificationError(AgentForkError):
     def __init__(self, message: str, *, details: dict[str, object] | None = None):
         super().__init__(message)
         self.details = details
+
+
+class EntryUnreadableError(AgentForkError):
+    """A carried entry could not be read and did not qualify for a skip.
+
+    Skipping is reserved for untracked or ignored entries whose ``lstat``
+    succeeded and whose fork carries no deletion (P02 A5). Anything else —
+    a tracked path, a failed ``lstat``, or a skip blocked by a deletion —
+    surfaces here rather than as a raw ``runtime_error`` carrying an errno.
+    """
+
+    code = "entry_unreadable"
+    exit_code = 1
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str,
+        reason: str,
+        phase: str,
+        deletion_blockers: tuple[str, ...] = (),
+        sentinel: tuple[int, int, int, int, int, int] | None = None,
+    ):
+        super().__init__(message)
+        # Internal observation metadata. It deliberately stays out of the
+        # stable machine details schema; capture uses it to freeze the exact
+        # successful lstat that preceded a failed read.
+        self.sentinel = sentinel
+        self.details: dict[str, object] = {
+            "entry": {
+                "path": escape_terminal_text(path),
+                "reason": reason,
+                "phase": phase,
+            },
+            "deletion_blockers": [
+                escape_terminal_text(blocker)
+                for blocker in sorted(
+                    deletion_blockers,
+                    key=lambda value: value.encode("utf-8", "surrogateescape"),
+                )
+            ],
+        }
+
+
+class StrictSkipRefusedError(AgentForkError):
+    """A completed fork attempt contained skips forbidden by ``--strict``."""
+
+    code = "strict_skip_refused"
+    exit_code = 1
+
+    def __init__(self, skipped: Iterable[object]):
+        ordered = sorted(
+            skipped,
+            key=lambda record: str(getattr(record, "path", record)).encode(
+                "utf-8", "surrogateescape"
+            ),
+        )
+        entries = [
+            {
+                "path": escape_terminal_text(str(getattr(record, "path", record))),
+                "reason": str(getattr(record, "reason", "unreadable")),
+                "phase": str(getattr(record, "phase", "capture")),
+            }
+            for record in ordered
+        ]
+        named = ", ".join(entry["path"] for entry in entries)
+        super().__init__(
+            "--strict refused a fork with skipped entries"
+            + (f": {named}" if named else "")
+        )
+        self.details: dict[str, object] = {
+            "skipped": entries,
+            "count": len(entries),
+        }
 
 
 class RegistryBusyError(AgentForkError):

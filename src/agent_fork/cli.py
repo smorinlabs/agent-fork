@@ -188,6 +188,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Verify the completed fork (default: enabled)",
     )
     fork.add_argument(
+        "--strict",
+        action="store_true",
+        help="Refuse and roll back a fork that skips any carried entry",
+    )
+    fork.add_argument(
         "--setup-hook-policy",
         choices=("tracked", "any", "off"),
         default=None,
@@ -713,6 +718,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             with_ignored=config.with_ignored,
             verify=config.verify,
             force=args.force,
+            strict=args.strict,
             extra_args=extra_args,
             codex_session_name_resolution=config.codex_session_name_resolution,
             setup_hook_policy=config.setup_hook_policy,
@@ -757,6 +763,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         command=result.launch.command,
         notices=tuple(notices),
         setup_hook=result.setup_hook.document(),
+        skipped=result.skipped,
     )
     print(presented.render(output_kind))
     for notice in notices:

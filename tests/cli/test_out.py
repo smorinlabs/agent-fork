@@ -854,3 +854,105 @@ def test_interrupt_error_codes_join_the_stable_catalog(repo_scenario):
         signal.SIGINT: InterruptedBySigintError,
         signal.SIGTERM: InterruptedBySigtermError,
     }
+
+
+@pytest.mark.matrix("T-OUT-29")
+def test_strict_skip_refusal_has_exact_ordered_json_details(repo_scenario):
+    """A strict refusal is one stable error with an ordered skipped schema."""
+    from agent_fork.content import SkipRecord
+    from agent_fork.errors import ERROR_CATALOG, StrictSkipRefusedError
+    from agent_fork.output import STABLE_ERROR_CODES, render_error
+
+    repo_scenario()
+    sentinel = (0, 0, 0, 0, 0, 0)
+    error = StrictSkipRefusedError(
+        (
+            SkipRecord("z-last", "unsupported-type", "materialize", sentinel),
+            SkipRecord("a-first", "unreadable", "capture", sentinel),
+        )
+    )
+    assert ERROR_CATALOG["strict_skip_refused"].exit_code == 1
+    assert "strict_skip_refused" in STABLE_ERROR_CODES
+    assert json.loads(render_error(error, machine=True)) == {
+        "error": {
+            "code": "strict_skip_refused",
+            "message": str(error),
+            "details": {
+                "skipped": [
+                    {"path": "a-first", "reason": "unreadable", "phase": "capture"},
+                    {
+                        "path": "z-last",
+                        "reason": "unsupported-type",
+                        "phase": "materialize",
+                    },
+                ],
+                "count": 2,
+            },
+        }
+    }
+
+
+@pytest.mark.matrix("T-OUT-30")
+def test_entry_unreadable_has_exact_escaped_ordered_json_details(repo_scenario):
+    """The companion error exposes its entry and every deletion blocker."""
+    from agent_fork.errors import EntryUnreadableError
+    from agent_fork.output import render_error
+    from agent_fork.text import escape_terminal_text
+
+    repo_scenario()
+    error = EntryUnreadableError(
+        "cannot read carried entry",
+        path="bad\nentry",
+        reason="unreadable",
+        phase="capture",
+        deletion_blockers=("z-last", "a-first"),
+    )
+    assert json.loads(render_error(error, machine=True)) == {
+        "error": {
+            "code": "entry_unreadable",
+            "message": "cannot read carried entry",
+            "details": {
+                "entry": {
+                    "path": escape_terminal_text("bad\nentry"),
+                    "reason": "unreadable",
+                    "phase": "capture",
+                },
+                "deletion_blockers": ["a-first", "z-last"],
+            },
+        }
+    }
+
+
+@pytest.mark.matrix("T-OUT-31")
+def test_successful_skip_notice_uses_stderr_once_and_stays_in_json(repo_scenario):
+    """A13 notice routing applies unchanged to A5's successful skip."""
+    from conftest import run_cli
+
+    def run(name, *, machine):
+        world = repo_scenario("plain@main")
+        locked = world.parent_path / "locked.txt"
+        locked.write_text("secret\n")
+        os.chmod(locked, 0)
+        arguments = ["fork", name, "--no-agent"]
+        if machine:
+            arguments.append("--json")
+        try:
+            completed = run_cli(arguments, world.env, world.parent_path)
+        finally:
+            os.chmod(locked, 0o644)
+        return completed
+
+    human = run("skip-human", machine=False)
+    assert human.returncode == 0
+    assert b"locked.txt" not in human.stdout
+    assert human.stderr.count(b"skipped entry, not carried: locked.txt") == 1
+
+    machine = run("skip-json", machine=True)
+    assert machine.returncode == 0
+    document = json.loads(machine.stdout)
+    notice = "skipped entry, not carried: locked.txt"
+    assert document["notices"].count(notice) == 1
+    assert document["skipped"] == [
+        {"path": "locked.txt", "reason": "unreadable", "phase": "capture"}
+    ]
+    assert machine.stderr.decode().count(notice) == 1

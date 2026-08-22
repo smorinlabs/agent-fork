@@ -12,6 +12,7 @@ reinterpret glob characters such as ``[`` in a filename.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import stat
@@ -19,7 +20,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_fork.errors import EntryUnreadableError
 from agent_fork.git import run_git
+from agent_fork.text import escape_terminal_text
 
 GITLINK_MODE = "160000"
 _DIGEST_CHUNK = 1 << 20
@@ -56,6 +59,16 @@ class Inventory:
     intent_to_add: tuple[str, ...] = ()
     untracked: tuple[str, ...] = ()
     ignored: tuple[str, ...] = ()
+    deletions: tuple[str, ...] = ()
+    """Paths the fork carries a deletion for, staged or unstaged.
+
+    Collected explicitly with ``--diff-filter=D`` rather than inferred from a
+    missing working-tree path, because a staged ``git rm --cached`` leaves the
+    file present on disk: nothing looks absent, yet the cached deletion still
+    transports. A skip must be refused while any deletion is carried, since
+    ``--no-renames`` splits ``old -> new`` into unassociated endpoints and
+    skipping one would silently drop the other (P02 A5).
+    """
 
     @property
     def paths(self) -> tuple[str, ...]:
@@ -82,10 +95,45 @@ class Difference:
 
 
 @dataclass(frozen=True)
+class SkipRecord:
+    """One carried entry that could not be copied and qualified for a skip.
+
+    ``sentinel`` is ``lstat`` metadata taken at observation and rechecked at
+    finalization. It carries mode and ctime as well as the obvious fields:
+    changing a file from mode ``000`` to ``0644`` preserves inode, size and
+    mtime, and its porcelain record stays ``?? path``, so without those two a
+    file that became readable mid-fork would be omitted with every check
+    reporting agreement.
+    """
+
+    path: str
+    reason: str
+    phase: str
+    sentinel: tuple[int, int, int, int, int, int]
+
+
+def sentinel_from_stat(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    """Return the immutable metadata bracket for one successful ``lstat``."""
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def sentinel_for(root: Path, relative: str) -> tuple[int, int, int, int, int, int]:
+    return sentinel_from_stat((root / relative).lstat())
+
+
+@dataclass(frozen=True)
 class CarriedState:
     paths: tuple[str, ...]
     index: tuple[IndexEntry, ...]
     manifest: tuple[ManifestEntry, ...]
+    skipped: tuple[SkipRecord, ...] = ()
 
 
 def nul_paths(data: bytes) -> list[str]:
@@ -248,6 +296,32 @@ def collect_inventory(
         intent_to_add=tuple(intent_to_add_paths(root, env=env)),
         untracked=listing(["ls-files", "--others", "-z", "--exclude-standard"]),
         ignored=ignored,
+        deletions=tuple(
+            sorted(
+                {
+                    *listing(
+                        [
+                            "diff",
+                            "--cached",
+                            "--name-only",
+                            "-z",
+                            "--no-renames",
+                            "--diff-filter=D",
+                        ]
+                    ),
+                    *listing(
+                        [
+                            "diff",
+                            "--name-only",
+                            "-z",
+                            "--no-renames",
+                            "--diff-filter=D",
+                            "--ignore-submodules=dirty",
+                        ]
+                    ),
+                }
+            )
+        ),
     )
 
 
@@ -263,15 +337,45 @@ def _manifest_entry(root: Path, relative: str, *, tracked: bool) -> ManifestEntr
     target = root / relative
     try:
         info = target.lstat()
-    except OSError:
+    except OSError as error:
+        # Only a genuinely missing path may read as absent. Every other errno —
+        # EACCES from an untraversable ancestor, EIO, ELOOP — would otherwise
+        # masquerade as a deletion, which the carried-state rules treat as
+        # legitimate, and the entry would be dropped silently (P02 A5).
+        if error.errno not in (errno.ENOENT, errno.ENOTDIR):
+            raise EntryUnreadableError(
+                f"cannot stat carried entry: {escape_terminal_text(relative)}",
+                path=relative,
+                reason="lstat-failed",
+                phase="capture",
+            ) from error
         return ManifestEntry(relative, tracked, "absent", 0, "", "")
     mode = stat.S_IMODE(info.st_mode)
+    sentinel = sentinel_from_stat(info)
     if stat.S_ISLNK(info.st_mode):
-        return ManifestEntry(
-            relative, tracked, "symlink", mode, "", os.readlink(target)
-        )
+        try:
+            link_target = os.readlink(target)
+        except OSError as error:
+            raise EntryUnreadableError(
+                f"cannot read carried entry: {escape_terminal_text(relative)}",
+                path=relative,
+                reason="tracked" if tracked else "unreadable",
+                phase="capture",
+                sentinel=sentinel,
+            ) from error
+        return ManifestEntry(relative, tracked, "symlink", mode, "", link_target)
     if stat.S_ISREG(info.st_mode):
-        return ManifestEntry(relative, tracked, "file", mode, _digest(target), "")
+        try:
+            digest = _digest(target)
+        except OSError as error:
+            raise EntryUnreadableError(
+                f"cannot read carried entry: {escape_terminal_text(relative)}",
+                path=relative,
+                reason="tracked" if tracked else "unreadable",
+                phase="capture",
+                sentinel=sentinel,
+            ) from error
+        return ManifestEntry(relative, tracked, "file", mode, digest, "")
     return ManifestEntry(relative, tracked, "other", mode, "", "")
 
 
@@ -279,6 +383,7 @@ def capture_state(
     root: Path,
     inventory: Inventory | Iterable[str],
     *,
+    known_skipped: Iterable[object] = (),
     env: Mapping[str, str] | None = None,
 ) -> CarriedState:
     """Snapshot index and working-tree facts for ``inventory`` inside ``root``."""
@@ -289,12 +394,52 @@ def capture_state(
     )
     gitlinks = {entry.path for entry in index if entry.mode == GITLINK_MODE}
     tracked = {entry.path for entry in index}
-    manifest = tuple(
-        _manifest_entry(root, relative, tracked=relative in tracked)
-        for relative in paths
-        if relative not in gitlinks
-    )
-    return CarriedState(paths, index, manifest)
+    skippable: set[str] = set()
+    blockers: tuple[str, ...] = ()
+    if isinstance(inventory, Inventory):
+        skippable = {*inventory.untracked, *inventory.ignored} - tracked
+        blockers = inventory.deletions
+    known_paths = {str(getattr(record, "path", record)) for record in known_skipped}
+
+    entries: list[ManifestEntry] = []
+    skipped: list[SkipRecord] = []
+    for relative in paths:
+        if relative in gitlinks or relative in known_paths:
+            continue
+        try:
+            entries.append(_manifest_entry(root, relative, tracked=relative in tracked))
+        except EntryUnreadableError as error:
+            details = error.details
+            if details is None:
+                raise AssertionError("entry_unreadable must carry details") from error
+            entry = details["entry"]
+            reason = entry.get("reason", "") if isinstance(entry, dict) else ""
+            # Three preconditions, all required. A tracked path never skips
+            # because a rename's endpoints land in different listings; a failed
+            # lstat never skips because no sentinel could be recorded; and no
+            # path skips while a deletion is carried, for the same
+            # split-endpoint reason (P02 A5).
+            if (
+                reason != "unreadable"
+                or relative not in skippable
+                or error.sentinel is None
+            ):
+                raise
+            if blockers:
+                raise EntryUnreadableError(
+                    "cannot skip a carried entry while the fork carries a "
+                    f"deletion: {escape_terminal_text(relative)}",
+                    path=relative,
+                    reason="unreadable",
+                    phase="capture",
+                    deletion_blockers=blockers,
+                ) from error
+            skipped.append(
+                SkipRecord(relative, "unreadable", "capture", error.sentinel)
+            )
+    omitted = known_paths | {record.path for record in skipped}
+    carried_paths = tuple(path for path in paths if path not in omitted)
+    return CarriedState(carried_paths, index, tuple(entries), tuple(skipped))
 
 
 def _index_map(state: CarriedState) -> dict[tuple[str, str], IndexEntry]:
