@@ -502,6 +502,26 @@ structured `Difference` scoped to that submodule's path, same shape as the
 top-level `content-match` differences, so `error.details.failed_checks` stays
 one flat, addressable list regardless of nesting depth.
 
+**Implementation-time note on rungs 4+5 (2026-08-21, before gate-6 round 2).**
+Rungs 4 and 5 above are described as two separate comparisons, the first a
+raw `git status --porcelain=v1` string match. The shipped implementation
+(`verify_submodules`, `src/agent_fork/submodules.py`) does not run that raw
+comparison; it reuses the same structural `compare_states(plan.content,
+child_content)` the top-level `content-match` rung already runs, one level
+down, folding 4 and 5 into a single call. This is a deliberate
+implementation choice, not an oversight: `compare_states` compares
+`ls-files --stage` index entries (which carry unmerged conflicts as distinct
+per-stage entries, not the porcelain `UU` marker) and per-path manifest
+digests, and is already exercised and trusted at the top level, so reusing
+it here avoids a second parallel parsing path. The accepted residual gap is
+whatever a raw porcelain line would show that this structural comparison
+would not — chiefly porcelain's own rename markers (`R  old -> new`), which
+`compare_states`'s `--no-renames`-derived model reports instead as a
+delete-of-old plus add-of-new; the practical difference is presentation, not
+missed detection, since both forms flag the same path pair as changed. This
+note supersedes the "same comparison ... recursed one level" framing above
+and the gate-6 absorption commit's characterization of this area.
+
 Test rows: inject each defect independently — wrong HEAD, cold when it should
 be warm, attached instead of detached, dirty content, a plan entry silently
 skipped, a parent submodule mutated by carry — and require the fork to fail
