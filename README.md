@@ -279,6 +279,14 @@ predates the repository field and so cannot identify its fork; a path now occupi
 by something else is reported and kept, because that may be another
 repository's live worktree.
 
+`cleanup` is not atomic across Git's worktree removal, branch deletion, and the
+registry update: an interruption can leave only some of those steps complete.
+During that destructive section, SIGINT or SIGTERM kills the active Git process
+group and exits `130` or `143` with a partial-removal warning. There is no
+attempt to restore files Git already removed. Inspect the worktree and branch;
+if the worktree is gone but its registry record remains, run
+`agent-fork prune`.
+
 `cleanup` always inspects the
 target for uncommitted changes and commits that are not reachable from a remote.
 Without the matching override, it refuses and lists up to 10 at-risk paths or
@@ -713,7 +721,9 @@ to run), under `off` (it is not evaluated), and when no hook is present.
   started that remained in its process group, are terminated before rollback
   removes the worktree; one that left the group by calling `setsid()` cannot be
   reached, and is reported rather than waited for
-  ([details](#repository-hooks)).
+  ([details](#repository-hooks)). Cleanup cannot restore files Git already
+  removed, so it stops the active Git process group and reports that removal
+  may be partial.
 - **No network, no telemetry.** `agent-fork` makes no runtime network calls and
   collects no data ([details](#telemetry-and-networking)).
 
@@ -737,6 +747,9 @@ Under any machine format, a failure prints a single error object on stderr:
 Codes are stable compatibility identifiers; messages may gain detail without
 changing their meaning. Error objects may add a documented `details` object;
 cleanup guard refusals use the cleanup schema shown above.
+Interruption errors use `interrupted_sigint` or `interrupted_sigterm`; their
+`details` object contains the signal name and resulting process exit code, for
+example `{"exit_code":143,"signal":"SIGTERM"}`.
 
 | Exit | Meaning | Codes |
 |---|---|---|

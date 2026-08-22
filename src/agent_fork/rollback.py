@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import signal
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from agent_fork import interrupts
 from agent_fork.git import GitCommandError, run_git
 from agent_fork.repository import WorktreeCreation
+
+OperationInterrupted = interrupts.OperationInterrupted
 
 
 @dataclass(frozen=True)
@@ -16,41 +18,20 @@ class RollbackResult:
     manual_recovery: str | None = None
 
 
-class OperationInterrupted(BaseException):
-    def __init__(self, signum: int):
-        self.signum = signum
-        self.exit_code = 128 + signum
-
-
 def run_with_rollback(creation, operation, *, env=None):
     """Run a post-create mutation with rollback on failure or termination signal."""
-    previous = {}
 
-    def interrupt(signum, _frame):
-        from agent_fork.git import terminate_active_git
-        from agent_fork.include import terminate_active_setup_hook
+    def operation_with_rollback():
+        try:
+            return operation()
+        except BaseException:
+            rollback_worktree(creation, env=env)
+            raise
 
-        terminate_active_git()
-        # The setup hook is the second owned process group, and it is killed in
-        # the handler for the same reason Git's is: unwinding first would leave
-        # it writing into a directory rollback is about to remove. It is also
-        # load-bearing on its own — when the hook's own shell has already
-        # exited, `run_setup_hook()` can be past its reap ladder while group
-        # members it left behind are still running, and only this call reaches
-        # them (A12 Gate-1 fact 6; T-RBK-10).
-        terminate_active_setup_hook()
-        raise OperationInterrupted(signum)
-
-    for signum in (signal.SIGINT, signal.SIGTERM):
-        previous[signum] = signal.signal(signum, interrupt)
-    try:
-        return operation()
-    except BaseException:
-        rollback_worktree(creation, env=env)
-        raise
-    finally:
-        for signum, handler in previous.items():
-            signal.signal(signum, handler)
+    return interrupts.run_with_interruption_handler(
+        operation_with_rollback,
+        message="interrupted after rollback",
+    )
 
 
 def manual_recovery_command(creation: WorktreeCreation) -> str:

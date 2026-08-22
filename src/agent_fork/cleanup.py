@@ -9,6 +9,7 @@ from pathlib import Path
 
 from agent_fork.errors import AgentForkError, PreconditionError
 from agent_fork.git import run_git
+from agent_fork.interrupts import run_with_interruption_handler
 from agent_fork.models import RegistryEntry
 from agent_fork.registry import (
     find_candidates,
@@ -734,43 +735,52 @@ def cleanup(
         if not keep_branch:
             run_git(plan.git_root, ["branch", "-D", plan.branch], env=env)
 
-    if not plan.owned:
-        destroy()
-        return CleanupResult(plan, True, notices, details, retained_metadata)
+    def mutate() -> None:
+        if not plan.owned:
+            destroy()
+            return
 
-    # The plan was built before consent, which has no time bound. Hold the
-    # registry lock across revalidation, destruction, and removal so a record
-    # that changed while the user was deciding refuses here, with nothing
-    # destroyed, rather than after the worktree is already gone.
-    token = plan.entry.token()
-    stale = PreconditionError(
-        "cleanup_registry_stale",
-        "the fork changed while the removal was awaiting confirmation; "
-        "nothing was removed",
+        # The plan was built before consent, which has no time bound. Hold the
+        # registry lock across revalidation, destruction, and removal so a record
+        # that changed while the user was deciding refuses here, with nothing
+        # destroyed, rather than after the worktree is already gone.
+        token = plan.entry.token()
+        stale = PreconditionError(
+            "cleanup_registry_stale",
+            "the fork changed while the removal was awaiting confirmation; "
+            "nothing was removed",
+        )
+        with registry_lock(registry_path(env)):
+            require_single(token, env=env)
+            # Everything the plan was built on is re-established here, not just
+            # the record. Consent has no time bound, so the anchor directory can
+            # have become a different repository in the interval — checking only
+            # that the pair is live would then confirm against the newcomer and
+            # destroy its work.
+            anchor = plan.anchor
+            try:
+                anchor_common_dir = inspect_repository(anchor, env=env).common_dir
+                observed = live_worktree_pairs(anchor, env=env)
+            except Exception as error:
+                # The anchor can stop being a repository while consent is pending.
+                # That is the same fact the checks below establish — the plan no
+                # longer describes reality — so it reads as the same refusal
+                # rather than as a probe failure the user has to interpret.
+                raise stale from error
+            if anchor_common_dir != plan.git_root:
+                raise stale
+            if not _owns(plan.entry, plan.git_root):
+                raise stale
+            if match_live(plan.entry, observed) is None:
+                raise stale
+            destroy()
+            remove_locked(token, env=env)
+
+    run_with_interruption_handler(
+        mutate,
+        message=(
+            "cleanup was interrupted and removal may be partial; if the worktree "
+            "is gone but its registry record remains, run `agent-fork prune`"
+        ),
     )
-    with registry_lock(registry_path(env)):
-        require_single(token, env=env)
-        # Everything the plan was built on is re-established here, not just
-        # the record. Consent has no time bound, so the anchor directory can
-        # have become a different repository in the interval — checking only
-        # that the pair is live would then confirm against the newcomer and
-        # destroy its work.
-        anchor = plan.anchor
-        try:
-            anchor_common_dir = inspect_repository(anchor, env=env).common_dir
-            observed = live_worktree_pairs(anchor, env=env)
-        except Exception as error:
-            # The anchor can stop being a repository while consent is pending.
-            # That is the same fact the checks below establish — the plan no
-            # longer describes reality — so it reads as the same refusal
-            # rather than as a probe failure the user has to interpret.
-            raise stale from error
-        if anchor_common_dir != plan.git_root:
-            raise stale
-        if not _owns(plan.entry, plan.git_root):
-            raise stale
-        if match_live(plan.entry, observed) is None:
-            raise stale
-        destroy()
-        remove_locked(token, env=env)
     return CleanupResult(plan, True, notices, details, retained_metadata)

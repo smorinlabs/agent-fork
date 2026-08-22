@@ -1712,6 +1712,7 @@ def test_main_translates_a_signal_during_the_hook_into_exit_130(repo_scenario):
     assert json.loads(lines[0]) == {
         "error": {
             "code": "interrupted_sigint",
+            "details": {"exit_code": 130, "signal": "SIGINT"},
             "message": "interrupted after rollback",
         }
     }
@@ -1765,6 +1766,7 @@ def test_interrupt_renders_json_when_the_mode_comes_from_configuration(repo_scen
     assert json.loads(lines[0]) == {
         "error": {
             "code": "interrupted_sigint",
+            "details": {"exit_code": 130, "signal": "SIGINT"},
             "message": "interrupted after rollback",
         }
     }
