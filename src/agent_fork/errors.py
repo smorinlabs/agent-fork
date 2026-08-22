@@ -46,6 +46,12 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
     "submodule_unrepresentable": ErrorSpec(
         5, "submodule checkout differs from the commit recorded in the index"
     ),
+    "submodule_cold_content": ErrorSpec(
+        5, "a cold submodule checkout path contains content"
+    ),
+    "submodule_transport_unsafe": ErrorSpec(
+        5, "Git configuration can rewrite a pinned local submodule source"
+    ),
     "conflict_branch_exists": ErrorSpec(5, "fork branch already exists"),
     "conflict_branch_worktree": ErrorSpec(5, "branch is attached to a worktree"),
     "conflict_worktree_path": ErrorSpec(5, "worktree destination already exists"),

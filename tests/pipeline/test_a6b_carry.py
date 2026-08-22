@@ -127,22 +127,22 @@ def test_carry_restores_only_the_childs_own_remote_url(repo_scenario):
     world = repo_scenario("plain@main", states=(submodule(committed=True),))
     child = world.parent_path.parent / "a6b-remote"
     _carry(world, child)
-    child_remote = (
-        _git(world, child / "vendor/submodule", "config", "--get", "remote.origin.url")
-        .stdout.decode()
-        .strip()
-    )
-    parent_remote = (
-        _git(
-            world,
-            world.parent_path / "vendor/submodule",
-            "config",
-            "--get",
-            "remote.origin.url",
-        )
-        .stdout.decode()
-        .strip()
-    )
+    child_remote = _git(
+        world,
+        child / "vendor/submodule",
+        "config",
+        "--null",
+        "--get-all",
+        "remote.origin.url",
+    ).stdout
+    parent_remote = _git(
+        world,
+        world.parent_path / "vendor/submodule",
+        "config",
+        "--null",
+        "--get-all",
+        "remote.origin.url",
+    ).stdout
     assert child_remote == parent_remote
 
 
@@ -417,8 +417,8 @@ def test_carry_removes_the_synthetic_origin_when_the_parent_submodule_has_none(
     with the pin only process-scoped, `git config --get remote.origin.url`
     inside the freshly-initialized child submodule returns that path,
     persisted to disk. When the parent's own submodule has NO
-    `remote.origin.url` at all (`plan.remote_url is None`), step 3's
-    restore is a no-op (`if plan.remote_url is not None`), so this synthetic,
+    `remote.origin.url` at all (`plan.remote_urls == ()`), step 3's
+    restore is a no-op (`if plan.remote_urls`), so this synthetic,
     machine-local origin silently survives in the child -- an origin the
     parent never had, pointing at a path that only exists on this machine.
     The carried child must match the parent: no origin remote at all.

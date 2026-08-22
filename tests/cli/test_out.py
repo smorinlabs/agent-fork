@@ -961,3 +961,65 @@ def test_successful_skip_notice_uses_stderr_once_and_stays_in_json(repo_scenario
         {"path": "locked.txt", "reason": "unreadable", "phase": "capture"}
     ]
     assert machine.stderr.decode().count(notice) == 1
+
+
+@pytest.mark.matrix("T-OUT-33")
+def test_cold_submodule_content_has_exact_json_details(repo_scenario):
+    """The cold-content refusal identifies bounded, qualified entries."""
+    from agent_fork.errors import PreconditionError
+    from agent_fork.output import render_error
+
+    repo_scenario()
+    error = PreconditionError(
+        "submodule_cold_content",
+        "cold submodule directory contains content",
+        details={
+            "submodule": "vendor/submodule",
+            "entries": ["vendor/submodule/.hidden", "vendor/submodule/loose.txt"],
+            "count": 2,
+        },
+    )
+    assert json.loads(render_error(error, machine=True)) == {
+        "error": {
+            "code": "submodule_cold_content",
+            "message": "cold submodule directory contains content",
+            "details": {
+                "submodule": "vendor/submodule",
+                "entries": [
+                    "vendor/submodule/.hidden",
+                    "vendor/submodule/loose.txt",
+                ],
+                "count": 2,
+            },
+        }
+    }
+
+
+@pytest.mark.matrix("T-OUT-34")
+def test_unsafe_submodule_transport_has_exact_json_details(repo_scenario):
+    """The transport refusal exposes the matching prefix, not the target URL."""
+    from agent_fork.errors import PreconditionError
+    from agent_fork.output import render_error
+
+    repo_scenario()
+    source = "/repo/vendor/submodule"
+    error = PreconditionError(
+        "submodule_transport_unsafe",
+        "ambient Git URL rewrite matches the local submodule source",
+        details={
+            "submodule": "vendor/submodule",
+            "source": source,
+            "rewrite_prefix": source,
+        },
+    )
+    assert json.loads(render_error(error, machine=True)) == {
+        "error": {
+            "code": "submodule_transport_unsafe",
+            "message": "ambient Git URL rewrite matches the local submodule source",
+            "details": {
+                "submodule": "vendor/submodule",
+                "source": source,
+                "rewrite_prefix": source,
+            },
+        }
+    }

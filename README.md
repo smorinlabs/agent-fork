@@ -776,17 +776,19 @@ carriable on its own — for example a submodule advanced to a commit only its
 own `HEAD` knows about, which a plain `git worktree add` cannot represent.
 
 Per submodule, the recipe is: skip it if the parent itself never initialized
-it; otherwise initialize the child's copy offline, from the parent's own
-checkout rather than the remote; restore only the child's own
-`remote.origin.url` (never `git submodule sync`, which would corrupt the
-parent's shared configuration from a linked worktree); check out the parent
-submodule's exact commit, detached; copy its working-tree state the same way
-the top-level worktree's state is copied; then recurse into any submodules
-nested inside it. Verification re-checks the same signals recursively —
-initialization, commit identity, detached state, and content — so a submodule
-carried to the wrong commit fails the fork rather than passing silently.
+it and its checkout path is empty; otherwise refuse cold paths containing
+content before mutation. An initialized copy is cloned offline from the
+parent's own checkout rather than the remote. Effective `url.*.insteadOf`
+configuration that could rewrite that pinned local path is refused, and the
+clone command independently denies network protocols. The fork restores every
+`remote.origin.url` value in its original order, checks out the parent
+submodule's exact commit detached, copies its working-tree state, and recurses.
+Verification re-checks initialization, commit identity, detached state, exact
+remote URL values, and content, so a wrong commit or changed remote fails the
+fork rather than passing silently. Unmerged index stages inside any initialized
+submodule are also refused before branch or worktree creation.
 
-The one fidelity limit: only `remote.origin.url` is restored inside each
+The one fidelity limit: only the ordered `remote.origin.url` values are restored inside each
 carried submodule. Other configuration — fetch refspecs, sparse-checkout
 settings, hooks — is whatever the fresh `git submodule add` step produced, not
 a copy of the parent's own local overrides. A completed fork's notices name
@@ -832,7 +834,7 @@ same paths.
 | 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy`, `entry_unreadable`, `strict_skip_refused` |
 | 2 | Usage error or required prompt disabled | `config_error` |
 | 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown`, `claude_parent_incomplete_analysis` |
-| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable`, `conflict_fork_registered`, `cleanup_registry_stale`, `cleanup_registry_ambiguous` |
+| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable`, `submodule_cold_content`, `submodule_transport_unsafe`, `conflict_fork_registered`, `cleanup_registry_stale`, `cleanup_registry_ambiguous` |
 | 130 / 143 | Interrupted by SIGINT / SIGTERM | `interrupted_sigint`, `interrupted_sigterm` |
 
 Exit 4 remains reserved because this local tool has no authentication failure

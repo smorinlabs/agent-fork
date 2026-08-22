@@ -41,7 +41,7 @@ def test_clean_submodule_snapshot_records_head_and_resolved_url(repo_scenario):
     assert plan.name == "vendor/submodule"
     assert plan.initialized is True
     assert plan.head is not None and len(plan.head) == 40
-    assert plan.remote_url is not None
+    assert plan.remote_urls
     assert plan.nested == ()
 
 
@@ -60,7 +60,7 @@ def test_uninitialized_submodule_snapshots_as_cold_with_no_head_or_url(
     plan = plans[0]
     assert plan.initialized is False
     assert plan.head is None
-    assert plan.remote_url is None
+    assert plan.remote_urls == ()
     assert plan.nested == ()
 
 
@@ -112,8 +112,8 @@ def test_snapshot_resolves_a_relative_gitmodules_url_to_an_absolute_value(
     """
     world = repo_scenario("plain@main", states=(submodule(url_kind="relative"),))
     plan = _snapshot(world)[0]
-    assert plan.remote_url is not None
-    assert not plan.remote_url.startswith("../")
+    assert plan.remote_urls
+    assert not plan.remote_urls[0].startswith("../")
 
 
 @pytest.mark.matrix("T-MAT-48")
@@ -125,5 +125,5 @@ def test_snapshot_records_an_unreachable_remote_without_touching_the_network(
         "plain@main", states=(submodule(url_kind="remote-unreachable"),)
     )
     plan = _snapshot(world)[0]
-    assert plan.remote_url is not None
-    assert "192.0.2.1" in plan.remote_url
+    assert plan.remote_urls
+    assert "192.0.2.1" in plan.remote_urls[0]

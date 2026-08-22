@@ -43,6 +43,8 @@ from agent_fork.text import escape_terminal_text
 # supplies — a caller should not have to know this internal detail to get a
 # correct comparison.
 SEMANTIC_PINS: tuple[tuple[str, str], ...] = (("diff.ignoreSubmodules", "none"),)
+_NETWORK_PROTOCOLS = ("ext", "git", "http", "https", "ssh")
+_COLD_ENTRY_DETAIL_LIMIT = 20
 
 
 @dataclass(frozen=True)
@@ -55,7 +57,7 @@ class SubmoduleSnapshot:
     submodule must be keyed by ``name`` while every Git pathspec must use
     ``path``, never the other way around.
 
-    ``initialized``, ``head``, and ``remote_url`` are all ``None``/``False``
+    ``initialized``, ``head``, and ``remote_urls`` are all empty/``False``
     together when the parent itself left the submodule uninitialized (cell
     `g`) — there is nothing to read inside a checkout that does not exist, and
     a fork must not initialize what the parent itself did not.
@@ -65,7 +67,7 @@ class SubmoduleSnapshot:
     path: str
     initialized: bool
     head: str | None
-    remote_url: str | None
+    remote_urls: tuple[str, ...]
     inventory: Inventory
     content: CarriedState | None
     nested: tuple[SubmoduleSnapshot, ...]
@@ -110,8 +112,8 @@ def _gitmodules_names(parent: Path, *, env: Mapping[str, str] | None) -> dict[st
     return mapping
 
 
-def _resolve_remote_url(checkout: Path, *, env: Mapping[str, str] | None) -> str | None:
-    """The submodule's own effective `remote.origin.url`, already resolved.
+def _remote_urls(checkout: Path, *, env: Mapping[str, str] | None) -> tuple[str, ...]:
+    """The submodule's exact ordered `remote.origin.url` values.
 
     "Resolved" matters for a relative `.gitmodules` URL: Git expands it
     against the parent's remote when the submodule was added, and the
@@ -121,11 +123,17 @@ def _resolve_remote_url(checkout: Path, *, env: Mapping[str, str] | None) -> str
     at exactly that moment.
     """
     result = run_git(
-        checkout, ["config", "--get", "remote.origin.url"], env=env, check=False
+        checkout,
+        ["config", "--local", "--null", "--get-all", "remote.origin.url"],
+        env=env,
+        check=False,
     )
     if result.returncode != 0:
-        return None
-    return result.stdout.decode(errors="surrogateescape").strip() or None
+        return ()
+    records = result.stdout.split(b"\0")
+    if records and records[-1] == b"":
+        records.pop()
+    return tuple(record.decode(errors="surrogateescape") for record in records)
 
 
 def _snapshot_one(
@@ -146,7 +154,7 @@ def _snapshot_one(
             path=path,
             initialized=False,
             head=None,
-            remote_url=None,
+            remote_urls=(),
             inventory=Inventory(),
             content=None,
             nested=(),
@@ -156,7 +164,7 @@ def _snapshot_one(
         .stdout.decode()
         .strip()
     )
-    remote_url = _resolve_remote_url(checkout, env=env)
+    remote_urls = _remote_urls(checkout, env=env)
     # with_submodules=True unconditionally: a submodule's own nested gitlinks
     # are represented via `nested` below regardless of the top-level flag —
     # the opt-out only governs whether *this* submodule is carried at all, not
@@ -194,7 +202,7 @@ def _snapshot_one(
         path=path,
         initialized=True,
         head=head,
-        remote_url=remote_url,
+        remote_urls=remote_urls,
         inventory=inventory,
         content=content,
         nested=nested,
@@ -227,37 +235,204 @@ def _snapshot_recursive(
     )
 
 
+@dataclass(frozen=True)
+class ColdSubmoduleContent:
+    """One cold gitlink whose checkout path is not empty."""
+
+    path: str
+    entries: tuple[str, ...]
+    count: int
+
+
+@dataclass(frozen=True)
+class UnsafeSubmoduleTransport:
+    """One local checkout source matched by an ambient Git URL rewrite."""
+
+    path: str
+    source: str
+    rewrite_prefix: str
+
+
+@dataclass(frozen=True)
+class SubmodulePreflight:
+    """Recursive facts needed to refuse unsafe carry before mutation."""
+
+    unmerged_paths: tuple[str, ...]
+    cold_content: tuple[ColdSubmoduleContent, ...]
+    unsafe_transports: tuple[UnsafeSubmoduleTransport, ...]
+    missing_metadata: tuple[str, ...]
+
+
+def _config_records(
+    root: Path,
+    pattern: str,
+    *,
+    env: Mapping[str, str] | None,
+) -> tuple[tuple[str, str], ...]:
+    result = run_git(
+        root,
+        ["config", "--null", "--get-regexp", pattern],
+        env=env,
+        check=False,
+    )
+    if result.returncode != 0:
+        return ()
+    records: list[tuple[str, str]] = []
+    for raw_record in result.stdout.split(b"\0"):
+        if not raw_record:
+            continue
+        raw_key, separator, raw_value = raw_record.partition(b"\n")
+        if not separator:
+            continue
+        records.append(
+            (
+                raw_key.decode(errors="surrogateescape"),
+                raw_value.decode(errors="surrogateescape"),
+            )
+        )
+    return tuple(records)
+
+
+def _matching_url_rewrite(
+    root: Path,
+    source: str,
+    *,
+    env: Mapping[str, str] | None,
+) -> str | None:
+    prefixes = [
+        value
+        for key, value in _config_records(root, r"^url\..*\.insteadof$", env=env)
+        if key.lower().startswith("url.")
+        and key.lower().endswith(".insteadof")
+        and source.startswith(value)
+    ]
+    return max(prefixes, key=len) if prefixes else None
+
+
+def _cold_entries(checkout: Path, qualified_path: str) -> tuple[tuple[str, ...], int]:
+    if checkout.is_symlink() or (checkout.exists() and not checkout.is_dir()):
+        return (qualified_path,), 1
+    if not checkout.exists():
+        return (), 0
+    try:
+        names = sorted(
+            (entry.name for entry in checkout.iterdir()),
+            key=lambda name: name.encode(errors="surrogateescape"),
+        )
+    except OSError:
+        # Inability to prove the directory empty is itself unsafe. Name the
+        # checkout, without traversing it or exposing an OS-dependent error.
+        return (qualified_path,), 1
+    entries = tuple(
+        f"{qualified_path}/{name}" for name in names[:_COLD_ENTRY_DETAIL_LIMIT]
+    )
+    return entries, len(names)
+
+
+def _unmerged_paths(
+    root: Path,
+    qualified_root: str,
+    *,
+    env: Mapping[str, str] | None,
+) -> tuple[str, ...]:
+    result = run_git(root, ["ls-files", "-u", "-z"], env=env)
+    paths = {
+        record.split(b"\t", 1)[1].decode(errors="surrogateescape")
+        for record in result.stdout.split(b"\0")
+        if b"\t" in record
+    }
+    return tuple(
+        f"{qualified_root}/{path}" if qualified_root else path for path in sorted(paths)
+    )
+
+
+def inspect_submodule_preflight(
+    root: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+    _path_prefix: str = "",
+) -> SubmodulePreflight:
+    """Inspect every recursive carry hazard before creating a worktree.
+
+    Cold paths are inspected without descending into their content. Initialized
+    paths are checked for unmerged index stages, matching `url.*.insteadOf`
+    rewrites, missing `.gitmodules` metadata, and nested hazards. The returned
+    paths are qualified from the top-level repository so every refusal remains
+    attributable at depth two and beyond.
+    """
+    names = _gitmodules_names(root, env=env)
+    unmerged: list[str] = []
+    cold: list[ColdSubmoduleContent] = []
+    unsafe: list[UnsafeSubmoduleTransport] = []
+    missing: list[str] = []
+    for path in sorted(gitlink_paths(root, env=env)):
+        checkout = root / path
+        qualified_path = f"{_path_prefix}{path}" if _path_prefix else path
+        if not (checkout / ".git").exists():
+            entries, count = _cold_entries(checkout, qualified_path)
+            if count:
+                cold.append(ColdSubmoduleContent(qualified_path, entries, count))
+            continue
+        unmerged.extend(_unmerged_paths(checkout, qualified_path, env=env))
+        if path not in names:
+            missing.append(qualified_path)
+        else:
+            name = names[path]
+            if "=" not in name:
+                source = str(checkout)
+                rewrite_prefix = _matching_url_rewrite(root, source, env=env)
+                if rewrite_prefix is not None:
+                    unsafe.append(
+                        UnsafeSubmoduleTransport(qualified_path, source, rewrite_prefix)
+                    )
+        nested = inspect_submodule_preflight(
+            checkout,
+            env=env,
+            _path_prefix=f"{qualified_path}/",
+        )
+        unmerged.extend(nested.unmerged_paths)
+        cold.extend(nested.cold_content)
+        unsafe.extend(nested.unsafe_transports)
+        missing.extend(nested.missing_metadata)
+    return SubmodulePreflight(
+        tuple(unmerged),
+        tuple(cold),
+        tuple(unsafe),
+        tuple(missing),
+    )
+
+
 def initialized_submodules_missing_metadata(
     root: Path,
     *,
     env: Mapping[str, str] | None = None,
     _path_prefix: str = "",
 ) -> tuple[str, ...]:
-    """List initialized gitlinks with no matching `.gitmodules` path entry.
+    """Compatibility wrapper for the original metadata-only inspection."""
+    return inspect_submodule_preflight(
+        root,
+        env=env,
+        _path_prefix=_path_prefix,
+    ).missing_metadata
 
-    A cold gitlink needs no metadata because carry deliberately leaves it cold.
-    An initialized one does: `git submodule update --init` refuses without the
-    path-to-name mapping. Walk initialized children recursively so the
-    pre-mutation guard covers the same depth as the carry recipe.
-    """
-    names = _gitmodules_names(root, env=env)
-    missing: list[str] = []
-    for path in gitlink_paths(root, env=env):
-        checkout = root / path
-        if not (checkout / ".git").exists():
-            continue
-        qualified_path = f"{_path_prefix}{path}" if _path_prefix else path
-        if path not in names:
-            missing.append(qualified_path)
-            continue
-        missing.extend(
-            initialized_submodules_missing_metadata(
-                checkout,
-                env=env,
-                _path_prefix=f"{qualified_path}/",
-            )
-        )
-    return tuple(missing)
+
+def _transport_pins(
+    checkout: Path,
+    *,
+    env: Mapping[str, str] | None,
+) -> tuple[tuple[str, str], ...]:
+    """Command-scoped pins allowing local clones and denying network helpers."""
+    configured = {
+        key.lower().removeprefix("protocol.").removesuffix(".allow")
+        for key, _value in _config_records(checkout, r"^protocol\..*\.allow$", env=env)
+        if key.lower().startswith("protocol.") and key.lower().endswith(".allow")
+    }
+    denied = sorted((configured | set(_NETWORK_PROTOCOLS)) - {"allow", "file"})
+    return (
+        ("protocol.allow", "never"),
+        ("protocol.file.allow", "always"),
+        *((f"protocol.{name}.allow", "never") for name in denied),
+    )
 
 
 def snapshot_submodules(
@@ -379,9 +554,9 @@ def _carry_one(
         ["submodule", "update", "--init", "--checkout", "--", literal_path],
         env=env,
         config_pins=(
-            ("protocol.file.allow", "always"),
-            (f"submodule.{plan.name}.url", str(parent / plan.path)),
             *config_pins,
+            (f"submodule.{plan.name}.url", str(parent / plan.path)),
+            *_transport_pins(child, env=env),
         ),
     )
     if not (child_checkout / ".git").exists():
@@ -393,13 +568,21 @@ def _carry_one(
     # Step 3 — restore only the child's own remote.origin.url. Never
     # `git submodule sync`: the child is a linked worktree sharing .git/config
     # with the parent, so top-level sync would corrupt the parent's config.
-    if plan.remote_url is not None:
+    if plan.remote_urls:
         run_git(
             child_checkout,
-            ["config", "remote.origin.url", plan.remote_url],
+            ["config", "--unset-all", "remote.origin.url"],
             env=env,
             config_pins=config_pins,
+            check=False,
         )
+        for remote_url in plan.remote_urls:
+            run_git(
+                child_checkout,
+                ["config", "--add", "remote.origin.url", remote_url],
+                env=env,
+                config_pins=config_pins,
+            )
     else:
         # `submodule update --init` always writes a persistent
         # remote.origin.url into the child, pointed at whatever the
@@ -442,7 +625,7 @@ def _carry_one(
     carried.append(qualified_path)
     remote_note = (
         "only remote.origin.url restored"
-        if plan.remote_url is not None
+        if plan.remote_urls
         else "no remote.origin.url to restore, origin removed"
     )
     notices.append(
@@ -612,6 +795,16 @@ def verify_submodules(
                     qualified_path,
                     "submodule-head",
                     f"expected HEAD {plan.head}, got {child_head}",
+                )
+            )
+
+        child_remote_urls = _remote_urls(child_checkout, env=env)
+        if child_remote_urls != plan.remote_urls:
+            differences.append(
+                Difference(
+                    qualified_path,
+                    "submodule-remote-url",
+                    "remote.origin.url values differ from the frozen plan",
                 )
             )
 

@@ -403,13 +403,47 @@ def validate_fork_guards(
             f"unmerged index paths: {rendered}; resolve conflicts and re-run",
         )
     if with_state and with_submodules:
-        from agent_fork.submodules import initialized_submodules_missing_metadata
+        from agent_fork.submodules import inspect_submodule_preflight
 
-        missing_metadata = initialized_submodules_missing_metadata(
-            info.parent_path, env=env
-        )
-        if missing_metadata:
-            listed = ", ".join(escape_terminal_text(path) for path in missing_metadata)
+        preflight = inspect_submodule_preflight(info.parent_path, env=env)
+        if preflight.unmerged_paths:
+            listed = ", ".join(
+                escape_terminal_text(path) for path in preflight.unmerged_paths
+            )
+            raise PreconditionError(
+                "unmerged_index",
+                f"unmerged index paths: {listed}; resolve conflicts and re-run",
+            )
+        if preflight.cold_content:
+            finding = preflight.cold_content[0]
+            listed = ", ".join(escape_terminal_text(path) for path in finding.entries)
+            raise PreconditionError(
+                "submodule_cold_content",
+                "cold submodule directory contains content that initialization "
+                f"could overwrite: {listed}; move or remove it, then re-run",
+                details={
+                    "submodule": escape_terminal_text(finding.path),
+                    "entries": [escape_terminal_text(path) for path in finding.entries],
+                    "count": finding.count,
+                },
+            )
+        if preflight.unsafe_transports:
+            finding = preflight.unsafe_transports[0]
+            raise PreconditionError(
+                "submodule_transport_unsafe",
+                "ambient Git url.*.insteadOf configuration rewrites the pinned "
+                f"local source for {escape_terminal_text(finding.path)}; remove "
+                "the matching rewrite and re-run",
+                details={
+                    "submodule": escape_terminal_text(finding.path),
+                    "source": escape_terminal_text(finding.source),
+                    "rewrite_prefix": escape_terminal_text(finding.rewrite_prefix),
+                },
+            )
+        if preflight.missing_metadata:
+            listed = ", ".join(
+                escape_terminal_text(path) for path in preflight.missing_metadata
+            )
             raise PreconditionError(
                 "submodule_unrepresentable",
                 "initialized submodule has no matching .gitmodules path entry: "
