@@ -975,6 +975,10 @@ class GitShim:
     def release(self) -> Path:
         return self.directory / "release"
 
+    @property
+    def parked_pid(self) -> Path:
+        return self.directory / "parked.pid"
+
     def calls(self) -> list[list[str]]:
         if not self.log_path.exists():
             return []
@@ -996,12 +1000,14 @@ def shim_git(fail_call: str | None = None, park_at: str | None = None) -> GitShi
     park_pattern = park_at or "__never_park__"
     ready = directory / "ready"
     release = directory / "release"
+    parked_pid = directory / "parked.pid"
     script = directory / "git"
     script.write_text(
         "#!/bin/sh\n"
         f"printf '%s\\n' \"$*\" >> {shlex.quote(str(log_path))}\n"
         f'case "$*" in *{shlex.quote(fail_pattern)}*) exit 1 ;; esac\n'
         f'case "$*" in *{shlex.quote(park_pattern)}*) '
+        f"printf '%s\\n' \"$$\" > {shlex.quote(str(parked_pid))}; "
         f"touch {shlex.quote(str(ready))}; "
         f"while [ ! -e {shlex.quote(str(release))} ]; do sleep 0.01; done ;; esac\n"
         f'exec {shlex.quote(str(real_git))} "$@"\n'
