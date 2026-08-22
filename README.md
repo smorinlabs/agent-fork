@@ -47,6 +47,7 @@ $ agent-fork fork try-redis --dry-run
 branch: create fork/try-redis
 worktree: create /Users/you/code/myapp-fork-try-redis
 files-to-carry: staged=3 unstaged=7 untracked=2 ignored=0
+setup-hook: none
 paste command: cd /Users/you/code/myapp-fork-try-redis && claude --session-id 9b74b9f2-f3d2-4060-b233-0121ac17ed7c --resume c854b79c-16b2-4863-a095-03d35d195ec9 --fork-session -n try-redis
 validation: local-only; no mutation performed
 ```
@@ -208,7 +209,7 @@ Inside a session, just type `/agent-fork` — the commands below are the
 direct-CLI equivalents:
 
 ```bash
-agent-fork doctor              # confirm Git, agent CLIs, config, and XDG paths
+agent-fork doctor              # confirm Git, agent CLIs, config, XDG paths, setup hook
 agent-fork fork try-redis      # create the fork, print the paste command
 agent-fork session             # inspect context and print native fork/resume commands
 agent-fork list                # see the forks you have created
@@ -246,7 +247,7 @@ than starting a new one.
 | `agent-fork list` | List forks created by `agent-fork` |
 | `agent-fork cleanup <name\|branch\|worktree> --yes` | Remove a registered fork |
 | `agent-fork prune [--dry-run] --yes` | Remove registry records that are gone or unusable; never touches a worktree |
-| `agent-fork doctor` | Diagnose Git, agent, config, and XDG readiness |
+| `agent-fork doctor` | Diagnose Git, agent, config, and XDG readiness, plus whether this repository's setup hook would run |
 | `agent-fork config view\|get\|set\|validate` | Inspect or update configuration |
 | `agent-fork completion bash\|zsh\|fish` | Generate a shell completion script |
 | `agent-fork help [command]` | Show help for a command |
@@ -459,6 +460,8 @@ record; cleanup adds no flag that prunes this metadata automatically.
 | `--with-ignored` / `--no-with-ignored` | Also carry ignored files (default: disabled) |
 | `--verify` / `--no-verify` | Verify the completed fork (default: enabled) |
 | `--codex-session-name-resolution` / `--no-codex-session-name-resolution` | Resolve renamed Codex sessions (default: enabled) |
+| `--setup-hook-policy {tracked,any,off}` | Repository setup-hook policy: `tracked` runs it only when it is committed at the fork anchor and unchanged on disk, `any` runs it regardless, `off` never runs it (default: `tracked`) |
+| `--setup-hook-timeout SECONDS` | Seconds the setup hook may run before its process group is terminated (default: `300`) |
 | `--force` | Override only the Git-version floor |
 | `--dry-run` | Preview every planned mutation without changing anything |
 | `--copy` / `--no-copy` | Copy the paste command to the clipboard |
@@ -575,6 +578,8 @@ agent-fork 1.3 writes the registry, earlier versions will not read it.
 | `verify` | `true` | — | Run the verification ladder |
 | `copy` | `false` | — | Copy the paste command to the clipboard |
 | `output` | `"text"` | `AGENT_FORK_OUTPUT` | `text` or `json`, for every command that resolves configuration |
+| `setup_hook_policy` | `"tracked"` | — | `tracked`, `any`, or `off`; see "Repository hooks" |
+| `setup_hook_timeout` | `300` | — | Whole seconds, greater than zero; there is no "no timeout" value |
 
 A path-template `worktree_location` may use only the bare placeholders
 `{repo-name}`, `{repo-root}` (the repo root's *parent* directory), `{branch}`,
@@ -619,9 +624,69 @@ config `with_ignored = true` combined with `--no-with-state` carries no state.
 
 ### Repository hooks
 
-`.worktreeinclude` may list ignored files to copy after verification. An
-optional `.agent-fork/worktree-setup.sh` runs non-fatally in the new worktree
-with `REPO_ROOT` and `WORKTREE_PATH` set.
+`.worktreeinclude` may list ignored files to copy after verification.
+
+An optional `.agent-fork/worktree-setup.sh` runs non-fatally in the new worktree
+with `REPO_ROOT` and `WORKTREE_PATH` set. The hook lives in the repository being
+forked, not in `agent-fork`, so the repository supplies its content and
+`agent-fork` only supplies the execution mechanism — the same division as `npm`
+and a package's `postinstall` script.
+
+**Which hooks run.** `--setup-hook-policy` (or `[fork] setup_hook_policy`)
+decides:
+
+| Policy | What runs |
+|---|---|
+| `tracked` (default) | Only a hook committed in the fork anchor's tree as a regular file whose bytes on disk are identical to the committed blob |
+| `any` | The hook runs whatever its provenance; the observed eligibility is still reported, never masked |
+| `off` | Nothing runs and eligibility is never evaluated |
+
+Eligibility is evaluated in the new worktree, immediately before execution,
+because `agent-fork` carries your uncommitted state across: checking the copy
+that will actually execute is the only version of this check that means
+anything. A hook that fails the check is **skipped, not refused** — the fork
+still succeeds, with a named reason and the exact override to run it anyway.
+
+`tracked` is a provenance control, not a safety one. It stops a cloned
+repository from silently running *new, unreviewed* code on your next fork. A
+committed hook is one a reviewer *could* have read; it is not one that is safe,
+and a malicious committed hook runs exactly as before.
+
+**Bounds.** The hook runs in its own process group with `stdin` connected to
+`/dev/null`, and gets `--setup-hook-timeout` seconds (default 300) before that
+whole group is terminated. The group is the exact unit of the guarantee: a
+timeout, or an interrupt, kills the hook and every process it started **that
+stayed in the group**. A process that calls `setsid()` puts itself in a
+different group, where `killpg` cannot reach it — that is how Unix works, not
+something `agent-fork` can override.
+
+What is guaranteed for such an escaped process is that it cannot make your fork
+hang. `agent-fork` waits a bounded moment for the hook's output to close, then
+lets go, reports the hook's own exit code, and sets `descendants_cleared` to
+`false` in `--json` with a matching notice, so a process left running is stated
+rather than hidden. On the success path nothing is killed at all: a hook that
+deliberately starts a background process keeps it.
+
+A timeout bounds how long the hook runs; it cannot undo work the hook already
+did. A hook killed at the timeout may already have pushed a branch, written
+`~/.npmrc`, or changed shared repository configuration, and none of that is
+rolled back. The `/dev/null` stdin is a behavior change from earlier versions:
+a hook that used to prompt interactively now reads end-of-file instead of your
+terminal.
+
+**Visibility.** `fork` narrates the hook on stderr in human output and carries a
+`setup_hook` object in `--json`, including a bounded tail of the hook's own
+stdout and stderr whether it succeeded or failed. `fork --dry-run` and `doctor`
+both disclose the hook before anything runs. `doctor` evaluates against `HEAD`
+in the current worktree while `fork` resolves its own anchor; on a detached
+`HEAD` those can differ, which is why `doctor`'s message names `HEAD`
+explicitly.
+
+Note that this makes `doctor` able to fail on your repository's working-tree
+state, not only on machine readiness: a hook that is present but ineligible
+under the default `tracked` policy is reported as a failure, because it will
+silently not run. It stays passing under `any` (the hook is explicitly allowed
+to run), under `off` (it is not evaluated), and when no hook is present.
 
 ## Safety and guarantees
 
@@ -643,7 +708,12 @@ with `REPO_ROOT` and `WORKTREE_PATH` set.
   standing in and requires separate consent through `--yes`. Agent-owned
   session files are never removed.
 - **Interrupts are handled.** SIGINT and SIGTERM exit 130 and 143 after rollback
-  where applicable.
+  where applicable, with the stable codes `interrupted_sigint` and
+  `interrupted_sigterm`. A running repository setup hook, and every process it
+  started that remained in its process group, are terminated before rollback
+  removes the worktree; one that left the group by calling `setsid()` cannot be
+  reached, and is reported rather than waited for
+  ([details](#repository-hooks)).
 - **No network, no telemetry.** `agent-fork` makes no runtime network calls and
   collects no data ([details](#telemetry-and-networking)).
 
@@ -675,7 +745,7 @@ cleanup guard refusals use the cleanup schema shown above.
 | 2 | Usage error or required prompt disabled | `config_error` |
 | 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown`, `claude_parent_incomplete_analysis` |
 | 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable`, `conflict_fork_registered`, `cleanup_registry_stale`, `cleanup_registry_ambiguous` |
-| 130 / 143 | Interrupted by SIGINT / SIGTERM | — |
+| 130 / 143 | Interrupted by SIGINT / SIGTERM | `interrupted_sigint`, `interrupted_sigterm` |
 
 Exit 4 remains reserved because this local tool has no authentication failure
 class.

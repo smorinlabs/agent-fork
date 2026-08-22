@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from agent_fork.errors import AgentForkError
+from agent_fork.include import (
+    DEFAULT_SETUP_HOOK_POLICY,
+    DEFAULT_SETUP_HOOK_TIMEOUT,
+    SETUP_HOOK_POLICIES,
+)
 from agent_fork.models import ConfigValues, ResolvedConfig
 from agent_fork.text import escape_terminal_text
 from agent_fork.xdg import xdg_path
@@ -30,6 +35,8 @@ _FORK_KEYS = {
     "verify",
     "copy",
     "output",
+    "setup_hook_policy",
+    "setup_hook_timeout",
 }
 _BOOL_KEYS = {"with_state", "with_ignored", "verify", "copy"}
 _GIT_REF_ILLEGAL_SUBSTRINGS = ("~", "^", ":", "?", "*", "[", "\\", "..", "@{")
@@ -88,7 +95,7 @@ class KeySpec:
     dotted: str
     field: str
     table: str  # "fork" | "agents.claude" | "agents.codex"
-    kind: str  # "bool" | "enum" | "string" | "string-array"
+    kind: str  # "bool" | "enum" | "int" | "string" | "string-array"
     allowed: tuple[str, ...] = ()
     allowed_text: str | None = None
     env: str | None = None
@@ -173,6 +180,20 @@ KEY_SPECS: tuple[KeySpec, ...] = (
         env="AGENT_FORK_OUTPUT",
     ),
     KeySpec(
+        "fork.setup_hook_policy",
+        "setup_hook_policy",
+        "fork",
+        "enum",
+        allowed=SETUP_HOOK_POLICIES,
+    ),
+    KeySpec(
+        "fork.setup_hook_timeout",
+        "setup_hook_timeout",
+        "fork",
+        "int",
+        allowed_text="a whole number of seconds greater than zero",
+    ),
+    KeySpec(
         "agents.claude.extra_args",
         "claude_extra_args",
         "agents.claude",
@@ -201,6 +222,22 @@ _GET_KEYS_BY_BARE: dict[str, KeySpec] = {
 _ENV_BY_FIELD: dict[str, str] = {
     spec.field: spec.env for spec in KEY_SPECS if spec.env is not None
 }
+# Derived from the registry rather than hand-maintained, so a key added to
+# KEY_SPECS is type-checked by `load_config()` without a second list to
+# remember (A11's registry intent, extended to A12's `int` kind).
+_STRING_KEYS: frozenset[str] = frozenset(
+    spec.field
+    for spec in KEY_SPECS
+    if spec.table == "fork" and spec.kind in {"string", "enum"}
+)
+_ENUM_KEYS: dict[str, tuple[str, ...]] = {
+    spec.field: spec.allowed
+    for spec in KEY_SPECS
+    if spec.table == "fork" and spec.kind == "enum"
+}
+_INT_KEYS: frozenset[str] = frozenset(
+    spec.field for spec in KEY_SPECS if spec.table == "fork" and spec.kind == "int"
+)
 
 
 _TOML_SHORT_ESCAPES = {
@@ -278,7 +315,7 @@ def validate_values(
     provenance = provenance or {}
     findings: list[ConfigFinding] = []
     for spec in KEY_SPECS:
-        if spec.validator is None and spec.kind != "enum":
+        if spec.validator is None and spec.kind not in {"enum", "int"}:
             continue
         value = getattr(values, spec.field)
         if value is None:
@@ -286,6 +323,14 @@ def validate_values(
         reason: str | None = None
         if spec.kind == "enum" and value not in spec.allowed:
             reason = "not one of the allowed values"
+        elif spec.kind == "int":
+            # `isinstance(True, int)` is true in Python, so booleans need their
+            # own rejection. There is deliberately no "no timeout" sentinel: an
+            # unbounded hook is the fault A12 exists to close.
+            if isinstance(value, bool) or not isinstance(value, int):
+                reason = "not a whole number of seconds"
+            elif value <= 0:
+                reason = "not greater than zero seconds"
         elif spec.validator is not None:
             reason = spec.validator(value)
         if reason is not None:
@@ -351,6 +396,8 @@ def resolve_config(
     agent_mode = DEFAULT_AGENT_MODE
     verify = True
     copy = False
+    setup_hook_policy = DEFAULT_SETUP_HOOK_POLICY
+    setup_hook_timeout = DEFAULT_SETUP_HOOK_TIMEOUT
     output = "text"
     config_path: Path | None = None
     claude_extra_args: tuple[str, ...] = ()
@@ -382,6 +429,12 @@ def resolve_config(
             verify = source.verify
         if source.copy is not None:
             copy = source.copy
+        if source.setup_hook_policy is not None:
+            setup_hook_policy = source.setup_hook_policy
+            provenance["setup_hook_policy"] = label
+        if source.setup_hook_timeout is not None:
+            setup_hook_timeout = source.setup_hook_timeout
+            provenance["setup_hook_timeout"] = label
         if source.output is not None:
             output = source.output
             provenance["output"] = (
@@ -410,6 +463,8 @@ def resolve_config(
         claude_extra_args=claude_extra_args,
         codex_extra_args=codex_extra_args,
         codex_session_name_resolution=codex_session_name_resolution,
+        setup_hook_policy=setup_hook_policy,
+        setup_hook_timeout=setup_hook_timeout,
     )
     findings = validate_values(resolved, provenance=provenance)
     if findings:
@@ -439,17 +494,29 @@ def load_config(path: Path) -> ConfigValues:
     for key in _BOOL_KEYS:
         if key in fork and not isinstance(fork[key], bool):
             raise ConfigError(f"invalid config {path}: fork.{key} must be boolean")
-    for key in {"branch_prefix", "worktree_location", "agent_mode", "output"}:
+    for key in _STRING_KEYS:
         if key in fork and not isinstance(fork[key], str):
             raise ConfigError(f"invalid config {path}: fork.{key} must be a string")
-    if "agent_mode" in fork and fork["agent_mode"] not in {
-        "auto",
-        "strict",
-        "git-only",
-    }:
-        raise ConfigError(
-            f"invalid config {path}: fork.agent_mode must be auto, strict, or git-only"
-        )
+    # A11's lesson: a key that passes `config validate` and later crashes `fork`
+    # is the exact defect that item found, so every new key is rejected here.
+    for key, allowed in _ENUM_KEYS.items():
+        if key in fork and fork[key] not in allowed:
+            raise ConfigError(
+                f"invalid config {path}: fork.{key} must be "
+                f"{', '.join(allowed[:-1])}, or {allowed[-1]}"
+            )
+    for key in _INT_KEYS:
+        if key not in fork:
+            continue
+        value = fork[key]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ConfigError(
+                f"invalid config {path}: fork.{key} must be a whole number of seconds"
+            )
+        if value <= 0:
+            raise ConfigError(
+                f"invalid config {path}: fork.{key} must be greater than zero seconds"
+            )
     agents = document.get("agents", {})
     if not isinstance(agents, dict):
         raise ConfigError(f"invalid config {path}: [agents] must be a table")
@@ -611,6 +678,27 @@ def set_user_value(path: Path, key: str, value: str) -> None:
                 source=str(resolved_path),
             ).render()
         )
+    elif spec.kind == "int":
+        # Digits only, before `int()` sees it: `int("1_000")` is 1000, so
+        # `config set setup_hook_timeout 1_000` used to write a value the user
+        # never typed.
+        reason = (
+            "not a whole number of seconds"
+            if not (value.isascii() and value.isdigit())
+            else "not greater than zero seconds"
+            if int(value) <= 0
+            else None
+        )
+        if reason is not None:
+            raise ConfigError(
+                ConfigFinding(
+                    key=spec.dotted,
+                    value=value,
+                    reason=reason,
+                    allowed=spec.describe_allowed(),
+                    source=str(resolved_path),
+                ).render()
+            )
     elif spec.validator is not None:
         # Normalize identically to resolve_config() before validating, so a
         # whitespace-only branch_prefix (which resolves to the default) is
@@ -650,13 +738,19 @@ def set_user_value(path: Path, key: str, value: str) -> None:
             },
             codex_session_name_resolution=value.lower() == "true",
         )
+    elif spec.kind == "bool":
+        values[spec.field] = value.lower() == "true"
+    elif spec.kind == "int":
+        values[spec.field] = int(value)
     else:
-        values[spec.field] = value.lower() == "true" if spec.kind == "bool" else value
+        values[spec.field] = value
     lines = ["[fork]"]
     for name in sorted(values):
         item = values[name]
         if isinstance(item, bool):
             text = "true" if item else "false"
+        elif isinstance(item, int):
+            text = str(item)
         else:
             text = _toml_string_literal(str(item))
         lines.append(f"{name} = {text}")

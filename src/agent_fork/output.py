@@ -53,9 +53,14 @@ class ForkOutput:
     notices: tuple[str, ...] = ()
     skipped: tuple[dict[str, str], ...] = ()
     parent_session_name: str | None = None
+    # `SetupHookResult.document()` output, supplied by every real fork. `None`
+    # renders as `null` rather than omitting the key, so the shape a consumer
+    # parses is the same whether or not a hook step was evaluated.
+    setup_hook: dict[str, object] | None = None
 
     def document(self) -> dict[str, object]:
         result: dict[str, object] = {
+            "setup_hook": self.setup_hook,
             "mode": self.mode,
             "fork": {
                 "name": self.name,
@@ -95,6 +100,32 @@ class ForkOutput:
         return "\n".join(lines)
 
 
+def setup_hook_plan_line(hook: dict[str, object] | None) -> str | None:
+    """Render one dry-run disclosure line from a predicted setup-hook plan."""
+    if hook is None:
+        return None
+    if hook["policy"] == "off":
+        return "setup-hook: disabled (--setup-hook-policy off)"
+    if not hook["present"]:
+        return "setup-hook: none"
+    state = (
+        "eligible at the fork anchor"
+        if hook["eligibility"] == "eligible"
+        # Every reason-less eligibility is handled above today; the fallback
+        # keeps a future one from rendering the literal string "None" at a user.
+        else hook["reason"] or f"eligibility {hook['eligibility']}"
+    )
+    if hook["would_run"]:
+        return (
+            f"setup-hook: {hook['path']}; {state}; would run; "
+            f"timeout {hook['timeout_seconds']}s"
+        )
+    return (
+        f"setup-hook: {hook['path']}; {state}; would skip; "
+        "override --setup-hook-policy any"
+    )
+
+
 @dataclass(frozen=True)
 class DryRunOutput:
     branch: str
@@ -105,6 +136,9 @@ class DryRunOutput:
     ignored: int
     command: str
     notices: tuple[str, ...] = ()
+    # Predicted parent-side, since `materialize()` has not run: the document
+    # says `prediction: true` rather than implying certainty about the child.
+    setup_hook: dict[str, object] | None = None
 
     def document(self) -> dict[str, object]:
         return {
@@ -118,6 +152,7 @@ class DryRunOutput:
                     "untracked": self.untracked,
                     "ignored": self.ignored,
                 },
+                "setup_hook": self.setup_hook,
             },
             "command": self.command,
             "notices": list(self.notices),
@@ -133,11 +168,18 @@ class DryRunOutput:
             f"worktree: create {self.worktree}",
             f"files-to-carry: staged={self.staged} unstaged={self.unstaged} "
             f"untracked={self.untracked} ignored={self.ignored}",
-            f"paste command: {self.command}",
-            "validation: local-only; no mutation performed",
         ]
+        hook_line = setup_hook_plan_line(self.setup_hook)
+        if hook_line is not None:
+            lines.append(hook_line)
         if self.notices:
-            lines.insert(3, "notices: " + "; ".join(self.notices))
+            lines.append("notices: " + "; ".join(self.notices))
+        lines.extend(
+            (
+                f"paste command: {self.command}",
+                "validation: local-only; no mutation performed",
+            )
+        )
         return "\n".join(lines)
 
 

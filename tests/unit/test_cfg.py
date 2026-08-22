@@ -305,6 +305,8 @@ def test_validate_values_finding_names_key_value_allowed_and_source(repo_scenari
         claude_extra_args=(),
         codex_extra_args=(),
         codex_session_name_resolution=True,
+        setup_hook_policy="tracked",
+        setup_hook_timeout=300,
     )
     findings = validate_values(resolved, provenance={"output": "AGENT_FORK_OUTPUT"})
     assert len(findings) == 1
@@ -342,6 +344,8 @@ def test_validate_values_returns_every_finding_not_just_the_first(repo_scenario)
         claude_extra_args=(),
         codex_extra_args=(),
         codex_session_name_resolution=True,
+        setup_hook_policy="tracked",
+        setup_hook_timeout=300,
     )
     findings = validate_values(resolved, provenance={})
     keys = {finding.key for finding in findings}
@@ -417,6 +421,8 @@ def test_config_get_dotted_addressing_including_arrays(repo_scenario):
         claude_extra_args=("--model", 'opus "max"\nwith a newline\tand a tab'),
         codex_extra_args=(),
         codex_session_name_resolution=False,
+        setup_hook_policy="tracked",
+        setup_hook_timeout=300,
     )
     rendered = config_get(base, "agents.claude.extra_args")
     parsed = tomllib.loads(f"extra_args = {rendered}\n")["extra_args"]
@@ -450,6 +456,8 @@ def test_config_get_rejects_every_internal_attribute(repo_scenario):
         claude_extra_args=(),
         codex_extra_args=(),
         codex_session_name_resolution=True,
+        setup_hook_policy="tracked",
+        setup_hook_timeout=300,
     )
     for leaked in (
         "config_path",
@@ -495,6 +503,8 @@ def test_unknown_key_is_escaped_in_get_and_set_error_messages(repo_scenario, tmp
         claude_extra_args=(),
         codex_extra_args=(),
         codex_session_name_resolution=True,
+        setup_hook_policy="tracked",
+        setup_hook_timeout=300,
     )
     evil_key = "evil‮name"
 
@@ -563,3 +573,42 @@ def test_config_set_does_not_block_on_a_pre_existing_unrelated_invalid_key(
     set_user_value(target, "verify", "false")
     assert 'branch_prefix = "-already-bad/"' in target.read_text()
     assert "verify = false" in target.read_text()
+
+
+@pytest.mark.matrix("T-CFG-37")
+def test_setup_hook_keys_default_and_obey_precedence(repo_scenario):
+    """T-CFG-37 — A12 policy resolution.
+
+    Given:  no source, a config-file source, and an explicit flag
+    Expect: `setup_hook_policy` defaults to `tracked` and `setup_hook_timeout`
+            to 300 seconds; an explicit flag beats a config value; and
+            `off` dominates whatever a lower-precedence source asked for
+    Source: P02 A12; REQ-12; REQ-13
+    """
+    from agent_fork.config import load_config, resolve_config
+
+    world = repo_scenario()
+    default = resolve_config()
+    assert default.setup_hook_policy == "tracked"
+    assert default.setup_hook_timeout == 300
+
+    path = world.parent_path / "hook.toml"
+    path.write_text('[fork]\nsetup_hook_policy = "any"\nsetup_hook_timeout = 45\n')
+    loaded = load_config(path)
+    configured = resolve_config(sources=(loaded,))
+    assert configured.setup_hook_policy == "any"
+    assert configured.setup_hook_timeout == 45
+
+    flagged = resolve_config(
+        sources=(loaded,),
+        flags={"setup_hook_policy": "tracked", "setup_hook_timeout": 10},
+    )
+    assert flagged.setup_hook_policy == "tracked"
+    assert flagged.setup_hook_timeout == 10
+
+    assert (
+        resolve_config(
+            sources=(loaded,), flags={"setup_hook_policy": "off"}
+        ).setup_hook_policy
+        == "off"
+    )

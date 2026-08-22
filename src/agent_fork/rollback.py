@@ -28,8 +28,17 @@ def run_with_rollback(creation, operation, *, env=None):
 
     def interrupt(signum, _frame):
         from agent_fork.git import terminate_active_git
+        from agent_fork.include import terminate_active_setup_hook
 
         terminate_active_git()
+        # The setup hook is the second owned process group, and it is killed in
+        # the handler for the same reason Git's is: unwinding first would leave
+        # it writing into a directory rollback is about to remove. It is also
+        # load-bearing on its own — when the hook's own shell has already
+        # exited, `run_setup_hook()` can be past its reap ladder while group
+        # members it left behind are still running, and only this call reaches
+        # them (A12 Gate-1 fact 6; T-RBK-10).
+        terminate_active_setup_hook()
         raise OperationInterrupted(signum)
 
     for signum in (signal.SIGINT, signal.SIGTERM):

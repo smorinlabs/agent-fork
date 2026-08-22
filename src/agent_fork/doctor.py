@@ -18,8 +18,9 @@ from agent_fork.agents import (
     read_help,
     recipe_flags,
 )
-from agent_fork.config import ConfigError, resolve_discovered_config
+from agent_fork.config import ConfigError, resolve_discovered_config, worktree_root
 from agent_fork.git import PRODUCT_GIT_MIN
+from agent_fork.include import SETUP_HOOK_RELATIVE_PATH, setup_hook_eligibility
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,83 @@ def _version_check(
     )
 
 
+def _setup_hook_check(
+    cwd: Path, env: Mapping[str, str], policy: str | None, timeout: int
+) -> DoctorCheck:
+    """A12: report whether this repository's setup hook would actually run.
+
+    Unlike every other row here, this one describes the repository's working
+    tree rather than machine readiness, and it is allowed to fail: a hook that
+    is present but ineligible under the default `tracked` policy will silently
+    not run, which the owner chose to surface as a hard failure rather than a
+    note. It stays `ok` under `any` (the hook is explicitly allowed to run),
+    under `off` (it is not evaluated), and when no hook is present.
+
+    Evaluated against `HEAD`, which the detail says explicitly: `fork` resolves
+    its own anchor and on a detached HEAD the two can differ.
+    """
+    name = "repository setup hook"
+    if policy is None:
+        return DoctorCheck(
+            name,
+            True,
+            "not evaluated: configuration could not be resolved (see config validity)",
+        )
+    if policy == "off":
+        return DoctorCheck(name, True, "disabled by config (setup_hook_policy = off)")
+    try:
+        root = worktree_root(cwd, env)
+    except ConfigError:
+        return DoctorCheck(name, True, f"not evaluated: {cwd} is not a worktree")
+    eligibility, reason = setup_hook_eligibility(
+        root, "HEAD", reference_label="HEAD", env=env
+    )
+    if eligibility == "absent":
+        return DoctorCheck(name, True, f"none in {root}")
+    if eligibility == "eligible":
+        return DoctorCheck(
+            name,
+            True,
+            f"{SETUP_HOOK_RELATIVE_PATH} present, eligible at HEAD, "
+            f"policy={policy}, timeout={timeout}s",
+        )
+    if eligibility == "unchecked":
+        # `reason` here names a read failure ("HEAD could not be read"), not a
+        # provenance verdict — composing it straight after the path the way
+        # the other reasons do ("present but ...") reads as though the hook
+        # was checked and rejected, when the check itself could not run
+        # (CodeRabbit, PR #65).
+        detail = (
+            f"{SETUP_HOOK_RELATIVE_PATH} present, but provenance could not be "
+            f"checked: {reason}"
+        )
+        if policy == "any":
+            return DoctorCheck(
+                name,
+                True,
+                f"{detail} (allowed to run under policy=any, timeout={timeout}s)",
+            )
+        return DoctorCheck(
+            name,
+            False,
+            f"{detail} (blocked under policy=tracked; "
+            "override --setup-hook-policy any)",
+        )
+    if policy == "any":
+        return DoctorCheck(
+            name,
+            True,
+            f"{SETUP_HOOK_RELATIVE_PATH} {reason} (allowed to run under "
+            f"policy=any, timeout={timeout}s)",
+        )
+    return DoctorCheck(
+        name,
+        False,
+        f"{SETUP_HOOK_RELATIVE_PATH} {reason} (blocked under policy=tracked; "
+        "override --setup-hook-policy any)",
+    )
+
+
 def run_doctor(
     cwd: Path,
     env: Mapping[str, str],
@@ -126,9 +204,13 @@ def run_doctor(
         CODEX_ENV_MIN,
         env,
     )
+    hook_policy: str | None = None
+    hook_timeout = 0
     try:
         resolved = resolve_discovered_config(cwd, env, flags=flags)
         selected_mode = agent_mode or resolved.agent_mode
+        hook_policy = resolved.setup_hook_policy
+        hook_timeout = resolved.setup_hook_timeout
         resolved_output = resolved.output
         config = DoctorCheck(
             "config validity", True, f"valid ({resolved.config_path or 'defaults'})"
@@ -145,6 +227,7 @@ def run_doctor(
             env_output if env_output in ("text", "json") else "text"
         )
         config = DoctorCheck("config validity", False, str(error))
+    setup_hook = _setup_hook_check(cwd, env, hook_policy, hook_timeout)
     assessment = assess_agent_signals(env)
     if selected_mode == "git-only":
         selected = "git-only"
@@ -205,4 +288,13 @@ def run_doctor(
         paths_ok &= ok
         details.append(f"{label}={path} ({'writable' if ok else 'not writable'})")
     xdg = DoctorCheck("XDG paths", paths_ok, ", ".join(details))
-    return (git, claude, codex, recipes, signals, config, xdg), resolved_output
+    return (
+        git,
+        claude,
+        codex,
+        recipes,
+        signals,
+        config,
+        xdg,
+        setup_hook,
+    ), resolved_output

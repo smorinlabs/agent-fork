@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 from dataclasses import dataclass
 
 
@@ -64,6 +65,10 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
     "cleanup_registry_ambiguous": ErrorSpec(
         5, "several registry records claim the same target"
     ),
+    # One code per exit code, never one code with a per-instance exit code: the
+    # catalog's one-code-one-exit-code invariant is what T-OUT-14/T-OUT-15 pin.
+    "interrupted_sigint": ErrorSpec(130, "interrupted by SIGINT after rollback"),
+    "interrupted_sigterm": ErrorSpec(143, "interrupted by SIGTERM after rollback"),
 }
 
 
@@ -241,3 +246,25 @@ class ClaudeParentIncompleteAnalysisError(ClaudeParentError):
 
     def __init__(self, message: str, **kwargs):
         super().__init__(message, code=self.code, **kwargs)
+
+
+class InterruptedBySigintError(AgentForkError):
+    """SIGINT reached the CLI mid-pipeline and rollback has completed."""
+
+    code = "interrupted_sigint"
+    exit_code = 130
+
+
+class InterruptedBySigtermError(AgentForkError):
+    """SIGTERM reached the CLI mid-pipeline and rollback has completed."""
+
+    code = "interrupted_sigterm"
+    exit_code = 143
+
+
+# `rollback.run_with_rollback()` installs handlers for exactly these two
+# signals, so `OperationInterrupted.signum` is always one of them.
+INTERRUPT_ERRORS: dict[int, type[AgentForkError]] = {
+    signal.SIGINT: InterruptedBySigintError,
+    signal.SIGTERM: InterruptedBySigtermError,
+}
