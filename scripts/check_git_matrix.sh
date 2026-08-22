@@ -58,10 +58,26 @@ measure_clone_cost() {
   # replaces any same-name record, so a real fork the user happened to have
   # registered under either name would be silently overwritten, and `set -e`
   # meant a failing benchmark command skipped cleanup entirely. Isolating
-  # XDG_STATE_HOME to this run's own tmp dir removes both risks at once: the
-  # trap below cleans it up even on early exit.
+  # XDG_STATE_HOME to this run's own tmp dir removes both risks at once.
+  #
+  # Gate-6 round 2 finding 2: a RETURN trap only fires when the function
+  # actually returns; `set -e` (the script's top-level `set -euo pipefail`)
+  # does not "return" from a failing function, it exits the whole process,
+  # so a RETURN trap here left the large temp fixture on disk on any
+  # mid-benchmark failure (confirmed empirically: a probe script with an
+  # identical RETURN trap printed no trap output and exited 1 on a `false`
+  # inside the function). An EXIT trap fires in both cases; safe here
+  # because this function's only caller is the script's final line, so
+  # nothing else needs $tmp afterward.
+  #
+  # Double-quoted, not single-quoted: an EXIT trap fires at PROCESS exit,
+  # by which point this function's `local tmp` binding is out of scope --
+  # a single-quoted trap referencing $tmp lazily then dies on `set -u` with
+  # "tmp: unbound variable" (caught by re-running this script for real
+  # after switching from RETURN to EXIT). Double-quoting bakes the path in
+  # as a literal at trap-install time, so the trap needs no live variable.
+  trap "rm -rf '$tmp'" EXIT
   export XDG_STATE_HOME="$tmp/xdg-state"
-  trap 'rm -rf "$tmp"' RETURN
   agent_fork_bin="$worktree_root/.venv/bin/agent-fork"
 
   local sub="$tmp/big-submodule"

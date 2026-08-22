@@ -77,6 +77,7 @@ def verify_fork(
     parent_state_before: CarriedState | None = None,
     submodule_plans: tuple[SubmoduleSnapshot, ...] = (),
     submodule_skipped: tuple[str, ...] = (),
+    submodule_reasoned_skipped: tuple[str, ...] = (),
     env: Mapping[str, str] | None = None,
 ) -> None:
     """Run the complete base ladder and topology-dependent assertions.
@@ -196,6 +197,7 @@ def verify_fork(
             submodule_plans,
             with_ignored=with_ignored,
             skipped=submodule_skipped,
+            reasoned_skipped=submodule_reasoned_skipped,
             env=env,
         )
         if submodule_differences:

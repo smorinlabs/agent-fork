@@ -208,7 +208,13 @@ def test_recursive_verification_catches_a_wrong_submodule_head(repo_scenario):
 
 @pytest.mark.matrix("T-OUT-29")
 def test_json_output_carries_with_submodules_and_the_carry_notice(repo_scenario):
-    """The flag's resolved value and the carry outcome both reach the JSON document."""
+    """The flag's resolved value and the carry outcome both reach the JSON
+    document. Gate-6 round 2 finding 9: the notice assertion must specifically
+    confirm the CARRY outcome, not just that `vendor/submodule` is mentioned
+    anywhere -- a "not carried", "skipped", or "left cold" notice would have
+    satisfied a looser assertion just as well, proving nothing about which
+    outcome actually happened.
+    """
     from conftest import run_cli
 
     world = repo_scenario("plain@main", states=(submodule(dirty="modified"),))
@@ -220,7 +226,10 @@ def test_json_output_carries_with_submodules_and_the_carry_notice(repo_scenario)
 
     document = json.loads(completed.stdout)
     assert document["fork"]["mode"]["with_submodules"] is True
-    assert any("vendor/submodule" in notice for notice in document["notices"])
+    assert any(
+        notice.startswith("submodule carried: vendor/submodule")
+        for notice in document["notices"]
+    ), document["notices"]
 
 
 @pytest.mark.matrix("T-VER-46")
@@ -252,6 +261,81 @@ def test_ambient_config_at_snapshot_time_does_not_cause_a_false_verification_fai
     result = _fork(world, "ambient-config-snapshot")
     child_inner = result.creation.path / "vendor/submodule" / "inner" / "tracked.txt"
     assert child_inner.read_text() == "advanced\n"
+
+
+@pytest.mark.matrix("T-VER-50")
+def test_equals_named_submodule_left_cold_does_not_roll_back_the_whole_fork(
+    repo_scenario,
+):
+    """Gate-6 round 2 finding 1. A `=`-named submodule is a reasoned,
+    deliberate skip (T-MAT-57 -- it cannot be expressed as a `-c
+    submodule.<name>.url=...` pin, so carrying it would risk contacting its
+    real remote). But rung 6 ("nested-plan completeness") treats ANY
+    initialized plan entry present in `skipped` as a failure, with no way to
+    distinguish a reasoned skip from an accidental one -- so today, under
+    the tool's OWN default settings, a repository containing an
+    `=`-named submodule is unforkable: `verify_fork` raises
+    `submodule-skipped` and the whole fork rolls back, even though carry did
+    exactly what the design doc's own Notices section says it should
+    ("left cold -- say so"). The fix: a reasoned skip behaves like
+    left-cold-with-notice at rung 6, not a failure -- the fork still
+    succeeds, with a notice, and the submodule is left uninitialized.
+    """
+    world = repo_scenario(
+        "plain@main", states=(submodule(name="eq=name", committed=True),)
+    )
+    result = _fork(world, "eq-name-left-cold")
+    assert not (result.creation.path / "vendor/submodule/.git").exists()
+    assert any(
+        "vendor/submodule" in notice and "=" in notice for notice in result.notices
+    )
+
+
+@pytest.mark.matrix("T-VER-49")
+def test_per_submodule_ignore_config_does_not_hide_a_staged_gitlink_advance(
+    repo_scenario,
+):
+    """Gate-6 round 2 findings 4+5, corrected axis. `-c diff.ignoreSubmodules=none`
+    (the `SEMANTIC_PINS` pin) does NOT defeat a per-submodule
+    `submodule.<name>.ignore=all` local config value -- only the explicit
+    `--ignore-submodules=none` command-line flag does (probed directly against
+    real Git: `diff --cached --name-only` and `diff-index -p --cached` both
+    stay silent under the pin, both report the change under the flag). With
+    that config set on the parent and the submodule's gitlink staged forward,
+    the unpinned-of-that-axis inventory omits the path from its staged
+    listing, so `materialize()` never transports the patch and the child's
+    submodule sits at the old commit -- unstaged from the child's own
+    perspective where the parent has it staged, which the exact-copy-status
+    rung then reports as a real difference and the whole fork rolls back, even
+    though the repository was legitimately forkable.
+    """
+    world = repo_scenario("plain@main", states=(submodule(dirty="advanced-staged"),))
+    _git(
+        world,
+        world.parent_path,
+        "config",
+        "submodule.vendor/submodule.ignore",
+        "all",
+    )
+
+    result = _fork(world, "per-submodule-ignore-staged")
+    assert _status(world, result.creation.path) == _status(world, world.parent_path)
+    child_head = (
+        _git(
+            world,
+            result.creation.path / "vendor/submodule",
+            "rev-parse",
+            "HEAD",
+        )
+        .stdout.decode()
+        .strip()
+    )
+    parent_head = (
+        _git(world, world.parent_path / "vendor/submodule", "rev-parse", "HEAD")
+        .stdout.decode()
+        .strip()
+    )
+    assert child_head == parent_head
 
 
 @pytest.mark.matrix("T-VER-45")

@@ -379,6 +379,87 @@ def test_carry_skips_a_submodule_whose_name_contains_equals(repo_scenario):
     assert not (child / "vendor/submodule/.git").exists()
 
 
+@pytest.mark.matrix("T-MAT-60")
+def test_carried_notice_escapes_a_hostile_submodule_name(repo_scenario):
+    """Gate-6 round 2 finding 10 -- round-1 finding 6 (terminal injection,
+    absorbed in commit bf81d94) added `escape_terminal_text()` around both
+    `plan.path` and `plan.name` in the "submodule carried" notice, but no
+    test actually proved the escaping happens: T-MAT-46 checks only skip
+    state and T-MAT-50 checks only the remote-fidelity wording, neither
+    with a hostile string in play. A submodule config name containing an
+    ANSI erase-screen sequence and an embedded newline (the same hostile
+    shape `test_a1_content.py` uses for a filename) must not reach the
+    notice literally -- it must come back escaped, single-line, and
+    terminal-safe.
+    """
+    hostile = "bad\x1b[2Jname"
+    world = repo_scenario(
+        "plain@main", states=(submodule(name=hostile, committed=True),)
+    )
+    child = world.parent_path.parent / "a6b-hostile-name"
+    result = _carry(world, child)
+
+    assert "vendor/submodule" in result.carried
+    carried_notice = next(
+        notice for notice in result.notices if notice.startswith("submodule carried")
+    )
+    assert "\x1b" not in carried_notice
+    assert "\\x1b" in carried_notice
+
+
+@pytest.mark.matrix("T-MAT-58")
+def test_carry_removes_the_synthetic_origin_when_the_parent_submodule_has_none(
+    repo_scenario,
+):
+    """Gate-6 round 2 finding 7. `submodule update --init` always writes a
+    persistent `remote.origin.url` into the child submodule's own config,
+    pointed at whatever the init-scoped `-c submodule.<name>.url` pin named
+    (the parent's own local checkout path) -- confirmed empirically: even
+    with the pin only process-scoped, `git config --get remote.origin.url`
+    inside the freshly-initialized child submodule returns that path,
+    persisted to disk. When the parent's own submodule has NO
+    `remote.origin.url` at all (`plan.remote_url is None`), step 3's
+    restore is a no-op (`if plan.remote_url is not None`), so this synthetic,
+    machine-local origin silently survives in the child -- an origin the
+    parent never had, pointing at a path that only exists on this machine.
+    The carried child must match the parent: no origin remote at all.
+    """
+    world = repo_scenario("plain@main", states=(submodule(committed=True),))
+    outer = world.parent_path / "vendor/submodule"
+    _git(world, outer, "config", "--unset", "remote.origin.url")
+
+    child = world.parent_path.parent / "a6b-no-origin"
+    _carry(world, child)
+
+    remotes = _git(world, child / "vendor/submodule", "remote").stdout.decode().split()
+    assert remotes == []
+
+
+@pytest.mark.matrix("T-MAT-59")
+def test_nested_cold_notice_is_qualified_with_its_outer_path(repo_scenario):
+    """Gate-6 round 2 finding 8. `carry_submodules` qualifies nested `carried`
+    and `skipped` PATHS with their outer prefix (``outer/inner``, gate-6
+    finding 7's own fix for rung 6), but nested NOTICE TEXT is appended
+    unchanged (`notices.extend(nested_notices)`), still naming only the bare
+    nested path (``inner``). Two different outer submodules that each happen
+    to contain a nested submodule named the same thing would produce two
+    identical, unattributable "left cold: inner" notices with no way to
+    tell which outer's `inner` either one refers to.
+    """
+    world = repo_scenario(
+        "plain@main", states=(submodule(nested=True, committed=True),)
+    )
+    outer = world.parent_path / "vendor/submodule"
+    _git(world, outer, "submodule", "deinit", "-f", "--", "inner")
+
+    child = world.parent_path.parent / "a6b-nested-cold-notice"
+    result = _carry(world, child)
+
+    assert any("vendor/submodule/inner" in notice for notice in result.notices), (
+        result.notices
+    )
+
+
 @pytest.mark.matrix("T-VER-47")
 def test_rung_7_catches_the_parent_submodule_cleanly_moving_head(repo_scenario):
     """Gate-6 finding 1 -- rung 7 ("recursive parent-untouched") compared only
@@ -506,20 +587,24 @@ def test_a_mixed_time_race_is_caught_by_verification_not_silently_carried(
 
 @pytest.mark.matrix("T-VER-44")
 def test_semantic_pin_reaches_a_recursive_collect_inventory_call(repo_scenario):
-    """Gate-4 pass 1 finding 4 — the semantic pin actually changes the output
-    of the recursive calls it is threaded into, not just present as an unused
-    parameter. Reproduced directly against `collect_inventory` on a submodule
-    checkout, the same call `verify_submodules` and `_carry_one` make: ambient
-    `diff.ignoreSubmodules=all`, set inside *that checkout's own* local
-    config (not global, not passed by agent-fork — whatever a user of that
-    submodule happened to configure for themselves), hides a nested gitlink's
-    working-tree state from the unstaged listing. The pin, command-scoped,
-    must override it — and must do so with `with_submodules=True`, since a
-    bare pin loses to the hardcoded `--ignore-submodules=dirty` flag the
-    unstaged listing falls back to otherwise (a command-line flag always
-    outranks a `-c` pin on the same axis, confirmed empirically for T-FIX-33;
-    this is the same fact one level down, and it is why every internal
-    `collect_inventory` call in `submodules.py` needed that flag added).
+    """Gate-4 pass 1 finding 4 — semantics that reach a recursive
+    `collect_inventory` call must actually change its output, not just be
+    present as an unused parameter. Reproduced directly against
+    `collect_inventory` on a submodule checkout, the same call
+    `verify_submodules` and `_carry_one` make: ambient `diff.ignoreSubmodules=
+    all`, set inside *that checkout's own* local config (not global, not
+    passed by agent-fork — whatever a user of that submodule happened to
+    configure for themselves), would otherwise hide a nested gitlink's
+    working-tree state from the unstaged listing.
+
+    Gate-6 round 2 findings 4+5 hardened this further: a `-c` config pin
+    cannot defeat every axis a user's local config can set (concretely,
+    `submodule.<name>.ignore`, confirmed empirically — the pin left the
+    listing empty, only the explicit command-line flag restored it), so
+    `collect_inventory` now adds `--ignore-submodules=none` itself whenever
+    `with_submodules=True`, unconditionally of `config_pins`. This test now
+    proves that stronger, caller-independent guarantee: the ambient config
+    never hides the advance even when no pin is threaded through at all.
     """
     from agent_fork.content import collect_inventory
 
@@ -531,20 +616,7 @@ def test_semantic_pin_reaches_a_recursive_collect_inventory_call(repo_scenario):
     (outer / "inner" / "tracked.txt").write_text("advanced\n")
     _git(world, outer / "inner", "commit", "-qam", "advance the inner submodule")
 
-    unpinned = collect_inventory(
+    carrying_no_pins = collect_inventory(
         outer, with_state=True, with_ignored=False, with_submodules=True, env=world.env
     )
-    assert "inner" not in unpinned.unstaged, (
-        "fixture check: ambient config must hide the advanced nested gitlink "
-        "from an unpinned call, or this test proves nothing"
-    )
-
-    pinned = collect_inventory(
-        outer,
-        with_state=True,
-        with_ignored=False,
-        with_submodules=True,
-        config_pins=(("diff.ignoreSubmodules", "none"),),
-        env=world.env,
-    )
-    assert "inner" in pinned.unstaged
+    assert "inner" in carrying_no_pins.unstaged

@@ -671,14 +671,23 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             return count_paths(parent_path, arguments, env=environment)
 
         unstaged_args = ["diff", "--name-only", "-z", "--no-renames"]
-        if not config.with_submodules:
+        staged_args = ["diff", "--cached", "--name-only", "-z", "--no-renames"]
+        if config.with_submodules:
+            # Mirrors collect_inventory's own flag (gate-6 round 2 finding
+            # 4's second half): a local `submodule.<name>.ignore` value
+            # hides a staged gitlink advance from this listing and the `-c`
+            # pin cannot defeat it, only the explicit flag can. Without it
+            # here, the preview undercounts exactly what the real fork
+            # (materialize/collect_inventory, already carrying this flag)
+            # correctly carries.
+            unstaged_args.append("--ignore-submodules=none")
+            staged_args.append("--ignore-submodules=none")
+        else:
             unstaged_args.append("--ignore-submodules=dirty")
         dry = DryRunOutput(
             branch,
             destination,
-            count(["diff", "--cached", "--name-only", "-z", "--no-renames"])
-            if config.with_state
-            else 0,
+            count(staged_args) if config.with_state else 0,
             count(unstaged_args) if config.with_state else 0,
             count(["ls-files", "--others", "--exclude-standard", "-z"])
             if config.with_state

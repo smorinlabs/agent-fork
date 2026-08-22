@@ -72,6 +72,7 @@ Varying axes: topology (a linked-worktree row exercises the project-config walk-
 | T-CFG-43 | A6b step 3 — an explicit `with_submodules` flag outranks a configured source, matching `with_state`'s precedence | baseline | U | live | A6 design doc, implementation plan step 3 |
 | T-CFG-44 | A6b step 3 — `[fork] with_submodules` round-trips through a config file and validates as boolean | baseline | U | live | A6 design doc, implementation plan step 3 |
 | T-CFG-45 | Gate-6 finding 4 — a lower-precedence `with_state=false` does not permanently zero `with_submodules`; a later, higher-precedence source that only re-enables `with_state` restores the independently resolved default | baseline | U | live | gate-6 finding 4 |
+| T-CFG-46 | Gate-6 round 2 finding 3 — `with_submodules` is a registered `KEY_SPECS` entry: both bare and dotted `config get`/`config set` forms resolve it, matching `with_state` | baseline | U | live | gate-6 round 2 finding 3 |
 
 ---
 
@@ -347,6 +348,9 @@ Varying axes: mode (exact / exact+ignored / no-state) plus the full file-state i
 | T-MAT-54 | A6b coverage gap — depth-2 dirt: a dirty tracked file inside a submodule nested two levels deep carries, distinct from cell `h`'s clean-nested case | baseline | F | live | A6 design doc §Implementation plan step 1; coverage audit |
 | T-MAT-56 | Gate-6 finding 5 — a submodule config name containing a space parses correctly (`--null`, not a single-space split) and the offline override actually engages, proven against a remote-unreachable URL | baseline | F | live | gate-6 finding 5 |
 | T-MAT-57 | Gate-6 finding 5 — a submodule config name containing `=` cannot be expressed as a `-c key=value` override; skipped with a notice rather than silently falling through to the real, uncontrolled remote | baseline | F | live | gate-6 finding 5 |
+| T-MAT-58 | Gate-6 round 2 finding 7 — `submodule update --init` persists a synthetic `remote.origin.url` pointed at the parent's local checkout path; when the parent's own submodule has none, carry must remove it rather than let it survive | baseline | F | live | gate-6 round 2 finding 7 |
+| T-MAT-59 | Gate-6 round 2 finding 8 — a nested submodule's notice text is qualified with its outer path (`outer/inner`), matching the qualification `carried`/`skipped` already receive, so two same-named nested submodules under different outers stay attributable | baseline | F | live | gate-6 round 2 finding 8 |
+| T-MAT-60 | Gate-6 round 2 finding 10 — round-1 finding 6's terminal-escaping fix (commit bf81d94) had no regression test; a hostile submodule config name (ANSI erase-screen sequence) must come back escaped in the "submodule carried" notice | baseline | F | live | gate-6 round 2 finding 10; gate-6 finding 6 |
 
 ---
 
@@ -407,6 +411,8 @@ Varying axes: topology (drives the conditional checks: plain@main, linked-worktr
 | T-VER-46 | Gate-6 finding 2 — the real snapshot→carry→verify pipeline, not the primitive directly: ambient `diff.ignoreSubmodules=all` at snapshot time must not cause a false "newly carried" difference when carry and verify, both pinned, correctly see what the unpinned snapshot missed | baseline | F | live | gate-6 finding 2 |
 | T-VER-47 | Gate-6 finding 1 — rung 7 ("recursive parent-untouched") compared only dirty-inventory content, never the parent submodule's own HEAD; a clean commit-to-commit move between snapshot and verify must still be caught | baseline | F | live | gate-6 finding 1 |
 | T-VER-48 | Gate-6 finding 7 — rung 6 compared the bare, unqualified `plan.path` against `skipped`, which `carry_submodules` qualifies with its outer prefix (`outer/inner`); a skipped NESTED plan could never be detected as a result | baseline | F | live | gate-6 finding 7 |
+| T-VER-49 | Gate-6 round 2 findings 4+5 — a `submodule.<name>.ignore` local config value hides a staged gitlink advance from the inventory and from `materialize`'s patch generation; the `-c diff.ignoreSubmodules=none` pin cannot defeat it, only the explicit `--ignore-submodules=none` flag can, confirmed empirically | baseline | F | live | gate-6 round 2 findings 4, 5 |
+| T-VER-50 | Gate-6 round 2 finding 1 — a `=`-named submodule's reasoned skip must not fail rung 6 ("nested-plan completeness") the way a silent/unexpected skip does; the fork still succeeds, with a notice, and the submodule stays cold | baseline | F | live | gate-6 round 2 finding 1 |
 
 ---
 
@@ -705,6 +711,7 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-66 | A12 gate-6 round 4 — SIGINT/SIGTERM are blocked across the resolve-and-publish critical section, so a signal raised between `resolve_discovered_config()` returning and `args._resolved_machine` being assigned is deferred until after the assignment and still renders one JSON error object; the caller's mask is restored afterwards | baseline | C | live | R7.8; REQ-22; P02 A12 gate-6 round 4 |
 | T-CLI-67 | A12 gate-6 review (CodeRabbit) — `doctor`'s `unchecked` eligibility (a read/parse failure, not a provenance verdict) is composed as an explicit read-failure detail rather than run straight into the other reasons' "present but ..." wording, under both `tracked` (fails) and `any` (passes) | baseline | C | live | R9.10; P02 A12 gate-6 (CodeRabbit, PR #65) |
 | T-CLI-68 | Gate-6 finding 3 — dry-run's own unstaged count hardcoded `--ignore-submodules=dirty` unconditionally, undercounting a submodule under the tool's own `with_submodules` default | baseline | F | live | gate-6 finding 3 |
+| T-CLI-69 | Gate-6 round 2 finding 4 (second half) — the dry-run preview's own staged/unstaged count args need the same explicit `--ignore-submodules=none` flag `collect_inventory`/`materialize` gained, or a `submodule.<name>.ignore` local config makes the preview undercount what the real fork correctly carries | baseline | F | live | gate-6 round 2 finding 4 |
 
 ---
 

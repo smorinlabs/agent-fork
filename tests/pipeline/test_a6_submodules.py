@@ -483,6 +483,49 @@ def test_dry_run_counts_the_submodule_under_the_default_with_submodules(
     )
 
 
+@pytest.mark.matrix("T-CLI-69")
+def test_dry_run_staged_count_is_not_hidden_by_a_per_submodule_ignore_config(
+    repo_scenario,
+):
+    """Gate-6 round 2 finding 4's second half. `materialize()` and
+    `collect_inventory()` both now add an explicit `--ignore-submodules=none`
+    to their staged/unstaged listings whenever `with_submodules` is true
+    (confirmed empirically: `submodule.<name>.ignore=all` local config
+    silently drops a staged gitlink advance from `diff --cached --name-only`,
+    and only the explicit flag, never the `-c diff.ignoreSubmodules=none`
+    pin, restores it). The dry-run preview builds its own, separate count
+    args (`cli.py`) rather than reusing `collect_inventory` -- it needed the
+    identical fix, or the preview would undercount exactly what the real
+    fork (now fixed) correctly carries.
+    """
+    import json
+    import subprocess
+
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="advanced-staged"),))
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(world.parent_path),
+            "config",
+            "submodule.vendor/submodule.ignore",
+            "all",
+        ],
+        env=world.env,
+        check=True,
+    )
+    completed = run_cli(
+        ["fork", "preview", "--no-agent", "--dry-run", "-o", "json"],
+        world.env,
+        world.parent_path,
+    )
+    assert completed.returncode == 0, completed.stderr.decode()
+    document = json.loads(completed.stdout)
+    assert document["plan"]["files_to_carry"]["staged"] == 1
+
+
 @pytest.mark.matrix("T-CLI-38")
 def test_the_new_error_code_is_published_in_its_own_exit_row():
     """Gate-6 finding 7 — a stable identifier nobody published is not stable.

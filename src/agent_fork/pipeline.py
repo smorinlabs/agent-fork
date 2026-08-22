@@ -193,10 +193,12 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             with_ignored=request.with_ignored,
             with_submodules=request.with_submodules,
             inventory=inventory,
+            config_pins=top_level_pins,
             env=env,
         )
         notices.extend(materialized.notices)
         submodule_skipped: tuple[str, ...] = ()
+        submodule_reasoned_skipped: tuple[str, ...] = ()
         if request.with_state and request.with_submodules:
             carried = carry_submodules(
                 request.parent,
@@ -208,6 +210,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             )
             notices.extend(carried.notices)
             submodule_skipped = carried.skipped
+            submodule_reasoned_skipped = carried.reasoned_skipped
         if request.verify:
             verify_fork(
                 creation,
@@ -218,6 +221,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                 parent_state_before=parent_state,
                 submodule_plans=submodule_plans,
                 submodule_skipped=submodule_skipped,
+                submodule_reasoned_skipped=submodule_reasoned_skipped,
                 env=env,
             )
         included = copy_worktree_includes(request.parent, creation.path, env=env)

@@ -259,7 +259,17 @@ def collect_inventory(
             ["ls-files", "--others", "-z", "--ignored", "--exclude-standard"]
         )
     unstaged_args = ["diff", "--name-only", "-z", "--no-renames"]
-    if not with_submodules:
+    staged_args = ["diff", "--cached", "--name-only", "-z", "--no-renames"]
+    if with_submodules:
+        # A `submodule.<name>.ignore` value set in local config (never cloned
+        # into a fresh checkout) silently drops a staged gitlink advance from
+        # this listing -- `-c diff.ignoreSubmodules=none` (`SEMANTIC_PINS`)
+        # cannot override it, only the explicit command-line flag can
+        # (gate-6 round 2 findings 4+5, confirmed empirically against real
+        # Git: `-c` left the listing empty, the flag restored it).
+        unstaged_args.append("--ignore-submodules=none")
+        staged_args.append("--ignore-submodules=none")
+    else:
         # A6a's exemption: a fork that does not carry submodules must not
         # treat their working-tree dirt as ordinary unstaged content (A6b
         # step 6). When submodules ARE carried, this filter is dropped: the
@@ -268,7 +278,7 @@ def collect_inventory(
         # either way (`_manifest_entry` below).
         unstaged_args.append("--ignore-submodules=dirty")
     return Inventory(
-        staged=listing(["diff", "--cached", "--name-only", "-z", "--no-renames"]),
+        staged=listing(staged_args),
         unstaged=listing(unstaged_args),
         intent_to_add=tuple(
             intent_to_add_paths(root, env=env, config_pins=config_pins)

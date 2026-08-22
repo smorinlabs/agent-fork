@@ -264,6 +264,7 @@ class CarryResult:
     carried: tuple[str, ...]
     skipped: tuple[str, ...]
     notices: tuple[str, ...]
+    reasoned_skipped: tuple[str, ...]
 
 
 def _carry_one(
@@ -275,27 +276,40 @@ def _carry_one(
     with_ignored: bool,
     config_pins: Sequence[tuple[str, str]],
     env: Mapping[str, str] | None,
-) -> tuple[list[str], list[str], list[str]]:
+    _path_prefix: str = "",
+) -> tuple[list[str], list[str], list[str], list[str]]:
     """Carry one submodule per the recipe, then recurse into its own nested plan.
 
     Steps below are numbered to match the design doc's "recipe, per gitlink,
     depth-first" (step 0, name/path resolution, already happened at snapshot
     time — the frozen ``plan`` already carries both).
+
+    ``_path_prefix`` is internal recursion state, not a caller-facing
+    parameter (mirrors ``verify_submodules``'s own): every path this call
+    reports (``carried``/``skipped``/``reasoned_skipped`` entries and notice
+    text) is qualified with it at depths below the top, so two different
+    outer submodules that both happen to contain a nested submodule with the
+    same name still produce attributable, distinguishable reports (gate-6
+    round 2 finding 8). Filesystem-path uses (``child / plan.path`` etc.)
+    stay unqualified -- those are relative to this level's own ``child``.
     """
     carried: list[str] = []
     skipped: list[str] = []
     notices: list[str] = []
+    reasoned_skipped: list[str] = []
+    qualified_path = f"{_path_prefix}{plan.path}" if _path_prefix else plan.path
 
     # Step 1 — skip what the parent left cold. Named, not silent: a cold
     # submodule at any nesting depth must not read as full recursion having
-    # happened (design doc, "Notices").
+    # happened (design doc, "Notices"). Not "reasoned" in the sense below:
+    # rung 6 already exempts this case via `plan.initialized is False`.
     if not plan.initialized:
-        skipped.append(plan.path)
+        skipped.append(qualified_path)
         notices.append(
-            f"submodule left cold: {escape_terminal_text(plan.path)} "
+            f"submodule left cold: {escape_terminal_text(qualified_path)} "
             "(the parent itself never initialized it)"
         )
-        return carried, skipped, notices
+        return carried, skipped, notices, reasoned_skipped
 
     # A config name containing `=` cannot be expressed as a command-scoped
     # `-c submodule.<name>.url=...` override: Git's own `-c key=value` syntax
@@ -303,16 +317,22 @@ def _carry_one(
     # (gate-6 finding 5). Applying the override anyway would silently do
     # nothing, falling through to whatever `.gitmodules` itself names as the
     # URL -- exactly the uncontrolled remote this recipe exists to avoid.
-    # Skip rather than risk that.
+    # Skip rather than risk that. This is a REASONED skip (gate-6 round 2
+    # finding 1): unlike an unexpected/silent skip, it must not fail
+    # recursive verification -- the submodule was initialized in the parent
+    # (`plan.initialized` is True) but is deliberately left cold here, so
+    # both rung 1 (init parity) and rung 6 (nested-plan completeness) need to
+    # know it was excused, not missed.
     if "=" in plan.name:
-        skipped.append(plan.path)
+        skipped.append(qualified_path)
+        reasoned_skipped.append(qualified_path)
         notices.append(
-            f"submodule skipped: {escape_terminal_text(plan.path)} "
+            f"submodule skipped: {escape_terminal_text(qualified_path)} "
             f"(its config name {escape_terminal_text(plan.name)!r} contains "
             "'=', which cannot be expressed as a command-scoped -c override; "
             "carrying it could otherwise contact its real remote)"
         )
-        return carried, skipped, notices
+        return carried, skipped, notices, reasoned_skipped
 
     child_checkout = child / plan.path
     literal_path = f":(literal){plan.path}"
@@ -347,6 +367,20 @@ def _carry_one(
             env=env,
             config_pins=config_pins,
         )
+    else:
+        # `submodule update --init` always writes a persistent
+        # remote.origin.url into the child, pointed at whatever the
+        # init-scoped `-c submodule.<name>.url` pin named -- the parent's
+        # own local checkout path (gate-6 round 2 finding 7, confirmed
+        # empirically). When the parent's own submodule had no origin at
+        # all, that synthetic, machine-local origin must not survive: the
+        # child should match the parent exactly, with none.
+        run_git(
+            child_checkout,
+            ["remote", "remove", "origin"],
+            env=env,
+            config_pins=config_pins,
+        )
 
     # Step 4 — match the checked-out commit. This is what makes an unstaged
     # gitlink advance (cell `c`) representable at all.
@@ -372,18 +406,25 @@ def _carry_one(
         config_pins=config_pins,
         env=env,
     )
-    carried.append(plan.path)
+    carried.append(qualified_path)
+    remote_note = (
+        "only remote.origin.url restored"
+        if plan.remote_url is not None
+        else "no remote.origin.url to restore, origin removed"
+    )
     notices.append(
-        f"submodule carried: {escape_terminal_text(plan.path)} "
-        "(only remote.origin.url restored, not fetch refspecs or "
+        f"submodule carried: {escape_terminal_text(qualified_path)} "
+        f"({remote_note}, not fetch refspecs or "
         f"submodule.{escape_terminal_text(plan.name)}.active)"
     )
 
     # Step 6 — recurse for nested submodules, carrying the frozen plan for
     # that depth. The outer submodule's own checkout becomes the "parent" and
-    # "child" for its own nested submodules.
+    # "child" for its own nested submodules. `_path_prefix` qualification
+    # happens inside the recursive call itself now, so its results arrive
+    # already qualified -- no more post-hoc string-prefixing here.
     for nested_plan in plan.nested:
-        nested_carried, nested_skipped, nested_notices = _carry_one(
+        nested_carried, nested_skipped, nested_notices, nested_reasoned = _carry_one(
             parent / plan.path,
             child_checkout,
             nested_plan,
@@ -391,12 +432,14 @@ def _carry_one(
             with_ignored=with_ignored,
             config_pins=config_pins,
             env=env,
+            _path_prefix=f"{qualified_path}/",
         )
-        carried.extend(f"{plan.path}/{item}" for item in nested_carried)
-        skipped.extend(f"{plan.path}/{item}" for item in nested_skipped)
+        carried.extend(nested_carried)
+        skipped.extend(nested_skipped)
         notices.extend(nested_notices)
+        reasoned_skipped.extend(nested_reasoned)
 
-    return carried, skipped, notices
+    return carried, skipped, notices, reasoned_skipped
 
 
 def carry_submodules(
@@ -421,8 +464,9 @@ def carry_submodules(
     carried: list[str] = []
     skipped: list[str] = []
     notices: list[str] = []
+    reasoned_skipped: list[str] = []
     for plan in plans:
-        plan_carried, plan_skipped, plan_notices = _carry_one(
+        plan_carried, plan_skipped, plan_notices, plan_reasoned = _carry_one(
             parent,
             child,
             plan,
@@ -434,7 +478,10 @@ def carry_submodules(
         carried.extend(plan_carried)
         skipped.extend(plan_skipped)
         notices.extend(plan_notices)
-    return CarryResult(tuple(carried), tuple(skipped), tuple(notices))
+        reasoned_skipped.extend(plan_reasoned)
+    return CarryResult(
+        tuple(carried), tuple(skipped), tuple(notices), tuple(reasoned_skipped)
+    )
 
 
 def verify_submodules(
@@ -444,6 +491,7 @@ def verify_submodules(
     *,
     with_ignored: bool = False,
     skipped: tuple[str, ...] = (),
+    reasoned_skipped: tuple[str, ...] = (),
     config_pins: Sequence[tuple[str, str]] = (),
     env: Mapping[str, str] | None = None,
     _path_prefix: str = "",
@@ -470,6 +518,23 @@ def verify_submodules(
     for plan in plans:
         child_checkout = child / plan.path
         qualified_path = f"{_path_prefix}{plan.path}" if _path_prefix else plan.path
+
+        # A reasoned skip (gate-6 round 2 finding 1, e.g. the `=`-in-name
+        # case) is a deliberate decision, not a defect: it must not fail
+        # rung 6 the way a silent/unexpected skip does. The one thing still
+        # worth asserting is that the child actually stayed cold, the same
+        # shape as the "parent left it cold" case below.
+        if qualified_path in reasoned_skipped:
+            if (child_checkout / ".git").exists():
+                differences.append(
+                    Difference(
+                        qualified_path,
+                        "submodule-reasoned-skip-initialized",
+                        "expected the submodule to stay cold (reasoned skip), "
+                        "but the child initialized it",
+                    )
+                )
+            continue
 
         # Rung 6 — nested-plan completeness: the frozen plan expected this
         # submodule to be carried, but the carry step's own report says it
@@ -612,6 +677,7 @@ def verify_submodules(
                 plan.nested,
                 with_ignored=with_ignored,
                 skipped=skipped,
+                reasoned_skipped=reasoned_skipped,
                 config_pins=config_pins,
                 env=env,
                 _path_prefix=f"{qualified_path}/",

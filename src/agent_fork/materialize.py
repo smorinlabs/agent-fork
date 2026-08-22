@@ -144,17 +144,24 @@ def materialize(
                 config_pins=config_pins,
             )
         ita_paths = list(inventory.intent_to_add)
+        staged_args = [
+            "diff-index",
+            "-p",
+            "--binary",
+            "--no-color",
+            "--cached",
+            "--ita-invisible-in-index",
+        ]
+        if with_submodules:
+            # Mirrors collect_inventory's own flag: a local
+            # `submodule.<name>.ignore` value suppresses this patch for a
+            # staged gitlink advance and the `-c` pin cannot defeat it
+            # (gate-6 round 2 findings 4+5).
+            staged_args.append("--ignore-submodules=none")
+        staged_args.append("HEAD")
         staged = run_git(
             parent,
-            [
-                "diff-index",
-                "-p",
-                "--binary",
-                "--no-color",
-                "--cached",
-                "--ita-invisible-in-index",
-                "HEAD",
-            ],
+            staged_args,
             env=env,
             config_pins=config_pins,
         ).stdout
@@ -192,6 +199,8 @@ def materialize(
             "--no-color",
             "--ita-invisible-in-index",
         ]
+        if with_submodules:
+            unstaged_args.append("--ignore-submodules=none")
         if ita_paths:
             unstaged_args.extend(
                 [

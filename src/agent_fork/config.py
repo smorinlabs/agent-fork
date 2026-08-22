@@ -139,6 +139,7 @@ class ConfigFinding:
 KEY_SPECS: tuple[KeySpec, ...] = (
     KeySpec("fork.with_state", "with_state", "fork", "bool"),
     KeySpec("fork.with_ignored", "with_ignored", "fork", "bool"),
+    KeySpec("fork.with_submodules", "with_submodules", "fork", "bool"),
     KeySpec(
         "fork.branch_prefix",
         "branch_prefix",

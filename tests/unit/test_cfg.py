@@ -736,3 +736,47 @@ def test_with_state_restored_by_a_later_source_restores_with_submodules_default(
     )
     assert resolved.with_state is True
     assert resolved.with_submodules is True
+
+
+@pytest.mark.matrix("T-CFG-46")
+def test_with_submodules_is_a_registered_config_key(repo_scenario):
+    """Gate-6 round 2 finding 3 -- A11 introduced `KEY_SPECS`, the registry
+    `config_get`/`config_set` resolve every key through, but never gained an
+    entry for `with_submodules` (it did not exist on `main` yet when A11
+    shipped). Both the bare and dotted forms of a documented, effective
+    config key must resolve, not raise `unknown config key`.
+    """
+    from agent_fork.config import (
+        ConfigError,
+        ResolvedConfig,
+        config_get,
+        set_user_value,
+    )
+
+    base = ResolvedConfig(
+        with_state=True,
+        with_ignored=False,
+        with_submodules=True,
+        branch_prefix="fork/",
+        worktree_location="sibling",
+        worktree_location_explicit=False,
+        agent_mode="auto",
+        verify=True,
+        copy=False,
+        output="text",
+        config_path=None,
+        claude_extra_args=(),
+        codex_extra_args=(),
+        codex_session_name_resolution=False,
+        setup_hook_policy="tracked",
+        setup_hook_timeout=300,
+    )
+    assert config_get(base, "with_submodules") == "true"
+    assert config_get(base, "fork.with_submodules") == "true"
+
+    path = repo_scenario().parent_path / "cfg.toml"
+    set_user_value(path, "with_submodules", "false")
+    assert path.read_text().strip() == "[fork]\nwith_submodules = false"
+    set_user_value(path, "fork.with_submodules", "true")
+    with pytest.raises(ConfigError):
+        config_get(base, "with_submodule")
