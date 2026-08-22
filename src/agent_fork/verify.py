@@ -201,12 +201,13 @@ def verify_fork(
             env=env,
         )
         if submodule_differences:
+            first_failure = not failures
             failures.append(_labelled("submodule-content-match", submodule_differences))
             failed_checks.append(
                 _failed_check(
                     "submodule-content-match",
                     submodule_differences,
-                    primary=not failures,
+                    primary=first_failure,
                 )
             )
 

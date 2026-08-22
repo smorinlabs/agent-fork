@@ -206,9 +206,7 @@ def test_carry_recurses_into_a_nested_submodule(repo_scenario):
     child = world.parent_path.parent / "a6b-nested"
     result = _carry(world, child)
     assert "vendor/submodule" in result.carried
-    assert (child / "vendor/submodule/vendor/submodule/inner/.git").exists() or (
-        child / "vendor/submodule/inner/.git"
-    ).exists()
+    assert (child / "vendor/submodule/inner/.git").exists()
 
 
 @pytest.mark.matrix("T-MAT-49")

@@ -778,5 +778,6 @@ def test_with_submodules_is_a_registered_config_key(repo_scenario):
     set_user_value(path, "with_submodules", "false")
     assert path.read_text().strip() == "[fork]\nwith_submodules = false"
     set_user_value(path, "fork.with_submodules", "true")
+    assert path.read_text().strip() == "[fork]\nwith_submodules = true"
     with pytest.raises(ConfigError):
         config_get(base, "with_submodule")

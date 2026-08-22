@@ -402,6 +402,20 @@ def validate_fork_guards(
             "unmerged_index",
             f"unmerged index paths: {rendered}; resolve conflicts and re-run",
         )
+    if with_state and with_submodules:
+        from agent_fork.submodules import initialized_submodules_missing_metadata
+
+        missing_metadata = initialized_submodules_missing_metadata(
+            info.parent_path, env=env
+        )
+        if missing_metadata:
+            listed = ", ".join(escape_terminal_text(path) for path in missing_metadata)
+            raise PreconditionError(
+                "submodule_unrepresentable",
+                "initialized submodule has no matching .gitmodules path entry: "
+                f"{listed}; restore its .gitmodules metadata, or fork without "
+                "carrying submodules (--no-with-submodules)",
+            )
     # Last, because every guard above names a state the user can act on directly.
     # `gitlink_paths` reads mode-160000 entries from every index stage, so a
     # conflicted submodule would otherwise be refused here first, with a remedy

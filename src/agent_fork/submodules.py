@@ -227,6 +227,39 @@ def _snapshot_recursive(
     )
 
 
+def initialized_submodules_missing_metadata(
+    root: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+    _path_prefix: str = "",
+) -> tuple[str, ...]:
+    """List initialized gitlinks with no matching `.gitmodules` path entry.
+
+    A cold gitlink needs no metadata because carry deliberately leaves it cold.
+    An initialized one does: `git submodule update --init` refuses without the
+    path-to-name mapping. Walk initialized children recursively so the
+    pre-mutation guard covers the same depth as the carry recipe.
+    """
+    names = _gitmodules_names(root, env=env)
+    missing: list[str] = []
+    for path in gitlink_paths(root, env=env):
+        checkout = root / path
+        if not (checkout / ".git").exists():
+            continue
+        qualified_path = f"{_path_prefix}{path}" if _path_prefix else path
+        if path not in names:
+            missing.append(qualified_path)
+            continue
+        missing.extend(
+            initialized_submodules_missing_metadata(
+                checkout,
+                env=env,
+                _path_prefix=f"{qualified_path}/",
+            )
+        )
+    return tuple(missing)
+
+
 def snapshot_submodules(
     parent: Path,
     *,

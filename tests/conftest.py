@@ -754,7 +754,11 @@ def _apply_states(handle: WorldHandle, states: tuple[StateSpec, ...]) -> None:
                 path,
                 spec.path,
                 spec.target,
-                committed="committed" in extra,
+                # URL rewrites used to commit the gitlink accidentally via an
+                # unscoped `git commit`. Keep the fixture's established HEAD
+                # shape deliberately while `_rewrite_submodule_url` commits
+                # only `.gitmodules` and preserves unrelated staged state.
+                committed="committed" in extra or "url_kind" in extra,
             )
         elif spec.kind == "worktreeinclude":
             path.write_text(f"{spec.target}\n")
@@ -858,7 +862,15 @@ def _rewrite_submodule_url(
         url,
     )
     _run_git(handle.env, parent, "add", "--", ".gitmodules")
-    _run_git(handle.env, parent, "commit", "-m", f"repoint {config_name} url")
+    _run_git(
+        handle.env,
+        parent,
+        "commit",
+        "-m",
+        f"repoint {config_name} url",
+        "--",
+        ".gitmodules",
+    )
     _run_git(handle.env, parent, "submodule", "sync")
 
 

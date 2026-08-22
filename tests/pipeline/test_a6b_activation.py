@@ -79,10 +79,7 @@ def test_opt_out_reproduces_a6as_original_behaviour_exactly(repo_scenario):
     world = repo_scenario("plain@main", states=(submodule(dirty="modified"),))
     result = _fork(world, "opt-out", with_submodules=False)
     assert not (result.creation.path / "vendor/submodule/.git").exists()
-    assert any(
-        "not carried" in notice or "vendor/submodule" in notice
-        for notice in result.notices
-    )
+    assert any("not carried" in notice for notice in result.notices)
 
 
 @pytest.mark.matrix("T-GRD-27")
@@ -124,6 +121,56 @@ def test_dry_run_does_not_refuse_cell_c_under_the_default(repo_scenario):
         world.parent_path,
     )
     assert completed.returncode == 0, completed.stderr.decode()
+
+
+@pytest.mark.matrix("T-GRD-30")
+def test_initialized_gitlink_without_metadata_refuses_before_mutation(repo_scenario):
+    """An initialized gitlink cannot be carried without its `.gitmodules` map.
+
+    Both the real fork and dry-run must return the typed refusal before a branch
+    or destination exists. Falling through to `git submodule update` after
+    worktree creation turns this malformed-but-possible repository state into a
+    late Git exit 128 and needless rollback.
+    """
+    from agent_fork.errors import PreconditionError
+    from conftest import run_cli
+
+    world = repo_scenario("plain@main", states=(submodule(committed=True),))
+    _git(world, world.parent_path, "rm", "-q", "--", ".gitmodules")
+    _git(world, world.parent_path, "commit", "-qm", "remove submodule metadata")
+    assert (world.parent_path / "vendor/submodule/.git").exists()
+
+    destination = world.parent_path.parent / "missing-metadata"
+    with pytest.raises(PreconditionError) as raised:
+        _fork(world, "missing-metadata")
+    assert raised.value.code == "submodule_unrepresentable"
+    assert "vendor/submodule" in str(raised.value)
+    assert not destination.exists()
+    branch = _git(
+        world,
+        world.parent_path,
+        "show-ref",
+        "--verify",
+        "--quiet",
+        "refs/heads/fork/missing-metadata",
+        check=False,
+    )
+    assert branch.returncode != 0
+
+    preview = run_cli(
+        [
+            "fork",
+            "missing-metadata-preview",
+            "--no-agent",
+            "--dry-run",
+            "-o",
+            "json",
+        ],
+        world.env,
+        world.parent_path,
+    )
+    assert preview.returncode == 5
+    assert b'"code":"submodule_unrepresentable"' in preview.stderr
 
 
 @pytest.mark.matrix("T-VER-42")
@@ -204,6 +251,34 @@ def test_recursive_verification_catches_a_wrong_submodule_head(repo_scenario):
         for entry in cast("list[dict[str, object]]", check["differences"])
     }
     assert "submodule-head" in kinds
+
+
+@pytest.mark.matrix("T-VER-51")
+def test_submodule_only_failure_is_marked_primary(repo_scenario, monkeypatch):
+    """A recursive-only difference owns the structured primary flag."""
+    from agent_fork.content import Difference
+    from agent_fork.errors import VerificationError
+
+    world = repo_scenario("plain@main", states=(submodule(committed=True),))
+    monkeypatch.setattr(
+        "agent_fork.verify.verify_submodules",
+        lambda *args, **kwargs: [
+            Difference(
+                "vendor/submodule",
+                "submodule-detached",
+                "injected recursive-only difference",
+            )
+        ],
+    )
+
+    with pytest.raises(VerificationError) as raised:
+        _fork(world, "submodule-primary")
+
+    error = raised.value
+    assert error.details is not None
+    checks = cast("list[dict[str, object]]", error.details["failed_checks"])
+    assert [check["check"] for check in checks] == ["submodule-content-match"]
+    assert checks[0]["primary"] is True
 
 
 @pytest.mark.matrix("T-OUT-29")
