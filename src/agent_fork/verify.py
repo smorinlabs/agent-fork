@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from agent_fork.content import (
     CarriedState,
     Difference,
+    SkipRecord,
     capture_state,
     collect_inventory,
     compare_states,
@@ -67,6 +68,35 @@ def _worktree_pairs(creation: WorktreeCreation, *, env: Mapping[str, str] | None
     }
 
 
+def _submodule_roots_with_entry_skips(
+    plans: tuple[SubmoduleSnapshot, ...], skipped: tuple[SkipRecord, ...]
+) -> tuple[str, ...]:
+    """Name top-level gitlinks whose recursive content has an allowed skip."""
+    skipped_paths = tuple(str(getattr(record, "path", record)) for record in skipped)
+    return tuple(
+        plan.path
+        for plan in plans
+        if any(path.startswith(f"{plan.path}/") for path in skipped_paths)
+    )
+
+
+def _without_top_level_paths(
+    state: CarriedState, omitted: tuple[str, ...]
+) -> CarriedState:
+    """Remove exact top-level paths delegated to recursive verification."""
+    omitted_set = set(omitted)
+    return CarriedState(
+        paths=tuple(path for path in state.paths if path not in omitted_set),
+        index=tuple(entry for entry in state.index if entry.path not in omitted_set),
+        manifest=tuple(
+            entry for entry in state.manifest if entry.path not in omitted_set
+        ),
+        skipped=tuple(
+            record for record in state.skipped if record.path not in omitted_set
+        ),
+    )
+
+
 def verify_fork(
     creation: WorktreeCreation,
     *,
@@ -78,6 +108,7 @@ def verify_fork(
     submodule_plans: tuple[SubmoduleSnapshot, ...] = (),
     submodule_skipped: tuple[str, ...] = (),
     submodule_reasoned_skipped: tuple[str, ...] = (),
+    submodule_entry_skips: tuple[SkipRecord, ...] = (),
     skipped: tuple[object, ...] = (),
     env: Mapping[str, str] | None = None,
 ) -> None:
@@ -91,6 +122,9 @@ def verify_fork(
     """
     failures: list[str] = []
     failed_checks: list[dict[str, object]] = []
+    recursive_skip_roots = _submodule_roots_with_entry_skips(
+        submodule_plans, submodule_entry_skips
+    )
     head = _text(
         run_git(creation.path, ["rev-parse", "--verify", "HEAD"], env=env).stdout
     )
@@ -129,12 +163,18 @@ def verify_fork(
     # A skipped entry is in the parent and absent from the child by design, so
     # exclude it at the query boundary. Literal pathspecs keep metacharacters
     # in a filename from acting as patterns (P02 A5).
-    if skipped:
-        status_args.extend(["--", "."])
-        status_args.extend(
-            ":(exclude,literal)" + str(getattr(record, "path", record))
-            for record in skipped
+    status_exclusions = tuple(
+        sorted(
+            {
+                *(str(getattr(record, "path", record)) for record in skipped),
+                *recursive_skip_roots,
+            },
+            key=lambda path: path.encode("utf-8", "surrogateescape"),
         )
+    )
+    if status_exclusions:
+        status_args.extend(["--", "."])
+        status_args.extend(":(exclude,literal)" + path for path in status_exclusions)
 
     # The child's carried submodule is a fresh `submodule update --init`, so
     # it never inherits the parent's own submodule's local git config
@@ -178,7 +218,11 @@ def verify_fork(
             env=env,
             config_pins=top_level_pins,
         )
-        drift = compare_states(parent_state_before, parent_after)
+        expected_state = _without_top_level_paths(
+            parent_state_before, recursive_skip_roots
+        )
+        parent_after = _without_top_level_paths(parent_after, recursive_skip_roots)
+        drift = compare_states(expected_state, parent_after)
         child_state = capture_state(
             creation.path,
             collect_inventory(
@@ -193,7 +237,8 @@ def verify_fork(
             env=env,
             config_pins=top_level_pins,
         )
-        content = compare_states(parent_state_before, child_state)
+        child_state = _without_top_level_paths(child_state, recursive_skip_roots)
+        content = compare_states(expected_state, child_state)
         if drift:
             failures.append(_labelled("parent-content", drift))
             failed_checks.append(_failed_check("parent-content", drift, primary=True))

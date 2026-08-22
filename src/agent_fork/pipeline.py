@@ -17,7 +17,12 @@ from agent_fork.agents import (
     preflight_agent,
     preflight_git,
 )
-from agent_fork.content import capture_state, collect_inventory, sentinel_for
+from agent_fork.content import (
+    SkipRecord,
+    capture_state,
+    collect_inventory,
+    sentinel_for,
+)
 from agent_fork.errors import (
     PreconditionError,
     StrictSkipRefusedError,
@@ -243,8 +248,10 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         )
         notices.extend(materialized.notices)
         skipped.extend(materialized.skipped)
+        verification_skipped = tuple(skipped)
         submodule_skipped: tuple[str, ...] = ()
         submodule_reasoned_skipped: tuple[str, ...] = ()
+        submodule_entry_skips: tuple[SkipRecord, ...] = ()
         if request.with_state and request.with_submodules:
             carried = carry_submodules(
                 request.parent,
@@ -255,6 +262,8 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                 env=env,
             )
             notices.extend(carried.notices)
+            skipped.extend(carried.entry_skips)
+            submodule_entry_skips = carried.entry_skips
             submodule_skipped = carried.skipped
             submodule_reasoned_skipped = carried.reasoned_skipped
         if request.verify:
@@ -268,7 +277,8 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                 submodule_plans=submodule_plans,
                 submodule_skipped=submodule_skipped,
                 submodule_reasoned_skipped=submodule_reasoned_skipped,
-                skipped=tuple(skipped),
+                submodule_entry_skips=submodule_entry_skips,
+                skipped=verification_skipped,
                 env=env,
             )
         included = copy_worktree_includes(

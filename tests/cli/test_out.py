@@ -1023,3 +1023,31 @@ def test_unsafe_submodule_transport_has_exact_json_details(repo_scenario):
             },
         }
     }
+
+
+@pytest.mark.matrix("T-OUT-35")
+def test_recursive_skip_uses_qualified_json_and_stderr_path(repo_scenario):
+    """A successful recursive skip crosses the CLI boundary exactly once."""
+    from conftest import run_cli, submodule
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="untracked"),))
+    locked = world.parent_path / "vendor/submodule/loose.txt"
+    os.chmod(locked, 0)
+    try:
+        completed = run_cli(
+            ["fork", "recursive-skip-json", "--no-agent", "--json"],
+            world.env,
+            world.parent_path,
+        )
+    finally:
+        os.chmod(locked, 0o644)
+
+    assert completed.returncode == 0
+    document = json.loads(completed.stdout)
+    qualified = "vendor/submodule/loose.txt"
+    notice = f"skipped entry, not carried: {qualified}"
+    assert document["notices"].count(notice) == 1
+    assert document["skipped"] == [
+        {"path": qualified, "reason": "unreadable", "phase": "capture"}
+    ]
+    assert completed.stderr.decode().count(notice) == 1

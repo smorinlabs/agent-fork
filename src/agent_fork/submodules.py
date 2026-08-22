@@ -25,13 +25,14 @@ from agent_fork.content import (
     CarriedState,
     Difference,
     Inventory,
+    SkipRecord,
     capture_state,
     collect_inventory,
     compare_states,
     gitlink_paths,
 )
 from agent_fork.git import run_git
-from agent_fork.materialize import materialize
+from agent_fork.materialize import materialize, skip_notices
 from agent_fork.text import escape_terminal_text
 
 # Local configuration inside a parent's submodule is not cloned into the
@@ -467,12 +468,27 @@ def snapshot_submodules(
 
 @dataclass(frozen=True)
 class CarryResult:
-    """What one `carry_submodules` call actually did, recursively flattened."""
+    """What one `carry_submodules` call actually did, recursively flattened.
+
+    ``entry_skips`` uses paths qualified from the top-level repository, so its
+    records can join the pipeline's top-level skip policy without ambiguity.
+    """
 
     carried: tuple[str, ...]
     skipped: tuple[str, ...]
     notices: tuple[str, ...]
     reasoned_skipped: tuple[str, ...]
+    entry_skips: tuple[SkipRecord, ...]
+
+
+def _qualify_skip(record: SkipRecord, prefix: str) -> SkipRecord:
+    """Translate a submodule-local skip into the top-level path domain."""
+    return SkipRecord(
+        f"{prefix}/{record.path}",
+        record.reason,
+        record.phase,
+        record.sentinel,
+    )
 
 
 def _carry_one(
@@ -485,7 +501,7 @@ def _carry_one(
     config_pins: Sequence[tuple[str, str]],
     env: Mapping[str, str] | None,
     _path_prefix: str = "",
-) -> tuple[list[str], list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str], list[str], list[SkipRecord]]:
     """Carry one submodule per the recipe, then recurse into its own nested plan.
 
     Steps below are numbered to match the design doc's "recipe, per gitlink,
@@ -505,6 +521,7 @@ def _carry_one(
     skipped: list[str] = []
     notices: list[str] = []
     reasoned_skipped: list[str] = []
+    entry_skips: list[SkipRecord] = []
     qualified_path = f"{_path_prefix}{plan.path}" if _path_prefix else plan.path
 
     # Step 1 — skip what the parent left cold. Named, not silent: a cold
@@ -517,7 +534,7 @@ def _carry_one(
             f"submodule left cold: {escape_terminal_text(qualified_path)} "
             "(the parent itself never initialized it)"
         )
-        return carried, skipped, notices, reasoned_skipped
+        return carried, skipped, notices, reasoned_skipped, entry_skips
 
     # A config name containing `=` cannot be expressed as a command-scoped
     # `-c submodule.<name>.url=...` override: Git's own `-c key=value` syntax
@@ -540,7 +557,7 @@ def _carry_one(
             "'=', which cannot be expressed as a command-scoped -c override; "
             "carrying it could otherwise contact its real remote)"
         )
-        return carried, skipped, notices, reasoned_skipped
+        return carried, skipped, notices, reasoned_skipped, entry_skips
 
     child_checkout = child / plan.path
     literal_path = f":(literal){plan.path}"
@@ -612,16 +629,24 @@ def _carry_one(
     # with_submodules=True: this submodule's own nested gitlinks are carried
     # too, via step 6's recursion below -- materialize's default loss notice
     # would otherwise wrongly claim they were not.
-    materialize(
+    captured_skips = plan.content.skipped if plan.content is not None else ()
+    materialized = materialize(
         parent / plan.path,
         child_checkout,
         with_state=with_state,
         with_ignored=with_ignored,
         with_submodules=True,
         inventory=plan.inventory,
+        skipped=captured_skips,
         config_pins=config_pins,
         env=env,
     )
+    qualified_skips = tuple(
+        _qualify_skip(record, qualified_path)
+        for record in (*captured_skips, *materialized.skipped)
+    )
+    entry_skips.extend(qualified_skips)
+    notices.extend(skip_notices(qualified_skips))
     carried.append(qualified_path)
     remote_note = (
         "only remote.origin.url restored"
@@ -640,7 +665,13 @@ def _carry_one(
     # happens inside the recursive call itself now, so its results arrive
     # already qualified -- no more post-hoc string-prefixing here.
     for nested_plan in plan.nested:
-        nested_carried, nested_skipped, nested_notices, nested_reasoned = _carry_one(
+        (
+            nested_carried,
+            nested_skipped,
+            nested_notices,
+            nested_reasoned,
+            nested_entry_skips,
+        ) = _carry_one(
             parent / plan.path,
             child_checkout,
             nested_plan,
@@ -654,8 +685,9 @@ def _carry_one(
         skipped.extend(nested_skipped)
         notices.extend(nested_notices)
         reasoned_skipped.extend(nested_reasoned)
+        entry_skips.extend(nested_entry_skips)
 
-    return carried, skipped, notices, reasoned_skipped
+    return carried, skipped, notices, reasoned_skipped, entry_skips
 
 
 def carry_submodules(
@@ -681,8 +713,15 @@ def carry_submodules(
     skipped: list[str] = []
     notices: list[str] = []
     reasoned_skipped: list[str] = []
+    entry_skips: list[SkipRecord] = []
     for plan in plans:
-        plan_carried, plan_skipped, plan_notices, plan_reasoned = _carry_one(
+        (
+            plan_carried,
+            plan_skipped,
+            plan_notices,
+            plan_reasoned,
+            plan_entry_skips,
+        ) = _carry_one(
             parent,
             child,
             plan,
@@ -695,8 +734,13 @@ def carry_submodules(
         skipped.extend(plan_skipped)
         notices.extend(plan_notices)
         reasoned_skipped.extend(plan_reasoned)
+        entry_skips.extend(plan_entry_skips)
     return CarryResult(
-        tuple(carried), tuple(skipped), tuple(notices), tuple(reasoned_skipped)
+        carried=tuple(carried),
+        skipped=tuple(skipped),
+        notices=tuple(notices),
+        reasoned_skipped=tuple(reasoned_skipped),
+        entry_skips=tuple(entry_skips),
     )
 
 

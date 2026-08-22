@@ -203,7 +203,7 @@ def submodule_loss_notices(
     return (f"submodule working-tree changes are not carried: {listed}",)
 
 
-def _skip_notices(skipped: tuple[object, ...]) -> tuple[str, ...]:
+def skip_notices(skipped: tuple[object, ...]) -> tuple[str, ...]:
     """One notice per skipped entry, naming it.
 
     A count alone is not enough: the requirement is that the run says exactly
@@ -372,6 +372,6 @@ def materialize(
         - sum(record.path in ignored for record in newly_skipped),
         intent_to_add=tuple(ita_paths),
         notices=(submodule_loss_notices(parent, env=env) if not with_submodules else ())
-        + _skip_notices((*skipped, *newly_skipped)),
+        + skip_notices((*skipped, *newly_skipped)),
         skipped=tuple(newly_skipped),
     )

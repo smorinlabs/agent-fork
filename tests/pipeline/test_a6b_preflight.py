@@ -7,6 +7,7 @@ and unmerged indexes below the top-level repository.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 from collections.abc import Iterator
@@ -37,6 +38,8 @@ def _fork(
     env=None,
     with_state: bool = True,
     with_submodules: bool = True,
+    verify: bool = True,
+    strict: bool = False,
 ):
     from agent_fork.pipeline import ForkRequest, fork
 
@@ -49,6 +52,8 @@ def _fork(
             agent=None,
             with_state=with_state,
             with_submodules=with_submodules,
+            verify=verify,
+            strict=strict,
         ),
         env=world.env if env is None else env,
     )
@@ -355,6 +360,83 @@ def test_carry_preserves_remote_url_trailing_spaces_byte_for_byte(repo_scenario)
     carry_submodules(world.parent_path, child, plans, with_state=True, env=world.env)
 
     assert _remote_urls(world, child / "vendor/submodule") == expected
+
+
+@pytest.mark.matrix("T-MAT-74")
+def test_recursive_capture_skip_is_qualified_and_reported(repo_scenario):
+    """A snapshot skip inside a submodule reaches the public fork result."""
+    world = repo_scenario("plain@main", states=(submodule(dirty="untracked"),))
+    locked = world.parent_path / "vendor/submodule/loose.txt"
+    os.chmod(locked, 0)
+    try:
+        result = _fork(world, "submodule-capture-skip")
+    finally:
+        os.chmod(locked, 0o644)
+
+    qualified = "vendor/submodule/loose.txt"
+    assert result.skipped == (
+        {"path": qualified, "reason": "unreadable", "phase": "capture"},
+    )
+    assert result.notices.count(f"skipped entry, not carried: {qualified}") == 1
+    assert not (result.creation.path / qualified).exists()
+
+
+@pytest.mark.matrix("T-MAT-75")
+def test_recursive_materialize_skip_is_qualified_and_reported(
+    repo_scenario, monkeypatch
+):
+    """A skip first found by recursive transport is not discarded."""
+    from agent_fork import submodules
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="untracked"),))
+    checkout = world.parent_path / "vendor/submodule"
+    locked = checkout / "loose.txt"
+    original_materialize = submodules.materialize
+
+    def lock_before_materialize(parent, child, **kwargs):
+        if parent == checkout:
+            os.chmod(locked, 0)
+        return original_materialize(parent, child, **kwargs)
+
+    monkeypatch.setattr(submodules, "materialize", lock_before_materialize)
+    try:
+        result = _fork(world, "submodule-materialize-skip", verify=False)
+    finally:
+        os.chmod(locked, 0o644)
+
+    qualified = "vendor/submodule/loose.txt"
+    assert result.skipped == (
+        {"path": qualified, "reason": "unreadable", "phase": "materialize"},
+    )
+    assert result.notices.count(f"skipped entry, not carried: {qualified}") == 1
+    assert not (result.creation.path / qualified).exists()
+
+
+@pytest.mark.matrix("T-MAT-76")
+def test_strict_refuses_recursive_capture_skip_and_rolls_back(repo_scenario):
+    """Strict mode treats an inner entry skip like a top-level entry skip."""
+    from agent_fork.errors import StrictSkipRefusedError
+
+    world = repo_scenario("plain@main", states=(submodule(dirty="untracked"),))
+    locked = world.parent_path / "vendor/submodule/loose.txt"
+    os.chmod(locked, 0)
+    try:
+        with pytest.raises(StrictSkipRefusedError) as caught:
+            _fork(world, "submodule-strict-skip", strict=True)
+    finally:
+        os.chmod(locked, 0o644)
+
+    assert caught.value.details == {
+        "skipped": [
+            {
+                "path": "vendor/submodule/loose.txt",
+                "reason": "unreadable",
+                "phase": "capture",
+            }
+        ],
+        "count": 1,
+    }
+    _assert_fork_absent(world, "submodule-strict-skip")
 
 
 @pytest.mark.matrix("T-VER-58")
