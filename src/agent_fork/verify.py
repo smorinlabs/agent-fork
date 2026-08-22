@@ -78,6 +78,7 @@ def verify_fork(
     submodule_plans: tuple[SubmoduleSnapshot, ...] = (),
     submodule_skipped: tuple[str, ...] = (),
     submodule_reasoned_skipped: tuple[str, ...] = (),
+    skipped: tuple[object, ...] = (),
     env: Mapping[str, str] | None = None,
 ) -> None:
     """Run the complete base ladder and topology-dependent assertions.
@@ -125,6 +126,16 @@ def verify_fork(
         status_args.append("--ignore-submodules=dirty")
     if with_ignored:
         status_args.append("--ignored")
+    # A skipped entry is in the parent and absent from the child by design, so
+    # exclude it at the query boundary. Literal pathspecs keep metacharacters
+    # in a filename from acting as patterns (P02 A5).
+    if skipped:
+        status_args.extend(["--", "."])
+        status_args.extend(
+            ":(exclude,literal)" + str(getattr(record, "path", record))
+            for record in skipped
+        )
+
     # The child's carried submodule is a fresh `submodule update --init`, so
     # it never inherits the parent's own submodule's local git config
     # (nothing copies arbitrary config, only tracked/working-tree state) --
@@ -163,6 +174,7 @@ def verify_fork(
                 env=env,
                 config_pins=top_level_pins,
             ),
+            known_skipped=skipped,
             env=env,
             config_pins=top_level_pins,
         )
@@ -177,6 +189,7 @@ def verify_fork(
                 env=env,
                 config_pins=top_level_pins,
             ),
+            known_skipped=skipped,
             env=env,
             config_pins=top_level_pins,
         )

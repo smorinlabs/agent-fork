@@ -17,8 +17,12 @@ from agent_fork.agents import (
     preflight_agent,
     preflight_git,
 )
-from agent_fork.content import capture_state, collect_inventory
-from agent_fork.errors import PreconditionError
+from agent_fork.content import capture_state, collect_inventory, sentinel_for
+from agent_fork.errors import (
+    PreconditionError,
+    StrictSkipRefusedError,
+    VerificationError,
+)
 from agent_fork.git import run_git
 from agent_fork.include import (
     DEFAULT_SETUP_HOOK_POLICY,
@@ -55,6 +59,7 @@ class ForkRequest:
     with_submodules: bool = True
     verify: bool = True
     force: bool = False
+    strict: bool = False
     extra_args: tuple[str, ...] = ()
     agent_executable: str | None = None
     agent_version_output: str | None = None
@@ -74,6 +79,7 @@ class ForkResult:
     verification: bool
     included: tuple[str, ...]
     setup_hook: SetupHookResult
+    skipped: tuple[dict[str, str], ...] = ()
     agent: AgentContext | None = None
     parent_session_name: str | None = None
 
@@ -83,6 +89,42 @@ def _git_version(env: Mapping[str, str]) -> str:
         ["git", "--version"], env=dict(env), capture_output=True, text=True
     )
     return completed.stdout or completed.stderr
+
+
+def _recheck_skips(parent: Path, skipped: tuple[object, ...]) -> None:
+    """Fail the fork if a skipped entry changed after it was observed.
+
+    Skipped paths are excluded from every content comparison, so this is the
+    only thing standing between a mid-fork mutation and a successful fork that
+    quietly omitted it.
+    """
+    for record in skipped:
+        relative = str(getattr(record, "path", record))
+        try:
+            now = sentinel_for(parent, relative)
+        except OSError:
+            now = None
+        if now != getattr(record, "sentinel", None):
+            raise VerificationError(
+                "a skipped entry changed during the fork: "
+                f"{escape_terminal_text(relative)}",
+                details={
+                    "failed_checks": [
+                        {
+                            "check": "skip-sentinel",
+                            "primary": True,
+                            "total": 1,
+                            "differences": [
+                                {
+                                    "path": escape_terminal_text(relative),
+                                    "kind": "skip-sentinel",
+                                    "detail": "changed after observation",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            )
 
 
 def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
@@ -185,6 +227,8 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         request.parent, request.branch, request.destination, env=env
     )
 
+    skipped = list(parent_state.skipped if parent_state is not None else ())
+
     def finish() -> tuple[tuple[str, ...], SetupHookResult]:
         materialized = materialize(
             request.parent,
@@ -194,9 +238,11 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             with_submodules=request.with_submodules,
             inventory=inventory,
             config_pins=top_level_pins,
+            skipped=tuple(skipped),
             env=env,
         )
         notices.extend(materialized.notices)
+        skipped.extend(materialized.skipped)
         submodule_skipped: tuple[str, ...] = ()
         submodule_reasoned_skipped: tuple[str, ...] = ()
         if request.with_state and request.with_submodules:
@@ -222,10 +268,24 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                 submodule_plans=submodule_plans,
                 submodule_skipped=submodule_skipped,
                 submodule_reasoned_skipped=submodule_reasoned_skipped,
+                skipped=tuple(skipped),
                 env=env,
             )
-        included = copy_worktree_includes(request.parent, creation.path, env=env)
+        included = copy_worktree_includes(
+            request.parent,
+            creation.path,
+            deletion_blockers=inventory.deletions,
+            known_skipped=tuple(skipped),
+            env=env,
+        )
         notices.extend(included.notices)
+        skipped.extend(included.skipped)
+        if request.strict and skipped:
+            # Includes are the final skip-producing phase. Refuse here, before
+            # the setup hook can have external side effects and before the
+            # registry write, while still reporting capture + materialize +
+            # include skips in one error (P02 A5).
+            raise StrictSkipRefusedError(skipped)
         setup_hook = run_setup_hook(
             request.parent,
             creation.path,
@@ -238,6 +298,12 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             progress=request.progress,
         )
         notices.extend(setup_hook.notices)
+        # Finalization, not verification: include copying and the setup hook
+        # run after the ladder, and the hook receives REPO_ROOT and can mutate
+        # the parent. A sentinel checked earlier would leave a window in which
+        # a skipped entry changes and the fork is still registered successful
+        # (P02 A5).
+        _recheck_skips(request.parent, tuple(skipped))
         entry = RegistryEntry.create(
             name=request.name,
             branch=request.branch,
@@ -285,6 +351,13 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         request.verify,
         included,
         setup_hook,
+        tuple(
+            {"path": r.path, "reason": r.reason, "phase": r.phase}
+            for r in sorted(
+                skipped,
+                key=lambda record: record.path.encode("utf-8", "surrogateescape"),
+            )
+        ),
         resolved_agent,
         agent_check.parent_session_name if agent_check is not None else None,
     )

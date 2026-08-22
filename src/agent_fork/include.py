@@ -15,6 +15,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from agent_fork.content import SkipRecord, sentinel_from_stat
+from agent_fork.errors import EntryUnreadableError
 from agent_fork.git import GitCommandError, run_git
 from agent_fork.text import escape_terminal_text
 
@@ -66,6 +68,7 @@ class _HookGroup:
 class IncludeResult:
     copied: tuple[str, ...]
     notices: tuple[str, ...]
+    skipped: tuple[SkipRecord, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -145,8 +148,37 @@ def _matches(path: str, patterns: tuple[str, ...]) -> bool:
     )
 
 
+def _record_include_skip(
+    relative: str,
+    reason: str,
+    info: os.stat_result,
+    deletion_blockers: tuple[str, ...],
+    skipped: list[SkipRecord],
+    notices: list[str],
+) -> None:
+    if deletion_blockers:
+        raise EntryUnreadableError(
+            "cannot skip a .worktreeinclude entry while the fork carries "
+            f"a deletion: {escape_terminal_text(relative)}",
+            path=relative,
+            reason="unreadable",
+            phase="include",
+            deletion_blockers=deletion_blockers,
+        )
+    skipped.append(SkipRecord(relative, reason, "include", sentinel_from_stat(info)))
+    label = "unsupported" if reason == "unsupported-type" else "unreadable"
+    notices.append(
+        f"skipped {label} .worktreeinclude path: {escape_terminal_text(relative)}"
+    )
+
+
 def copy_worktree_includes(
-    parent: Path, child: Path, *, env: Mapping[str, str] | None = None
+    parent: Path,
+    child: Path,
+    *,
+    deletion_blockers: tuple[str, ...] = (),
+    known_skipped: tuple[object, ...] = (),
+    env: Mapping[str, str] | None = None,
 ) -> IncludeResult:
     """Copy matching ignored files, without overwriting materialized destinations."""
     patterns = _patterns(parent)
@@ -159,12 +191,19 @@ def copy_worktree_includes(
     ).stdout
     copied: list[str] = []
     notices: list[str] = []
+    skipped: list[SkipRecord] = []
+    skipped_paths = {str(getattr(record, "path", record)) for record in known_skipped}
     child_root = child.resolve()
     for raw in ignored.split(b"\0"):
         if not raw:
             continue
         relative = os.fsdecode(raw)
         if not _matches(relative, patterns):
+            continue
+        # With --with-ignored, capture has already observed ignored entries.
+        # Keep that first skip authoritative: reopening the same path here
+        # would produce two records and two notices for one omitted entry.
+        if relative in skipped_paths:
             continue
         source = parent / relative
         destination = (child / relative).resolve(strict=False)
@@ -176,20 +215,82 @@ def copy_worktree_includes(
             continue
         if destination.exists() or destination.is_symlink():
             continue
-        info = source.lstat()
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            info = source.lstat()
+        except OSError as error:
+            raise EntryUnreadableError(
+                f"cannot stat .worktreeinclude entry: {escape_terminal_text(relative)}",
+                path=relative,
+                reason="lstat-failed",
+                phase="include",
+                deletion_blockers=deletion_blockers,
+            ) from error
+
         if stat.S_ISLNK(info.st_mode):
-            destination.symlink_to(os.readlink(source))
+            try:
+                target = os.readlink(source)
+            except OSError:
+                _record_include_skip(
+                    relative,
+                    "unreadable",
+                    info,
+                    deletion_blockers,
+                    skipped,
+                    notices,
+                )
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.symlink_to(target)
         elif stat.S_ISREG(info.st_mode):
-            shutil.copy2(source, destination, follow_symlinks=False)
+            try:
+                source_file = source.open("rb")
+            except OSError:
+                _record_include_skip(
+                    relative,
+                    "unreadable",
+                    info,
+                    deletion_blockers,
+                    skipped,
+                    notices,
+                )
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            source_error: OSError | None = None
+            with source_file:
+                with destination.open("wb") as destination_file:
+                    while True:
+                        try:
+                            chunk = source_file.read(1 << 20)
+                        except OSError as error:
+                            source_error = error
+                            break
+                        if not chunk:
+                            break
+                        destination_file.write(chunk)
+            if source_error is not None:
+                destination.unlink()
+                _record_include_skip(
+                    relative,
+                    "unreadable",
+                    info,
+                    deletion_blockers,
+                    skipped,
+                    notices,
+                )
+                continue
+            shutil.copystat(source, destination, follow_symlinks=False)
         else:
-            notices.append(
-                f"skipped unsupported .worktreeinclude path: "
-                f"{escape_terminal_text(relative)}"
+            _record_include_skip(
+                relative,
+                "unsupported-type",
+                info,
+                deletion_blockers,
+                skipped,
+                notices,
             )
             continue
         copied.append(relative)
-    return IncludeResult(tuple(copied), tuple(notices))
+    return IncludeResult(tuple(copied), tuple(notices), tuple(skipped))
 
 
 def _signal_hook_group(group: _HookGroup, signum: signal.Signals) -> None:

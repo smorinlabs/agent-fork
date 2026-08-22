@@ -455,7 +455,7 @@ def test_dry_run_counts_and_notices_match_what_the_fork_will_carry(repo_scenario
     assert any("vendor/submodule" in notice for notice in document["notices"])
 
 
-@pytest.mark.matrix("T-CLI-68")
+@pytest.mark.matrix("T-CLI-69")
 def test_dry_run_counts_the_submodule_under_the_default_with_submodules(
     repo_scenario,
 ):
@@ -483,7 +483,7 @@ def test_dry_run_counts_the_submodule_under_the_default_with_submodules(
     )
 
 
-@pytest.mark.matrix("T-CLI-69")
+@pytest.mark.matrix("T-CLI-70")
 def test_dry_run_staged_count_is_not_hidden_by_a_per_submodule_ignore_config(
     repo_scenario,
 ):

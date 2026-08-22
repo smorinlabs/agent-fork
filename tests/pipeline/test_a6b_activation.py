@@ -49,7 +49,7 @@ def _fork(world, name, *, with_submodules=True, with_state=True, with_ignored=Fa
     return fork(request, env=world.env)
 
 
-@pytest.mark.matrix("T-VER-40")
+@pytest.mark.matrix("T-VER-46")
 def test_default_fork_carries_a_dirty_submodule_and_verifies(repo_scenario):
     """The headline case: A6b's whole reason to exist. Default settings, no
     flags, a dirty submodule — the fork succeeds and both statuses match.
@@ -71,7 +71,7 @@ def test_default_fork_carries_a_dirty_submodule_and_verifies(repo_scenario):
     assert any("submodule carried" in notice for notice in result.notices)
 
 
-@pytest.mark.matrix("T-VER-41")
+@pytest.mark.matrix("T-VER-47")
 def test_opt_out_reproduces_a6as_original_behaviour_exactly(repo_scenario):
     """`--no-with-submodules` must still fork successfully — A6a's original
     behaviour, gated rather than deleted.
@@ -173,7 +173,7 @@ def test_initialized_gitlink_without_metadata_refuses_before_mutation(repo_scena
     assert b'"code":"submodule_unrepresentable"' in preview.stderr
 
 
-@pytest.mark.matrix("T-VER-42")
+@pytest.mark.matrix("T-VER-48")
 def test_recursive_verification_catches_a_wrong_submodule_head(repo_scenario):
     """Rung 2 (HEAD identity) — the sharpest test in the whole design.
 
@@ -253,7 +253,7 @@ def test_recursive_verification_catches_a_wrong_submodule_head(repo_scenario):
     assert "submodule-head" in kinds
 
 
-@pytest.mark.matrix("T-VER-51")
+@pytest.mark.matrix("T-VER-57")
 def test_submodule_only_failure_is_marked_primary(repo_scenario, monkeypatch):
     """A recursive-only difference owns the structured primary flag."""
     from agent_fork.content import Difference
@@ -281,7 +281,7 @@ def test_submodule_only_failure_is_marked_primary(repo_scenario, monkeypatch):
     assert checks[0]["primary"] is True
 
 
-@pytest.mark.matrix("T-OUT-29")
+@pytest.mark.matrix("T-OUT-32")
 def test_json_output_carries_with_submodules_and_the_carry_notice(repo_scenario):
     """The flag's resolved value and the carry outcome both reach the JSON
     document. Gate-6 round 2 finding 9: the notice assertion must specifically
@@ -307,7 +307,7 @@ def test_json_output_carries_with_submodules_and_the_carry_notice(repo_scenario)
     ), document["notices"]
 
 
-@pytest.mark.matrix("T-VER-46")
+@pytest.mark.matrix("T-VER-52")
 def test_ambient_config_at_snapshot_time_does_not_cause_a_false_verification_failure(
     repo_scenario,
 ):
@@ -338,12 +338,12 @@ def test_ambient_config_at_snapshot_time_does_not_cause_a_false_verification_fai
     assert child_inner.read_text() == "advanced\n"
 
 
-@pytest.mark.matrix("T-VER-50")
+@pytest.mark.matrix("T-VER-56")
 def test_equals_named_submodule_left_cold_does_not_roll_back_the_whole_fork(
     repo_scenario,
 ):
     """Gate-6 round 2 finding 1. A `=`-named submodule is a reasoned,
-    deliberate skip (T-MAT-57 -- it cannot be expressed as a `-c
+    deliberate skip (T-MAT-67 -- it cannot be expressed as a `-c
     submodule.<name>.url=...` pin, so carrying it would risk contacting its
     real remote). But rung 6 ("nested-plan completeness") treats ANY
     initialized plan entry present in `skipped` as a failure, with no way to
@@ -366,7 +366,7 @@ def test_equals_named_submodule_left_cold_does_not_roll_back_the_whole_fork(
     )
 
 
-@pytest.mark.matrix("T-VER-49")
+@pytest.mark.matrix("T-VER-55")
 def test_per_submodule_ignore_config_does_not_hide_a_staged_gitlink_advance(
     repo_scenario,
 ):
@@ -413,7 +413,7 @@ def test_per_submodule_ignore_config_does_not_hide_a_staged_gitlink_advance(
     assert child_head == parent_head
 
 
-@pytest.mark.matrix("T-VER-45")
+@pytest.mark.matrix("T-VER-51")
 def test_with_ignored_carries_and_verifies_an_ignored_file_inside_a_submodule(
     repo_scenario,
 ):

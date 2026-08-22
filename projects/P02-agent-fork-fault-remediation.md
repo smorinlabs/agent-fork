@@ -171,7 +171,12 @@ repository-controlled text raw).
   **Owner decision 2026-08-17:** the auto-name bullet is recorded as
   over-broad, not unfixed — once uniqueness is `(repo, name)`, equal names in
   different repos are legal, so auto-naming is left untouched.
-- **A4 — Agent-CLI recipe drift is undetectable; failure lands post-fork.**
+- **A4 — [x] RESOLVED: Agent-CLI recipe drift is undetectable; failure lands
+  post-fork. Headline drift scenario partially refuted — unreproducible by
+  construction, impact downgraded high → medium; the one today-testable
+  defect fixed (`parse_version` read a banner's version, not the CLI's), plus
+  two warn-level detectors: version ambiguity and a three-state `--help`
+  recipe-flag probe. Merged in PR #37.**
   Emitted recipes live in `agents.py:286-301` guarded only by version
   floors (`agents.py:65-68`) — a future CLI that drops `--fork-session`
   passes every check and fails in the user's fresh terminal after branch,
@@ -271,6 +276,7 @@ repository-controlled text raw).
   lineage records reference a child session that never ran). Type:
   robustness.
 - **A5 — One bad untracked filesystem entry destroys the whole fork.**
+  *(Rewritten 2026-08-17 after probing; see "Corrected claim" below.)*
   Socket/fifo raises at `materialize.py:58-59`; unreadable or mid-copy
   deleted file raises at `materialize.py:156-157`; both roll back the whole
   worktree. The include path already has the right policy — notice and skip
@@ -279,6 +285,212 @@ repository-controlled text raw).
   roll back a correct fork. Proposed direction: skip-with-notice for
   non-regular/unreadable entries; retry-once or warn for the parent-status
   race. Impact: medium-high. Type: robustness.
+
+  **Corrected claim.** The entry bundles three faults that probing on
+  2026-08-17 separates into three different verdicts. Probe environment:
+  macOS 25.4 (APFS), this repository's `.venv` build, a scratch parent of 200
+  tracked files with one modified and one untracked file, baseline fork
+  1.1 s wall clock. Every citation below was re-checked against `origin/main`
+  on 2026-08-17: the original entry's line numbers predate the A1 fix and no
+  longer resolve.
+
+  - **(a) Socket/fifo — refuted; no work.** Git does not report FIFOs or
+    Unix-domain sockets as untracked at all. With both present in the parent,
+    `git status --porcelain` and `git ls-files --others --exclude-standard`
+    listed neither, and a fork of that parent succeeded normally:
+
+    ```bash
+    mkfifo dev.sock
+    python3 -c "import socket; socket.socket(socket.AF_UNIX).bind('real.sock')"
+    git ls-files --others --exclude-standard   # only new.txt
+    git status --porcelain                     # only  M tracked.txt / ?? new.txt
+    agent-fork fork sockcase --no-agent        # succeeds
+    ```
+
+    `Inventory.untracked` is exactly that listing (`collect_inventory`'s untracked listing), so the
+    `unsupported untracked file type` raise (`_copy_entry`'s non-regular branch) is
+    unreachable from an entry that existed when the fork started. It is
+    reachable only if a listed regular file is *replaced* by a non-regular
+    one inside the fork window — which is case (c), not a file-type fault.
+    Keep the raise as a cheap guard.
+
+  - **(b) Unreadable file — confirmed, but it fails earlier than recorded and
+    outside `materialize.py`.** With verification on (the default) the fork
+    dies *before any worktree exists*: `capture_state` (`fork`'s `capture_state` call)
+    runs ahead of `create_worktree_at_anchor` (`create_worktree_at_anchor`), and
+    `_digest` (`content.py:_digest`) opens every carried path with no guard.
+    There is therefore nothing to roll back on the default path; the original
+    "rolls back the whole worktree" holds only under `--no-verify`, which
+    skips the snapshot and reaches `_copy_entry` (`_copy_entry`).
+
+    ```bash
+    echo secret > locked.txt && chmod 000 locked.txt
+    agent-fork fork lk1 --no-agent              # exit 1, no worktree created
+    # runtime_error: [Errno 13] Permission denied: .../locked.txt
+    agent-fork fork lk2 --no-agent --no-verify  # exit 1, worktree rolled back
+    ```
+
+    Both surface as an untyped `runtime_error` carrying a raw errno string:
+    no step attribution, no statement that skipping the entry was possible.
+    "Mid-copy deleted file" is **not** part of this case: it is case (c)
+    reaching a different tripwire (`_copy_entry`'s `lstat`,
+    `_copy_entry`'s `lstat`).
+
+    **Corrected 2026-08-20 by the gate 1 matrix, on two points.** First, the
+    earlier claim that `copy_worktree_includes`'s unsupported-type branch "already implements the intended
+    policy" is only half true: it skips an unsupported file *type* but has no
+    guard for *readability*, so an unreadable file matched by
+    `.worktreeinclude` still kills the fork, after verification has already
+    passed. Second, the fault is not confined to untracked entries — an
+    unreadable **tracked, modified** file fails identically, because
+    `capture_state` digests every carried path regardless of tracking state.
+    The entry's title, "One bad **untracked** filesystem entry", is therefore
+    too narrow; read it as "one bad carried entry".
+
+  - **(c) Parent edited mid-fork — confirmed, deterministically reproduced;
+    the rollback is correct and must stay.** The window runs from the status
+    snapshot (`fork`'s parent status snapshot) through the content snapshot
+    (`fork`'s `capture_state` call), worktree creation, and materialization
+    (`fork`'s `materialize` call) to the final parent re-read (the `parent-untouched` bracket)
+    — measured at roughly 0.5 s to 0.7 s of a 1.1 s command, and it widens
+    with repository size because untracked entries are copied one at a time
+    (`materialize`'s untracked copy loop). Sweeping the delay of a single background
+    write pins the edges:
+
+    ```bash
+    # each line races one fork; run from the parent
+    ( sleep 0.55; echo autosave >> f1.txt ) & agent-fork fork c055 --no-agent
+    # -> verify_failed: verification failed: parent-content (f1.txt: content differs)
+    ( sleep 0.65; echo autosave >> f1.txt ) & agent-fork fork c065 --no-agent
+    # -> same failure
+    ( sleep 0.75; echo autosave >> f1.txt ) & agent-fork fork c075 --no-agent
+    # -> succeeds; the write landed after the window closed
+    ```
+
+    A write that changes a path's *status class* trips `parent-untouched`
+    (the `parent-untouched` bracket); a write that only changes bytes in an
+    already-modified path trips `parent-content` (the `parent-content` rung), the
+    rung A1 added. When the write lands *before* transport reads the path,
+    `content-match` (the `content-match` rung) fires alongside it — re-validated
+    2026-08-17 against `722e1fd`:
+    `parent-content (f1.txt: content differs), content-match (f1.txt: content
+    differs)`. That second rung is the torn copy made visible: the child holds
+    post-write bytes the snapshot never saw. That is not a regression from A1: before A1 this exact
+    race passed silently and produced a child whose relationship to the
+    snapshot was never checked. Failing is right — a write inside the window
+    can tear the copy, leaving the child matching no single moment of the
+    parent. The defects are the *reporting* and the *absence of recovery*:
+    the message names a check, not a cause, and never says that nothing was
+    lost and that a rerun will likely succeed.
+
+    Retry-once cures a one-shot autosave and does nothing for a continuous
+    writer — a dev-server log, a watch build, or another agent session working
+    in the parent — which fails every attempt until the writer stops. That is
+    what the original "or warn" half must cover.
+
+  **Re-validated 2026-08-20 against `46201c1`**, 51 commits later — A9, A13's
+  remediations, the P04/P05 session work, release plumbing, and PR #53's
+  consolidation of duplicated primitives. All three cases reproduce unchanged:
+  `_copy_entry` and every verification rung are behaviourally identical, so
+  only the line numbers cited above moved (`materialize.py` by 4 and 10 lines,
+  `verify.py` by 3; `content.py`, `pipeline.py`, and `include.py` unmoved).
+  The window re-measured on *fresh* repositories at roughly 0.45–0.8 s of a
+  ~1.0 s command, with run-to-run jitter large enough that a single trial
+  proves little. Direct evidence for the size-dependence claim: a parent
+  already carrying several fork worktrees stayed vulnerable past a 1.15 s
+  delay, where a fresh parent had closed the window before 0.8 s.
+
+  One re-evaluation finding for the fix design: PR #53 consolidated three
+  duplicated primitive families but left `_copy_entry` and the
+  `.worktreeinclude` copy loop (`copy_worktree_includes`'s copy loop) unmerged — a near-duplicate
+  pair whose *only* substantive divergence is the policy A5(b) is about, raise
+  versus notice-and-skip. The (b) remedy should therefore land as one shared
+  copy primitive taking the policy as a parameter, matching #53's pattern,
+  rather than as a second independent edit.
+
+  Revised impact: **(a) none** (refuted); **(b) medium** — one unreadable
+  carried path makes the repository unforkable, with an unattributable error;
+  **(c) medium** — no data is ever at risk, the cost is an undiagnosable
+  failure and, for continuous writers, a repository that cannot be forked at
+  all. Type: robustness + error reporting. Not data loss on current evidence.
+
+  **Gate 1 probe matrix executed 2026-08-20.** Eleven static entry shapes,
+  five mid-window mutations, and three cleanup shapes were run with captured
+  output; the full matrix lives in the
+  [A5 design doc](../docs/superpowers/plans/2026-08-20-p02-a5-skip-and-race-policy.md).
+  It confirmed the three verdicts above, and produced four findings beyond
+  them: N1 unreadable tracked files fail identically (absorbed here, as a
+  typed error rather than a skip), N2 a mode-000 directory makes the fork
+  *silently* omit data while reporting success (filed as
+  [#59](https://github.com/smorinlabs/agent-fork/issues/59)), N3
+  `.worktreeinclude` has no readability guard (absorbed here), N4 an
+  unreadable directory makes `cleanup` fail and leaves the worktree behind
+  (filed as [#60](https://github.com/smorinlabs/agent-fork/issues/60),
+  cross-referenced to A7). A5 also absorbs one narrow slice of
+  [#28](https://github.com/smorinlabs/agent-fork/issues/28): `lstat` must
+  classify only `ENOENT` and `ENOTDIR` as absent, because a `PermissionError`
+  currently masquerades as a deletion and would be silently swallowed by this
+  item's rule that absence is always legitimate.
+
+  **Unverified surface — the gate must probe before any fix.** macOS/APFS
+  only, one Git version, `--no-agent` only. Untested: Linux and
+  case-sensitive filesystems; whether any Git version lists non-regular
+  entries; the `--with-ignored` listing (`collect_inventory`'s ignored listing), which shares the
+  same `ls-files` mechanism but was not probed; unreadable *directories* as
+  opposed to files; a regular file swapped for a FIFO inside the window; and
+  the interaction with A6's dirty-submodule case. The window figures come
+  from one machine at one repository size — indicative, not a bound.
+
+  **Decided direction (owner, 2026-08-20, narrowed to Option A).** This
+  supersedes every earlier direction recorded for A5, including the
+  snapshot-versus-copy timing rule, the fail-on-swap resolution, and the
+  retry. A5 now fixes exactly one defect: *agent-fork must not refuse to work
+  because of a single entry it cannot copy.*
+
+  **The copy loop never fails the fork on a *qualifying* entry.** It skips
+  what it may skip and names it; verification remains the sole arbiter of
+  whether the result is acceptable. A skip requires all three preconditions —
+  untracked or ignored, successful `lstat`, and no carried deletion — and
+  anything else raises `entry_unreadable`. The design doc's "Skip
+  preconditions" section governs; the table below summarises it. Verified by the third gate 1 review: a regular file swapped for
+  a FIFO mid-fork is still caught, because `compare_states` reports the type
+  loss, both content rungs fail, and rollback runs.
+
+  | Condition while copying | Default | `--strict` |
+  |---|---|---|
+  | Untracked or ignored file cannot be read | skip, warn, name every skipped path | fail, same warning |
+  | Untracked or ignored non-regular entry (socket, FIFO) | skip, warn, name every skipped path | fail, same warning |
+  | **Tracked** file cannot be read | fail, with a typed error naming the path | same |
+  | Parent changed during the fork | fail and revert, unchanged from today | same |
+
+  Skipping is restricted to untracked and ignored entries (owner, 2026-08-20).
+  A tracked path cannot be skipped safely without rename handling, because
+  `--no-renames` decomposes `old -> new` into unassociated endpoints and
+  excluding only an unreadable `new` would silently drop `old` from the child.
+
+  **A skip requires all three preconditions**, or the entry is the typed
+  failure `entry_unreadable` (exit 1): the entry is untracked or ignored;
+  `lstat` succeeded so a stability sentinel exists; and the fork carries no
+  deletion that could pair with it, determined from an explicit
+  `--diff-filter=D` facet rather than inferred from absence. The sentinel is
+  `(st_dev, st_ino, st_mode, st_size, st_mtime_ns, st_ctime_ns)`, recorded at
+  observation and rechecked before success. Strict refusal is
+  `strict_skip_refused` (exit 1). Both codes now exist in `errors.py`, are
+  published in `README.md`, and have stable `details` schemas. The design doc
+  is the normative contract, and its
+  "Skip preconditions" section governs: a skip requires an untracked or
+  ignored entry, a successful `lstat`, and no carried deletion. Anything else
+  raises `entry_unreadable`.
+
+  Exit status is 0 when only skips occurred, non-zero under `--strict`. No
+  skip is ever triggered by *absence*: `collect_inventory` keeps deletion and
+  rename endpoints deliberately, so treating absence as a skip or a failure
+  would break ordinary deletions, which `T-VER-26` guards. The retry is
+  dropped. `.worktreeinclude` gains the same readability guard, with its
+  residual post-verification race accepted as a known limit. Flag name and
+  strict exit code are subject to the CLI Design Standard check. Full record,
+  including the probe matrix and three review rounds: the
+  [A5 design doc](../docs/superpowers/plans/2026-08-20-p02-a5-skip-and-race-policy.md).
 - **A6 — Submodule working-tree state makes the repo unforkable, and is
   silently dropped when verification is off.** Rewritten 2026-08-17 to match
   the probe matrices; see the [design doc](../docs/superpowers/plans/2026-08-17-p02-a6-dirty-submodules.md).
@@ -454,8 +666,8 @@ swept with the rest.
 - [x] [P02-T03] A3 fix per process — plan + adversarial plan review (four rounds, all REJECT; loop stopped by owner and the design reshaped around one resolution rule rather than more site-specific guards), TDD implementation, adversarial post-review (six rounds, all REJECT; every finding absorbed, none declined). Shipped: a `repository` field and v2 registry with conservative migration; the **actionability predicate** — a record authorizes nothing unless its `(worktree, branch)` pair is live in the repository freshly identified from the invoking directory; a stored repository that **vetoes but never authorizes**; `ConfirmedFork`, which makes an unconfirmed target unrepresentable so the values Git receives can only come from an observation; a lock-held cleanup transaction closing the post-consent window; `prune`, absorbing that half of A7; and `conflict_fork_registered`, which stops a fork silently clobbering a live same-named record *within* one repository — A3's own fault one level in. T-REG-14..36; 636 passed. Known limitation recorded: pre-v2 recovery goes through `--force`, which waives the dirty and unpushed guards (owner decision 2026-08-20). See the [design doc](../docs/superpowers/plans/2026-08-17-p02-a3-registry-repo-scope.md)
 - [x] [P02-TS04] A4 adversarial verification: **inline adversarial review 2026-08-17 — PARTIALLY REFUTED.** Findings: (a) impact inflated relative to A1/A3, downgraded high → medium (loud, non-destructive, recoverable failure); (b) the headline drift scenario is unreproducible by construction — it requires a CLI release that does not exist, so any repro fabricates a stub, making A4 the item's strongest partial-refutation candidate; (c) `--help` grepping is itself a drift surface (detects removal, not semantic change), which forces the remedy to warn rather than refuse; (d) only `parse_version` is a today-testable defect. Remedy re-scoped from three mechanisms to two. **Codex second lens RUN 2026-08-17** against the implemented diff (`aefcda0..HEAD`) — verdicts: claim 1 (semver) PARTIALLY REFUTED, claim 2 (warn-vs-refuse) PARTIALLY REFUTED, claim 3 (implementation) REFUTED, claim 4 (tests) REFUTED, claim 5 (misses) CONFIRMED. Two defects reproduced independently before acting: `UnicodeDecodeError` escaping `read_help` (breaking the never-refuse guarantee) and notices rendering after mutation. Full report: [TS04 Codex review](../docs/reviews/2026-08-17-p02-a4-codex-review.md). Reviewing the diff rather than the design proved the better target — every finding cited a line. **Process deviation recorded:** A4 predates the validation-first gate that landed with A2 (`1f8e038`); it ran review → rewrite → implement → Codex-on-diff rather than probe-matrix-first, and built no exhaustive input matrix. See the [A4 design doc](../docs/superpowers/plans/2026-08-17-p02-a4-recipe-flag-probe.md)
 - [x] [P02-T04] A4 fix per process (revised scope) — TDD, RED first: the ambiguity row demonstrated the real defect (`parse_version` returned the banner's `(10, 2, 3)` instead of the CLI's `2.1.233`). Shipped: `version_tokens` + ambiguity notice, `recipe_flags`/`missing_recipe_flags`/`read_help` with a warn-level probe in `preflight_agent` (detection pre-mutation; notice rendered with the fork result), `.`-guard on `_VERSION`, and T-PRE-21..26. Test-stub fidelity fix in `tests/cli/test_out.py` — the fake CLI answered `--help` with its version string, so the probe correctly reported the *stub's* missing flags; the stub now serves real help (the TS04 review independently confirmed this as fidelity repair, not evidence suppression). Post-review fixes: `UnicodeDecodeError` caught in `read_help`; option-declaration parsing so deprecation prose cannot prove a flag survives; three-state unverified notice; ambiguity counted across stdout and stderr; `doctor` drift scoped to the selected agent so an unused CLI cannot change the exit contract; T-PRE-26 tightened to equality; T-PRE-27/28 and T-CLI-26 added. PR #37 review added T-PRE-29 (the unverified notice named `codex --help` while the probe ran `codex fork --help`). Final state at merge: `just all` green, 430 passed, 1 skipped; `just check-matrix` clean (earlier snapshots in this item's history recorded 415/419/424 as the suite grew — the merge figure is the one to trust)
-- [ ] [P02-TS05] A5 adversarial verification (incl. Codex): socket/fifo, unreadable-file, and parent-race rollback repros
-- [ ] [P02-T05] A5 fix per process
+- [x] [P02-TS05] A5 adversarial verification (incl. Codex) — **CONFIRMED-WITH-CORRECTIONS 2026-08-20.** Eleven static entry shapes, five mid-window mutations, and three cleanup shapes separated the bundled claim: socket/FIFO entries are not enumerated by Git and therefore do not block ordinary forks; unreadable carried files fail as raw errors; and parent-race rollback is correct and remains required. The matrix also found the `.worktreeinclude` readability gap, the tracked-file variant, and the narrow `lstat`/absence dependency on issue #28. Silent enumeration and cleanup defects were routed to #59 and #60. See the [A5 design and evidence record](../docs/superpowers/plans/2026-08-20-p02-a5-skip-and-race-policy.md).
+- [x] [P02-T05] A5 fix per process — qualifying unreadable or unsupported untracked/ignored entries now skip with one named notice and a final metadata sentinel; tracked paths, failed `lstat`, and any skip while carrying a deletion fail as typed `entry_unreadable`. `--strict` aggregates capture/materialize/include skips into one byte-wise ordered exit-1 `strict_skip_refused` and rolls back. JSON additively exposes `skipped[]`; `.worktreeinclude` shares the readability policy without reopening known skips. Gate 6 and PR review found and fixed five implementation defects (same-observation sentinel, verify re-open, undocumented reason values, duplicate include reporting, and post-`lstat` symlink following) and filled the missing evidence rows. Final gate: 682 passed, 1 expected skip, 20 deselected; 623-row matrix clean. See the [A5 design and evidence record](../docs/superpowers/plans/2026-08-20-p02-a5-skip-and-race-policy.md).
 - [x] [P02-TS06] A6 adversarial verification (incl. Codex): CONFIRMED-WITH-CORRECTIONS 2026-08-17 — matrix 1 reproduced the rollback across four dirty shapes and refuted the "unforkable by default" breadth (staged gitlink advance already forks); matrix 2 showed identical carry is feasible across eight local depth-1 cells. Codex second lens returned CONFIRM-WITH-CORRECTIONS; its findings 5 and 6 narrowed the verdict wording and corrected the cleanup evidence provenance. Register entry rewritten; see the [design doc](../docs/superpowers/plans/2026-08-17-p02-a6-dirty-submodules.md)
 - [~] [P02-T06] A6 remediation umbrella — close after **A6a** (unblock: `--ignore-submodules` filtering plus an accurate notice; evidence already validated; merged to `main`) and **A6b** (carry submodules identically by default, `--with-submodules` / `--no-with-submodules`, owner decision 2026-08-17) both merge. Split 2026-08-20 after two gate-4 passes returned NOT-READY on integration complexity, not on the carry mechanism. **A6b status (2026-08-21):** implementation complete on `worktree-p02-a6b-carry-submodules`, merged with `origin/main` (A3/A10/A11/A12), gate 6 (adversarial implementation review) complete after four rounds — round 1: 8 findings absorbed; round 2 (post-merge): 10 findings, 9 absorbed, 1 documented as a pre-existing pattern shared with `main`; round 3: confirmed round 2's absorptions, found round 2's own trap fix itself broken, re-absorbed; round 4: confirmed clean. `just all` 718 passed/1 skipped, `just check-matrix` clean, `just test-git-matrix` green on Git 2.50.1 and 2.54.0. Branch is PR-ready; PR not yet opened. Plan and all gate reports in the [design doc](../docs/superpowers/plans/2026-08-17-p02-a6-dirty-submodules.md)
 - [ ] [P02-TS07] A7 adversarial verification (incl. Codex): stale-entry dead-end repro (already reproduced once; re-verify + bound the fix)

@@ -25,13 +25,13 @@ def _snapshot(world, **kwargs):
     )
 
 
-@pytest.mark.matrix("T-MAT-30")
+@pytest.mark.matrix("T-MAT-40")
 def test_no_gitlinks_snapshots_to_an_empty_tuple(repo_scenario):
     world = repo_scenario("plain@main")
     assert _snapshot(world) == ()
 
 
-@pytest.mark.matrix("T-MAT-31")
+@pytest.mark.matrix("T-MAT-41")
 def test_clean_submodule_snapshot_records_head_and_resolved_url(repo_scenario):
     world = repo_scenario("plain@main", states=(submodule(),))
     plans = _snapshot(world)
@@ -45,7 +45,7 @@ def test_clean_submodule_snapshot_records_head_and_resolved_url(repo_scenario):
     assert plan.nested == ()
 
 
-@pytest.mark.matrix("T-MAT-32")
+@pytest.mark.matrix("T-MAT-42")
 def test_uninitialized_submodule_snapshots_as_cold_with_no_head_or_url(
     repo_scenario,
 ):
@@ -64,7 +64,7 @@ def test_uninitialized_submodule_snapshots_as_cold_with_no_head_or_url(
     assert plan.nested == ()
 
 
-@pytest.mark.matrix("T-MAT-33")
+@pytest.mark.matrix("T-MAT-43")
 def test_renamed_submodule_snapshot_carries_both_name_and_path(repo_scenario):
     """Cell `j` — config name and path differ; the plan must keep both."""
     world = repo_scenario("plain@main", states=(submodule(name="libfoo"),))
@@ -73,7 +73,7 @@ def test_renamed_submodule_snapshot_carries_both_name_and_path(repo_scenario):
     assert plan.name == "libfoo"
 
 
-@pytest.mark.matrix("T-MAT-34")
+@pytest.mark.matrix("T-MAT-44")
 def test_nested_submodule_produces_a_nested_plan_entry(repo_scenario):
     """Cell `h` — the frozen plan recurses one level for a submodule-in-a-submodule."""
     world = repo_scenario("plain@main", states=(submodule(nested=True),))
@@ -85,7 +85,7 @@ def test_nested_submodule_produces_a_nested_plan_entry(repo_scenario):
     assert inner.head is not None
 
 
-@pytest.mark.matrix("T-MAT-35")
+@pytest.mark.matrix("T-MAT-45")
 def test_snapshot_records_the_submodules_own_dirty_inventory(repo_scenario):
     """A dirty submodule's own carried-state facets are captured, not just its HEAD."""
     world = repo_scenario("plain@main", states=(submodule(dirty="modified"),))
@@ -95,14 +95,14 @@ def test_snapshot_records_the_submodules_own_dirty_inventory(repo_scenario):
     assert "tracked.txt" in plan.content.paths
 
 
-@pytest.mark.matrix("T-MAT-36")
+@pytest.mark.matrix("T-MAT-46")
 def test_snapshot_with_no_state_returns_no_plans(repo_scenario):
     """`with_state=False` carries nothing, so there is nothing to snapshot either."""
     world = repo_scenario("plain@main", states=(submodule(dirty="modified"),))
     assert _snapshot(world, with_state=False) == ()
 
 
-@pytest.mark.matrix("T-MAT-37")
+@pytest.mark.matrix("T-MAT-47")
 def test_snapshot_resolves_a_relative_gitmodules_url_to_an_absolute_value(
     repo_scenario,
 ):
@@ -116,7 +116,7 @@ def test_snapshot_resolves_a_relative_gitmodules_url_to_an_absolute_value(
     assert not plan.remote_url.startswith("../")
 
 
-@pytest.mark.matrix("T-MAT-38")
+@pytest.mark.matrix("T-MAT-48")
 def test_snapshot_records_an_unreachable_remote_without_touching_the_network(
     repo_scenario,
 ):

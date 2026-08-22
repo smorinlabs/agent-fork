@@ -469,6 +469,7 @@ record; cleanup adds no flag that prunes this metadata automatically.
 | `--with-ignored` / `--no-with-ignored` | Also carry ignored files (default: disabled) |
 | `--with-submodules` / `--no-with-submodules` | Carry each submodule's working-tree state, recursively (default: enabled) |
 | `--verify` / `--no-verify` | Verify the completed fork (default: enabled) |
+| `--strict` | Refuse and roll back when any carried entry must be skipped |
 | `--codex-session-name-resolution` / `--no-codex-session-name-resolution` | Resolve renamed Codex sessions (default: enabled) |
 | `--setup-hook-policy {tracked,any,off}` | Repository setup-hook policy: `tracked` runs it only when it is committed at the fork anchor and unchanged on disk, `any` runs it regardless, `off` never runs it (default: `tracked`) |
 | `--setup-hook-timeout SECONDS` | Seconds the setup hook may run before its process group is terminated (default: `300`) |
@@ -495,6 +496,27 @@ Dry-run JSON is a preview schema rather than a completed-fork result. It sets
 `dry_run: true` and reports the planned branch and worktree creates, staged,
 unstaged, untracked, and ignored file counts, the paste command, notices,
 local validation status, and `mutation_performed: false`.
+
+### Skipped carried entries
+
+A fork does not fail solely because one untracked or ignored entry cannot be
+copied. The entry is omitted, the successful command names it once on stderr,
+and `fork --json` records it in both `notices[]` and `skipped[]`:
+
+```json
+{"skipped":[{"path":"locked.txt","phase":"capture","reason":"unreadable"}]}
+```
+
+Each `skipped[]` entry has the stable string fields `path`, `reason`, and
+`phase`. Entries are ordered byte-wise by path. A skip is permitted only when
+the path is untracked or ignored, its `lstat` metadata was observed, and the
+fork carries no deletion. A tracked path, a failed `lstat`, or a deletion that
+could be the other half of a rename fails with `entry_unreadable` instead.
+Parent changes during the fork still fail verification and roll the fork back.
+
+`--strict` changes any otherwise-permitted skip into the exit-1
+`strict_skip_refused` error and rolls the fork back. It is an invocation-only
+flag: there is no configuration key or environment variable for it.
 
 The default `auto` mode detects the agent and parent session from
 `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`. They can be supplied explicitly:
@@ -638,6 +660,13 @@ config `with_ignored = true` combined with `--no-with-state` carries no state.
 
 `.worktreeinclude` may list ignored files to copy after verification.
 
+An unreadable matching file follows the same skip policy and appears with
+`phase: "include"`. Include copying deliberately remains after verification,
+and copied include files do not have a per-copy stability bracket. A file
+changed during copying can therefore produce stale or torn child content
+without detection. Closing that accepted limit requires a separate
+copy-bracketing design.
+
 An optional `.agent-fork/worktree-setup.sh` runs non-fatally in the new worktree
 with `REPO_ROOT` and `WORKTREE_PATH` set. The hook lives in the repository being
 forked, not in `agent-fork`, so the repository supplies its content and
@@ -714,6 +743,12 @@ to run), under `off` (it is not evaluated), and when no hook is present.
 - **Ignored files stay put unless you ask.** `--with-ignored` may copy
   secret-bearing files such as `.env` between working trees, which is precisely
   why it is off by default.
+- **Skipped entries are named and bracketed.** A final metadata sentinel catches
+  a skipped target that changes before publication. The sentinel covers the
+  target, not every ancestor: an ancestor permission or rename race between
+  `lstat` and the later read can be reported as an unreadable skip even when the
+  target itself was readable at the fork boundaries. The omission is named;
+  closing this accepted limit requires descriptor-based traversal.
 - **`cleanup` is deliberately hard to misuse.** It is registry-scoped and
   refuses dirty or unpushed worktrees unless `--force` or the matching granular
   override is supplied. It always refuses to delete the directory you are
@@ -786,10 +821,15 @@ Interruption errors use `interrupted_sigint` or `interrupted_sigterm`; their
 `details` object contains the signal name and resulting process exit code, for
 example `{"exit_code":143,"signal":"SIGTERM"}`.
 
+`entry_unreadable` details contain one escaped `entry` object and a byte-wise
+ordered `deletion_blockers[]` array. `strict_skip_refused` details contain the
+byte-wise ordered `skipped[]` entries plus `count`; its human message names the
+same paths.
+
 | Exit | Meaning | Codes |
 |---|---|---|
 | 0 | Success | — |
-| 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy` |
+| 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy`, `entry_unreadable`, `strict_skip_refused` |
 | 2 | Usage error or required prompt disabled | `config_error` |
 | 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown`, `claude_parent_incomplete_analysis` |
 | 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable`, `conflict_fork_registered`, `cleanup_registry_stale`, `cleanup_registry_ambiguous` |
