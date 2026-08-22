@@ -687,7 +687,7 @@ swept with the rest.
   - [x] [P02-T13A] Emit completed-fork notices once on stderr while preserving JSON `notices[]`; RED/GREEN and final gates are recorded in the [A13 design and evidence record](../docs/superpowers/plans/2026-08-18-p02-a13-small-fault-remediation.md)
   - [x] [P02-T13B] Remove the byte-identical `table` CLI value and make `text` the default; implementation complete, with R4.1 and R9.3 release blockers recorded in `CONFORMANCE.md`
   - [x] [P02-T13C] Preserve typed Codex `thread/read` failure semantics, parent-name evidence, and parent-assertion honesty
-  - [ ] [P02-T13D] Make worktree parsing newline-safe without breaking the Git 2.19 floor; tracked separately in [issue #46](https://github.com/smorinlabs/agent-fork/issues/46)
+  - [x] [P02-T13D] Make worktree parsing newline-safe without breaking the Git 2.19 floor — completed in [PR #53](https://github.com/smorinlabs/agent-fork/pull/53), which closed [issue #46](https://github.com/smorinlabs/agent-fork/issues/46). Worktree enumeration uses NUL-delimited porcelain on Git 2.36+ and safely retries without `-z` on older supported Git.
   - [x] [P02-T13E] Treat every ITA-derived operand as a literal Git pathspec; implements the remediation for issue #29, which can close after merge
   - [x] [P02-T13F] Explain remote setup when cleanup refuses unpushed commits in a repository with no remote
   - [ ] [P02-T13G] Prevent cleanup from deleting changed ignored worktree-local data; tracked separately in [issue #44](https://github.com/smorinlabs/agent-fork/issues/44)
