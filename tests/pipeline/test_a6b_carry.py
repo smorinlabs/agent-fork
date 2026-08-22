@@ -387,10 +387,11 @@ def test_carried_notice_escapes_a_hostile_submodule_name(repo_scenario):
     test actually proved the escaping happens: T-MAT-46 checks only skip
     state and T-MAT-50 checks only the remote-fidelity wording, neither
     with a hostile string in play. A submodule config name containing an
-    ANSI erase-screen sequence and an embedded newline (the same hostile
-    shape `test_a1_content.py` uses for a filename) must not reach the
-    notice literally -- it must come back escaped, single-line, and
-    terminal-safe.
+    ANSI erase-screen sequence (the same hostile shape `test_a1_content.py`
+    uses for a filename, minus the embedded newline that hostile shape also
+    carries -- `git submodule add --name` rejects a literal newline in the
+    name outright, confirmed empirically) must not reach the notice
+    literally -- it must come back escaped and terminal-safe.
     """
     hostile = "bad\x1b[2Jname"
     world = repo_scenario(

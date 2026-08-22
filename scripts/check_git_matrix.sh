@@ -51,8 +51,7 @@ flox activate -d "$flox_root" -- bash -c '
 # without-submodule fork = 1s. Re-run this function and update the comment
 # if the recipe's cost profile changes materially.
 measure_clone_cost() {
-  local tmp agent_fork_bin
-  tmp=$(mktemp -d)
+  local agent_fork_bin
   # Gate-6 finding 8: this benchmark used the caller's REAL, shared XDG
   # registry with fixed names (bench-with/bench-without) -- add_entry()
   # replaces any same-name record, so a real fork the user happened to have
@@ -66,17 +65,21 @@ measure_clone_cost() {
   # so a RETURN trap here left the large temp fixture on disk on any
   # mid-benchmark failure (confirmed empirically: a probe script with an
   # identical RETURN trap printed no trap output and exited 1 on a `false`
-  # inside the function). An EXIT trap fires in both cases; safe here
-  # because this function's only caller is the script's final line, so
-  # nothing else needs $tmp afterward.
+  # inside the function). An EXIT trap fires in both cases.
   #
-  # Double-quoted, not single-quoted: an EXIT trap fires at PROCESS exit,
-  # by which point this function's `local tmp` binding is out of scope --
-  # a single-quoted trap referencing $tmp lazily then dies on `set -u` with
-  # "tmp: unbound variable" (caught by re-running this script for real
-  # after switching from RETURN to EXIT). Double-quoting bakes the path in
-  # as a literal at trap-install time, so the trap needs no live variable.
-  trap "rm -rf '$tmp'" EXIT
+  # `tmp` is deliberately NOT `local`: an EXIT trap fires at PROCESS exit,
+  # after this function has already returned, so a `local tmp` binding
+  # would be out of scope by then (confirmed empirically -- `set -u` killed
+  # it with "tmp: unbound variable"). Baking the path into the trap command
+  # as a literal string (via double-quoting) was gate-6 round 2's own first
+  # fix for that, but round 3 found IT unsafe too: if `$tmp` ever contains
+  # a single quote (possible if `$TMPDIR` itself does), the baked-in
+  # `rm -rf '$tmp'` string breaks on the embedded quote. A plain global
+  # variable sidesteps both problems: the trap can stay single-quoted
+  # (safe, normal deferred evaluation) and still see `$tmp` at fire time
+  # because the variable was never local to begin with.
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
   export XDG_STATE_HOME="$tmp/xdg-state"
   agent_fork_bin="$worktree_root/.venv/bin/agent-fork"
 
@@ -138,7 +141,7 @@ measure_clone_cost() {
   printf 'clone-cost: with-submodule=%ss without-submodule=%ss delta=%ss\n' \
     "$with_elapsed" "$without_elapsed" "$((with_elapsed - without_elapsed))"
 
-  # Deregister before the RETURN trap removes $tmp (which now also holds the
+  # Deregister before the EXIT trap removes $tmp (which now also holds the
   # isolated registry): agent-fork's own cleanup needs the worktree path to
   # still exist, so this must run first or it leaves an orphaned registry
   # entry with no path left to clean it up by (the cleanup command needs to
