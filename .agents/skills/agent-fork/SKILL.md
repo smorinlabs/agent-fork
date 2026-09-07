@@ -1,6 +1,6 @@
 ---
 name: agent-fork
-description: "Fork a Claude Code or Codex session together with its project files: create a new branch and separate Git worktree, copy tracked files and, by default, staged, unstaged, and untracked work, then print the command to continue the conversation there. Use for \"fork this session\", /agent-fork, $agent-fork, or requests for the current session ID or repository context. Supports a name hint, --now to skip confirmation, --session for session details plus fork and resume commands, and --session-only to print only the command to fork the conversation. Not for ordinary Git branch, directory, or status requests."
+description: "Fork a Claude Code or Codex session together with its project files: create a new branch and separate Git worktree, copy tracked files and, by default, their staged and unstaged changes plus untracked files, then print the command to continue the conversation there. Use for \"fork this session\", /agent-fork, $agent-fork, or requests for the current session ID or repository context. Supports a name hint, --now to skip confirmation, --session for session details, transcript path, and fork and resume commands, and --session-only to print only the command to fork the conversation. Not for ordinary Git branch, worktree, directory, or status requests."
 argument-hint: "[name-hint] [--now] | --session | --session-only"
 allowed-tools: Bash(agent-fork:*), Bash(command -v:*), Bash(readlink:*), Bash(uv run:*), Read, AskUserQuestion
 ---
