@@ -1,6 +1,6 @@
 ---
 name: agent-fork
-description: Inspect or fork the current Claude Code or Codex agent session. Use for "fork this session", `/agent-fork` or `$agent-fork` with an optional name hint and an optional exact `--now` to skip the confirmation, exact `--session` for inspection plus its native fork command, exact `--session-only` to print only that command, or questions asking for the current agent session ID or repository context. Other unsupported option-like text refuses before any CLI call. Do not use for ordinary Git branch, worktree, directory, or status requests that do not mention the active agent session or Agent Fork.
+description: "Fork a Claude Code or Codex session together with its project files: create a new branch and separate Git worktree, copy tracked files and, by default, their staged and unstaged changes plus untracked files, then print the command to continue the conversation there. Use for \"fork this session\", /agent-fork, $agent-fork, or requests for the current session ID or repository context. Supports a name hint, --now to skip confirmation, --session for session details, transcript path, and fork and resume commands, and --session-only to print only the command to fork the conversation. Not for ordinary Git branch, worktree, directory, or status requests."
 argument-hint: "[name-hint] [--now] | --session | --session-only"
 allowed-tools: Bash(agent-fork:*), Bash(command -v:*), Bash(readlink:*), Bash(uv run:*), Read, AskUserQuestion
 ---
