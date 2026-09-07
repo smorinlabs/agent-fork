@@ -71,8 +71,8 @@ The full set of skill invocations:
 Codex invokes the same skill as `$agent-fork`; every form above is otherwise
 identical.
 
-The skill is a thin front end over the installed CLI — each form maps to one
-CLI call:
+The skill delegates operations to the CLI. It first validates a session
+inspection, then uses the selected runner for the operation's command:
 
 | Skill form | CLI call | Result |
 |---|---|---|
@@ -94,12 +94,19 @@ the target branch, the destination worktree, and the files it would carry,
 and creates the fork only after you approve. `--now` skips that confirmation;
 the name is still chosen the same way.
 
-When the `agent-fork` CLI is not installed, the skill walks you through the
-fix step by step. It checks for `uv`: if `uv` is present it offers a one-off
-`uvx` run or a permanent install, and if not it points at the `uv` installer
-or a direct `pip` install. If it can confirm a local checkout of this
-repository, it also offers — after asking — to run from that checkout with
-`uv run --directory`.
+The skill uses the installed `agent-fork` CLI when its output supports the
+requested operation. If the CLI is missing or lacks a required field, the
+assistant runs the operation through `uvx` from the official Git repository.
+It uses `uv tool run` when only `uv` is available. Fetching the tool does not
+add a confirmation question; the environment's execution permissions apply.
+
+The assistant resolves one source commit and keeps the same command prefix
+for inspection, the fork preview, and an authorized fork. A temporary run
+does not replace the installed CLI. You can also ask the assistant to install
+or upgrade it permanently, or to use a confirmed local checkout through
+`uv run --project`. That checkout supplies the code while the command runs
+in your active repository. The skill checks the reported directory before
+accepting an inspection or proceeding to a fork.
 
 Two limits are deliberate: the skill accepts no CLI flags beyond the forms
 above (advanced flags are for direct CLI use), and the two inspection forms
@@ -131,18 +138,19 @@ marketplace:
 
 ### Optional: install the CLI
 
-The skill runs the `agent-fork` CLI and helps you set it up on first use, so
-installing the CLI yourself is optional. Doing so makes it available in any
-terminal:
+The skill can run the CLI through `uvx`, so a permanent installation is
+optional. To make `agent-fork` available directly in any terminal, ask the
+assistant to install it or run:
 
 ```bash
 uv tool install git+https://github.com/smorinlabs/agent-fork
 ```
 
-Or run it once without installing:
+Or inspect the current session in a temporary tool environment. `--isolated`
+avoids an older installed CLI; `--refresh` refreshes the cached source:
 
 ```bash
-uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
+uvx --isolated --refresh --from git+https://github.com/smorinlabs/agent-fork agent-fork session --json
 ```
 
 > After PyPI publication the no-install command becomes simply
