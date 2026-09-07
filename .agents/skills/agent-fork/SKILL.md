@@ -2,12 +2,12 @@
 name: agent-fork
 description: Inspect or fork the current Claude Code or Codex agent session. Use for "fork this session", `/agent-fork` or `$agent-fork` with an optional name hint and an optional exact `--now` to skip the confirmation, exact `--session` for inspection plus its native fork command, exact `--session-only` to print only that command, or questions asking for the current agent session ID or repository context. Other unsupported option-like text refuses before any CLI call. Do not use for ordinary Git branch, worktree, directory, or status requests that do not mention the active agent session or Agent Fork.
 argument-hint: "[name-hint] [--now] | --session | --session-only"
-allowed-tools: Bash(agent-fork:*), Bash(command -v:*), Bash(readlink:*), Bash(uv run:*), Read, AskUserQuestion
+allowed-tools: Bash(agent-fork:*), Bash(command -v:*), Bash(pwd -P), Bash(readlink:*), Bash(git ls-remote https://github.com/smorinlabs/agent-fork.git refs/heads/main), Bash(uv run --project:*), Bash(uvx --isolated --from git+https://github.com/smorinlabs/agent-fork@*), Bash(uv tool run --isolated --from git+https://github.com/smorinlabs/agent-fork@*), Bash(uv tool dir --bin), Bash(uv tool install git+https://github.com/smorinlabs/agent-fork@*), Bash(uv tool install --force git+https://github.com/smorinlabs/agent-fork@*), Read, AskUserQuestion
 ---
 
 # Agent Fork
 
-Delegate to the installed `agent-fork` CLI. Run every command from the user's
+Delegate to a compatible `agent-fork` CLI. Run every command from the user's
 active repository directory. Let the CLI own agent detection, session evidence,
 Git operations, automatic naming, verification, rollback, registry state, and
 continuation-command construction.
@@ -37,85 +37,34 @@ Never remove `--session` and then treat the remaining text as a fork name.
 
 ## Confirm the CLI before any route
 
-Every route below calls `agent-fork`. An absent CLI is not a CLI refusal:
-shell exit `127` or a `command not found` message means Agent Fork never ran.
-Never present that as CLI output, and never substitute hand-written Git for it.
+A **runner** is the complete executable prefix used to launch Agent Fork.
+Every `agent-fork` command below specifies the route arguments; replace its
+`agent-fork` prefix with the selected runner for the whole operation, including
+inspection, preview, fork, and doctor. Keep that prefix and source revision in
+working context rather than relying on shell variables surviving tool calls.
 
-When the CLI is missing, disclose the fix progressively: probe what exists
-before prescribing anything. `command -v agent-fork` has already failed, so
-test the installer next:
+1. Record the invocation directory with `pwd -P` before selecting a runner.
+2. Honor an explicit installation or checkout choice through
+   [the runner procedure](references/cli-runner.md). Otherwise probe
+   `command -v agent-fork` and select that executable when present. If lookup
+   fails, read `references/cli-runner.md` and select its temporary runner.
+3. Run `agent-fork session --json` through the selected runner and validate it
+   below. An absent executable, shell exit `127`, or `command not found` means
+   Agent Fork never ran; read `references/cli-runner.md` and recover once.
+   Otherwise-valid output missing a required contract field takes that same
+   recovery path. Do not ask for confirmation merely because recovery fetches
+   code. Malformed output and a CLI refusal do not trigger recovery.
+4. Require session `directory` to equal the recorded invocation directory.
+   If it differs, report `Agent-fork invocation directory mismatch` with both
+   paths terminal-escaped and stop before presentation, preview, or mutation.
+5. Reuse the validated inspection when entering the classified route. Do not
+   rerun it solely because a route below shows `agent-fork session --json`.
+   `--now` skips the fork preview and confirmation, not this read-only check.
 
-```bash
-command -v uv
-```
-
-With `uv` present, offer both forms and let the user pick. The no-install run:
-
-```bash
-uvx --from git+https://github.com/smorinlabs/agent-fork agent-fork --version
-```
-
-And the durable fix:
-
-```bash
-uv tool install git+https://github.com/smorinlabs/agent-fork
-```
-
-Install from the source repository. The bare package name is not installable:
-the PyPI entry is a placeholder until the first published release.
-
-Without `uv`, say plainly that `uv` is missing and that every route above —
-including the checkout fallback below — needs it. Offer two ways forward:
-install `uv` first
-(https://docs.astral.sh/uv/getting-started/installation/), or install the
-repository directly with the interpreter already present:
-
-```bash
-python3 -m pip install git+https://github.com/smorinlabs/agent-fork
-```
-
-Never run a network-fetched command on the user's behalf. Print it and let the
-user decide.
-
-### Offer a discovered source checkout before giving up
-
-A missing CLI does not always mean the code is absent. Look for an Agent Fork
-checkout in exactly two places, in order:
-
-1. The active repository itself: read `pyproject.toml` at the directory the
-   routes already run from, and confirm it declares `name = "agent-fork"`.
-   Do not shell out to Git to locate a root.
-2. The directory this skill was loaded from: resolve it with `readlink -f`,
-   strip the trailing `.agents/skills/agent-fork`, and confirm the same
-   `pyproject.toml` at what remains. A development symlink resolves to a
-   checkout; a copied installation does not.
-
-Read the candidate `pyproject.toml` and confirm the declared name before
-proposing anything. Do not search the filesystem more widely, and do not guess
-a path.
-
-With a confirmed checkout, name it, say plainly that the run uses that working
-tree rather than a released build, and ask before running the fallback. A dirty
-or mid-refactor tree is a different program from a release, so this is the
-user's call. On approval, run the classified route unchanged except for the
-prefix:
-
-```bash
-uv run --directory '<checkout>' agent-fork session --json
-```
-
-Shell-quote the checkout path as one argument. Keep every route's arguments,
-validation, and presentation rules exactly as specified below.
-Then still print the install command so the user can make the fix permanent.
-
-If no checkout is discoverable, or the user declines, stop with the install
-command. Never install, fetch, or execute network-fetched code automatically,
-and never substitute hand-written Git for the CLI.
-
-A CLI that runs and then reports an environment problem is a different case.
-Preserve its exact output and suggest `agent-fork doctor`, which checks Git,
-the agent CLIs, configuration validity, XDG paths, and whether this
-repository's setup hook would run.
+Never report tool setup as a completed inspection or fork. A CLI that runs
+and reports an environment problem has actually run: preserve its exact output
+and suggest `agent-fork doctor` through the selected runner. Doctor checks Git,
+the agent CLIs, configuration, XDG paths, and whether a setup hook would run.
 
 ## Classify the request
 
@@ -350,26 +299,27 @@ example values are never material to reconstruct a command from. When
 
 A missing CLI is handled by the preflight above, not here.
 
-If session JSON is otherwise valid but contains no `fork_command` key, the
-installed CLI predates that contract. If the route in use is `--session` and
-session JSON contains no `resume_command` or no `transcript` key, the
-installed CLI predates those contracts too — `--session-only` never requires
-either, since it only ever presents `fork_command`. Report `Installed
-agent-fork predates the fork_command contract` (missing `fork_command`),
-`Installed agent-fork predates the resume_command contract` (missing
-`resume_command`, `--session` route only), or `Installed agent-fork
-predates the transcript contract` (missing `transcript`, `--session` route
-only), show the upgrade command, and stop:
+Before classifying output as an older contract, require exit 0, one JSON
+object, the base session fields listed below, and valid values for every
+present command or transcript object. Malformed JSON, invalid present fields,
+and unknown status values are `Invalid agent-fork JSON output`; stop without
+fetching or retrying.
 
-```bash
-uv tool install --force git+https://github.com/smorinlabs/agent-fork
-```
+Otherwise-valid session JSON without `fork_command` predates that contract.
+Only the `--session` route also requires `resume_command` and `transcript`;
+`--session-only` never requires either. Record the matching diagnostic:
 
-Do not report this as `Invalid agent-fork JSON output` and do not reconstruct
-the command. `agent-fork --version` is not a reliable discriminator here: a
-version bump does not always accompany a contract change (`fork_command`'s
-own addition did not get one), so detect missing keys directly instead of
-trusting the reported version.
+- `Installed agent-fork predates the fork_command contract`
+- `Installed agent-fork predates the resume_command contract`
+- `Installed agent-fork predates the transcript contract`
+
+Read `references/cli-runner.md`, select a compatible runner, and repeat the
+inspection once before any mutation. On success, continue the original route
+with that runner; a successful `--session-only` still emits only the returned
+command. If recovery fails, report the diagnostic, missing fields, selected
+source, and actual failure. Never recover after attempting a real fork.
+`agent-fork --version` is not a reliable discriminator: `fork_command`'s
+addition did not get one, so check required fields instead of trusting a version.
 
 Treat exit 0 as success only when stdout is one JSON object with the expected
 route fields:
@@ -398,6 +348,7 @@ Preserve nonzero CLI output and stop.
 
 - Do not retry with guessed session IDs.
 - Do not search transcripts.
-- Do not run hand-written Git commands.
+- Do not run hand-written Git commands except the official-source
+  `git ls-remote` lookup in `references/cli-runner.md`.
 - Do not fall back to Git-only mode.
 - Do not execute a returned session fork or resume command.
