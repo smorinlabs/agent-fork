@@ -202,6 +202,8 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-35 | Production finding 4 — dry-run applies the same recursive unmerged-index guard and qualified path reporting as a real fork | baseline | F | live | post-merge production review |
 | T-GRD-36 | Production finding 4 — recursive unmerged-index inspection reaches depth two and remains scoped to `with_state and with_submodules`, preserving both opt-outs | baseline | F | live | post-merge production review |
 | T-GRD-37 | P02 A15 — a destination whose directory is gone but which Git still records as a (prunable) worktree refuses before mutation as `conflict_worktree_path` with a `git worktree prune` remedy, and the fork leaves no branch behind instead of reporting a concurrent-creation race | baseline | F | live | P02 A15 |
+| T-GRD-38 | P02 A15 review — with core.ignorecase, a destination that differs only in letter case from a missing-but-registered worktree refuses as `conflict_worktree_path` and leaks no branch | baseline | F | live | P02 A15 gate-6 |
+| T-GRD-39 | P02 A15 review — when `git worktree add -b` fails after creating the branch for a reason no guard sees (read-only destination parent), the branch this attempt created is removed and Git's real failure is reported instead of `conflict_branch_exists` | baseline | F | live | P02 A15 gate-6 |
 
 ---
 

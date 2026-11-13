@@ -351,3 +351,95 @@ def test_destination_still_registered_as_missing_worktree_refuses(repo_scenario)
         fork(request, env=world.env)
     assert forked.value.code == "conflict_worktree_path"
     assert git("branch", "--list", "--format=%(refname:short)") == branches_before
+
+
+def _git_out(world, *args):
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-C", str(world.parent_path), *args],
+        env=world.env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+@pytest.mark.matrix("T-GRD-38")
+def test_case_variant_of_registered_missing_worktree_refuses(repo_scenario):
+    """T-GRD-38 — P02 A15 review F1 — the stale-record guard honours core.ignorecase.
+
+    Given:  Git still records a missing worktree at `Stale`, and the repository
+            reports core.ignorecase (the macOS default)
+    Expect: forking to `stale` refuses as conflict_worktree_path, and no branch leaks
+    Source: P02 A15 gate-6 review
+    """
+    import shutil
+
+    from agent_fork.errors import PreconditionError
+    from agent_fork.pipeline import ForkRequest, fork
+
+    world = repo_scenario("plain@main")
+    if _git_out(world, "config", "--bool", "core.ignorecase").strip() != "true":
+        pytest.skip("repository is case-sensitive")
+    registered = world.parent_path.parent / "Stale"
+    _git_out(world, "worktree", "add", "-q", "-b", "earlier", str(registered))
+    shutil.rmtree(registered)
+    branches_before = _git_out(world, "branch", "--list", "--format=%(refname:short)")
+
+    request = ForkRequest(
+        parent=world.parent_path,
+        destination=world.parent_path.parent / "stale",
+        name="case",
+        branch="fork/case",
+        agent=None,
+    )
+    with pytest.raises(PreconditionError) as caught:
+        fork(request, env=world.env)
+    assert caught.value.code == "conflict_worktree_path"
+    assert _git_out(world, "branch", "--list", "--format=%(refname:short)") == (
+        branches_before
+    )
+
+
+@pytest.mark.matrix("T-GRD-39")
+def test_worktree_add_failure_after_branch_creation_rolls_branch_back(repo_scenario):
+    """T-GRD-39 — P02 A15 review F2 — a failure Git hits after creating the branch.
+
+    Given:  the destination's parent directory is read-only, which no guard
+            detects, so `git worktree add -b` creates the branch and then fails
+    Expect: the branch this attempt created is removed and Git's real failure is
+            reported, never conflict_branch_exists ("won a concurrent creation race")
+    Source: P02 A15 gate-6 review
+    """
+    import os
+
+    from agent_fork.errors import PreconditionError
+    from agent_fork.pipeline import ForkRequest, fork
+
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    world = repo_scenario("plain@main")
+    locked = world.parent_path.parent / "read-only"
+    locked.mkdir()
+    locked.chmod(0o555)
+    branches_before = _git_out(world, "branch", "--list", "--format=%(refname:short)")
+    request = ForkRequest(
+        parent=world.parent_path,
+        destination=locked / "child",
+        name="ro",
+        branch="fork/ro",
+        agent=None,
+    )
+    try:
+        with pytest.raises(Exception) as caught:
+            fork(request, env=world.env)
+    finally:
+        locked.chmod(0o755)
+    assert not (
+        isinstance(caught.value, PreconditionError)
+        and caught.value.code == "conflict_branch_exists"
+    ), caught.value
+    assert _git_out(world, "branch", "--list", "--format=%(refname:short)") == (
+        branches_before
+    )
