@@ -336,7 +336,6 @@ def _message_route(
     session_id = env["CODEX_THREAD_ID"] if tool == "codex" else env["MUSE_SESSION_ID"]
     if SAFE_SESSION_ID.fullmatch(session_id) is None or not _terminal_safe(session_id):
         return SessionMessageRoute(tool, "unsafe_input")
-    quoted = shlex.quote(session_id)
     if tool == "codex":
         return SessionMessageRoute(
             "codex",
@@ -344,17 +343,18 @@ def _message_route(
             session_id,
             codex_name,
             "codex-queue",
-            f"codex queue --thread {quoted} --message",
+            f"codex queue --thread {shlex.quote(session_id)} --message",
             "argument",
         )
+    # `muse session-message send` refuses senders it cannot verify
+    # (`sender_unverified` from a shell and from `muse exec`), so Muse reports
+    # an address for its in-session messaging, not a shell command.
     return SessionMessageRoute(
         "muse",
-        "available",
+        "address_only",
         session_id,
         _muse_session_name(env, session_id),
         "muse-session-message",
-        f"muse session-message send --target {quoted}",
-        "stdin",
     )
 
 

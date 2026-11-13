@@ -575,14 +575,10 @@ def test_session_outputs_message_route(repo_scenario):
         run_cli(["session", "--json"], muse_env, world.parent_path).stdout
     )
     assert document["agent"] is None
-    assert document["message_route"]["command"] == (
-        f"muse session-message send --target {muse_id}"
-    )
+    assert document["message_route"]["status"] == "address_only"
+    assert document["message_route"]["command"] is None
     human = run_cli(["session"], muse_env, world.parent_path).stdout
-    assert (
-        f"message route: muse session-message send --target {muse_id} "
-        "(muse, message on stdin)"
-    ).encode() in human
+    assert f"message route: {muse_id} (muse, address only)".encode() in human
     assert b"\x1b" not in human and b"\x07" not in human
     assert b"message route name: gold" in human
 

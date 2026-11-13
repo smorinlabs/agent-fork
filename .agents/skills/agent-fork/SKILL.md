@@ -123,7 +123,8 @@ character-for-character and say where the message goes: as the command's
 final argument (`message_via: argument`) or on stdin (`message_via: stdin`).
 Never execute the command. For `address_only`, show `message_route.address`
 terminal-escaped and name the channel (`claude-sendmessage` means the
-`SendMessage` tool; `opencode-session` has no verified delivery command). For
+`SendMessage` tool; `muse-session-message` means Muse's in-session
+messaging; `opencode-session` has no verified delivery command). For
 any other status, show `—` with the exact status. Show `message_route.name`,
 terminal-escaped, when it is non-null. `message_route` is optional and
 informational: its absence never triggers recovery, and an unrecognized

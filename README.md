@@ -389,7 +389,7 @@ agent-fork does not fork or resume them (`agent` stays null).
 |---|---|---|---|---|
 | Claude Code | `CLAUDECODE=1` | `address_only`, or `not_running` | live registry name, as in `messaging` | none: use the `SendMessage` tool |
 | Codex | `CODEX_THREAD_ID` | `available` | thread ID | `codex queue --thread <id> --message` (as the final argument) |
-| Muse | `MUSE_SESSION_ID` | `available` | session ID; `name` from `muse sessions --json` | `muse session-message send --target <id>` (on stdin) |
+| Muse | `MUSE_SESSION_ID` | `address_only` | session ID; `name` from `muse sessions --json` | none: `muse session-message send` refuses unverified senders |
 | OpenCode | `OPENCODE=1` or `OPENCODE_SESSION_ID` | `address_only` | `ses_…` session ID | none |
 
 Other statuses: `not_detected` (no tool's signal), `ambiguous` (signals from
@@ -401,12 +401,14 @@ outer Claude session's name.
 
 What has been verified (2026-11-12; Codex 0.167.2, Muse Code 1.4.18, OpenCode
 2.2.7): `codex queue` queued a message to a thread; Muse and OpenCode
-detection and the Muse name lookup were run inside live sessions. A headless
-`muse exec` session refuses messages (`target_surface_excluded`), so Muse
-delivery to an interactive session is documented from `muse
-session-message --help`, not yet observed. OpenCode has no messaging
-command: `opencode run --session <id>` starts a model turn and creates the
-session if the ID is unknown, so it is not offered as a send command.
+detection and the Muse name lookup were run inside live sessions. Muse is
+address-only because `muse session-message send --target <id>` found an
+interactive target session but refused the sender with `sender_unverified`,
+both from a plain shell and from inside a headless `muse exec` session; Muse
+appears to accept messages only through its own in-session tool. OpenCode has
+no messaging command: `opencode run --session <id>` starts a model turn and
+creates the session if the ID is unknown, so it is not offered as a send
+command.
 
 JSON inspection also reports `agent_signal`, an additive object with
 `status`, `present`, and `missing`. Its status is `absent`, `incomplete`,

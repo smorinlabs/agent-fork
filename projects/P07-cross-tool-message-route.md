@@ -18,7 +18,9 @@ Evidence (probed 2026-11-12 with clean environments; installed versions Codex
   queues a message; the thread reads it when it next runs.
 - Muse sets `MUSE_SESSION_ID` (and `MUSE_THREAD_ID`, same value) for its
   commands and no Claude variables. `muse session-message send --target
-  <uuid-or-name>` reads the body on stdin. `muse sessions --json` lists running
+  <uuid-or-name>` reads the body on stdin, but refuses senders it cannot
+  verify (`sender_unverified`, from a shell and from `muse exec`), so Muse is
+  reported as address only. `muse sessions --json` lists running
   sessions with `sessionId` and `name`.
 - OpenCode sets `OPENCODE=1` and `OPENCODE_SESSION_ID` (`ses_` plus letters and
   digits). It has no messaging command; `opencode run --session <id>` starts a
@@ -60,5 +62,5 @@ Also: when Muse or OpenCode signals are present, P06 `messaging` reports
       raw, never fatal; output references gain the row
 - [x] [P07-T05] README section
 - [x] Regression Test Status: `just all` (769 passed, 1 skipped), `make check`, and `just check-matrix` green
-- [x] [P07-TS04] Live verification 2026-11-12: inside a real Muse session the CLI printed `message route: muse session-message send --target <id> (muse, message on stdin)` and the name `wood-fenrir` from `muse sessions --json`; inside a real OpenCode session it printed the `ses_` address; `codex queue` queued a message to a throwaway thread (exit 0). Not verified: Muse delivery to an interactive session (headless `muse exec` targets return `target_surface_excluded`; an unattended interactive Muse session did not register)
+- [x] [P07-TS04] Live verification 2026-11-12: inside a real Muse session the CLI printed the Muse route with the name `wood-fenrir` from `muse sessions --json`; inside a real OpenCode session it printed the `ses_` address; `codex queue` queued a message to a throwaway thread (exit 0). `muse session-message send` to an interactive session (`dawn-asteroid`, opened by the owner) found the target but returned `sender_unverified` from a shell and from `muse exec`, so the Muse route was changed to `address_only`
 - [ ] [P07-T06] PR merged

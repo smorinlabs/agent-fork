@@ -1237,14 +1237,15 @@ def test_message_route_covers_each_tool_and_mixed_signals(repo_scenario, monkeyp
     assert codex.command == f"codex queue --thread {shlex.quote(thread)} --message"
     assert (codex.channel, codex.message_via) == ("codex-queue", "argument")
 
-    # Muse: the session ID is the address; the body goes on stdin.
+    # Muse: address only. `muse session-message send` rejects senders it cannot
+    # verify (`sender_unverified`, observed from a shell and from `muse exec`).
     muse_id = "01a1d370-4c8a-7ee0-b5d6-13befc579f52"
     muse = route({"MUSE_SESSION_ID": muse_id, "MUSE_THREAD_ID": muse_id})
-    assert (muse.agent, muse.status, muse.address) == ("muse", "available", muse_id)
-    assert muse.command == f"muse session-message send --target {muse_id}"
-    assert (muse.channel, muse.message_via, muse.name) == (
+    assert (muse.agent, muse.status, muse.address) == ("muse", "address_only", muse_id)
+    assert (muse.channel, muse.command, muse.message_via, muse.name) == (
         "muse-session-message",
-        "stdin",
+        None,
+        None,
         None,
     )
 
@@ -1317,7 +1318,7 @@ def test_muse_route_name_comes_from_muse_sessions(repo_scenario):
             "MUSE_SESSION_ID": muse_id,
         }
         result = inspect_session(env, cwd=world.parent_path).message_route
-        assert result.status == "available" and result.address == muse_id
+        assert result.status == "address_only" and result.address == muse_id
         return result.name
 
     assert name_with(f"cat <<'JSON'\n{listing}\nJSON", "found") == "gold-asteroid"
