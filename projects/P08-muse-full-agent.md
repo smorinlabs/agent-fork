@@ -1,6 +1,13 @@
 # P08 — Muse as a full agent-fork agent
 
-Detect Muse sessions and support fork, resume, transcript, and messaging.
+**References**
+- **Trunk:** [PROJECTS.md](../PROJECTS.md)
+- **Successor of:** [P07 — cross-tool message route](P07-cross-tool-message-route.md) (PR #76), which gave Muse detection and an address-only message route
+- **Discussion:** [P09 — OpenCode as a full agent-fork agent](P09-opencode-full-agent-.md), scoped in parallel on `feat/p09-opencode-full-agent`; both touch `agents.py`, `cli.py`, and `session.py`
+- **Prior art:** [`src/agent_fork/codex_app_server.py`](../src/agent_fork/codex_app_server.py), the bounded JSON-RPC stdio client the MSP client follows
+
+## [ ] Project P08: Muse as a full agent-fork agent (v1.5.0)
+**Goal**: Detect Muse sessions and support fork, resume, and transcript the way Claude Code and Codex are supported. Messaging stays address-only.
 
 ### Scope
 agent-fork treats a Muse (Muse Code) session the way it treats Claude Code and Codex: detect it, fork it with its project files, resume it in place, and locate its transcript.
@@ -40,6 +47,8 @@ Running sessions via `muse sessions --json`: verified 2026-11-12, a live `muse e
 - Messaging: keep address-only.
 - Fork timing: lazy, at paste time.
 
+### Tests & Tasks
+
 ### Probe findings (2026-11-13, Muse Code 1.4.20, `--provider echo`, isolated `XDG_DATA_HOME`)
 - **Native fork exists, only over MSP.** `muse schema generate-json-schema` lists stable method `session/fork` (`SessionForkParams`: `commandId` UUIDv7, `sessionId`, optional `cutPoint.lastTurnId`, `excludeItems`). Reached via `muse serve` (newline-delimited JSON-RPC on stdio: `initialize`, then the `initialized` notification, then calls). No CLI `fork` verb. The real index's 4 existing forks all carry `msp_fork_command_id`.
 - **Fork copies completed turns only.** With `cutPoint` omitted the fork takes "all completed turns", so an in-flight parent turn (the one running agent-fork) is not copied. Not yet confirmed against a live session.
@@ -52,5 +61,3 @@ Running sessions via `muse sessions --json`: verified 2026-11-12, a live `muse e
 - **Workspace keys are per checkout path.** `workspace_key` equals the checkout path, so every git worktree is its own workspace.
 - **Trust gate.** Headless subcommands (`muse export`, `muse resume --help`) refuse in a workspace whose trust is undecided ("pass --trust-workspace"). A fresh fork worktree is always such a workspace. `--trust-workspace` must come after the subcommand; before it, Muse starts the TUI.
 
-<!-- Idea state. Minimal by convention.
-     Promote with `project-refine P08` when ready. -->
