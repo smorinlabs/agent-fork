@@ -628,3 +628,79 @@ def test_terminating_the_hook_group_gives_it_a_sigterm_grace_period(tmp_path):
         for pipe in (process.stdout, process.stderr):
             if pipe is not None:
                 pipe.close()
+
+
+@pytest.mark.requires_process_group_signals
+@pytest.mark.parametrize(
+    "signum",
+    [
+        pytest.param(
+            signal.SIGINT, id="T-RBK-14", marks=pytest.mark.matrix("T-RBK-14")
+        ),
+        pytest.param(
+            signal.SIGTERM, id="T-RBK-15", marks=pytest.mark.matrix("T-RBK-15")
+        ),
+    ],
+)
+def test_interrupt_during_worktree_creation_removes_the_claimed_branch(
+    repo_scenario, signum
+):
+    """P02 A15 gate-6 round 3 — the branch is claimed before `git worktree add`,
+    so an interrupt between the two must remove it and say so, rather than
+    leaking it under "interrupted before any mutation"."""
+    from conftest import shim_git
+
+    world = repo_scenario("plain@main")
+    branches_before = subprocess.run(
+        ["git", "branch", "--list", "--format=%(refname:short)"],
+        cwd=world.parent_path,
+        env=world.env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    with shim_git(park_at="worktree add") as shim:
+        environment = dict(world.env)
+        environment["PATH"] = f"{shim.directory}{os.pathsep}{environment['PATH']}"
+        executable = Path(sys.executable).with_name("agent-fork")
+        process = subprocess.Popen(
+            [
+                str(executable),
+                "fork",
+                "irq",
+                "--no-agent",
+                "--worktree-dir",
+                str(world.parent_path.parent / "irq-child"),
+            ],
+            env=environment,
+            cwd=world.parent_path,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            for _ in range(1000):
+                if shim.ready.exists():
+                    break
+                time.sleep(0.01)
+            assert shim.ready.exists(), "fork did not reach git worktree add"
+            os.kill(process.pid, signum)
+            _stdout, stderr = process.communicate(timeout=10)
+        finally:
+            shim.release.touch()
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+    assert process.returncode == 128 + signum, stderr
+    assert b"before any mutation" not in stderr
+    assert b"fork/irq" in stderr, stderr
+    branches_after = subprocess.run(
+        ["git", "branch", "--list", "--format=%(refname:short)"],
+        cwd=world.parent_path,
+        env=world.env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert branches_after == branches_before
