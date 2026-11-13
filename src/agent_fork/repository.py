@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+import signal
+import threading
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from agent_fork.content import gitlink_paths, nul_paths
-from agent_fork.errors import PreconditionError
+from agent_fork.errors import AgentForkError, PreconditionError
 from agent_fork.git import GitCommandError, run_git
+from agent_fork.interrupts import OperationInterrupted, run_with_interruption_handler
 from agent_fork.text import escape_terminal_text
 from agent_fork.worktree_list import list_worktrees
 
@@ -329,6 +333,9 @@ def _unrepresentable_submodules(
     return sorted(gitlinks.intersection(nul_paths(changed.stdout)))
 
 
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
 def validate_fork_guards(
     parent: Path,
     branch: str,
@@ -373,6 +380,38 @@ def validate_fork_guards(
         raise PreconditionError(
             "conflict_worktree_path", f"worktree path already exists: {destination}"
         )
+    # A deleted worktree directory leaves Git's record of it behind. `git
+    # worktree add -b` then creates the branch before refusing the path, so
+    # this must refuse first, while nothing has been created.
+    # `resolve()` cannot canonicalise the case of a path that does not exist,
+    # while Git matches it case-insensitively when core.ignorecase is set.
+    ignorecase = (
+        run_git(
+            info.parent_path,
+            ["config", "--bool", "core.ignorecase"],
+            env=env,
+            check=False,
+        )
+        .stdout.decode()
+        .strip()
+        == "true"
+    )
+
+    def comparable(path: Path) -> str:
+        text = str(path.resolve())
+        # Git folds ASCII only (strcasecmp), so `ß` must not match `ss`.
+        return text.translate(_ASCII_LOWER) if ignorecase else text
+
+    wanted = comparable(destination)
+    for record in list_worktrees(info.parent_path, env=env):
+        if comparable(record.path) == wanted:
+            raise PreconditionError(
+                "conflict_worktree_path",
+                f"worktree path is still registered with Git although its "
+                f"directory is missing: {escape_terminal_text(str(destination))}; "
+                "run 'git worktree prune' to clear the stale record (after "
+                "'git worktree unlock <path>' if it is locked)",
+            )
     operation = mid_operation(info)
     if operation is not None:
         raise PreconditionError(
@@ -484,35 +523,97 @@ def create_worktree_at_anchor(
     anchor: str | None = None,
     env: Mapping[str, str] | None = None,
 ) -> WorktreeCreation:
-    """Atomically ask Git to create branch+worktree and classify race losses."""
+    """Create the fork branch, then its worktree, owning what this call made.
+
+    The branch is created first and on its own. Git refuses that atomically
+    when the name already exists, so a refusal there is a genuine lost race and
+    nothing was created. Once the branch exists this call provably owns it, so
+    a worktree failure afterwards can be rolled back without guessing whether
+    a concurrent creator's branch is being deleted.
+    """
     info = inspect_repository(parent, env=env)
     resolved_anchor = anchor or resolve_anchor(parent, env=env)
+    anchor_commit = (
+        run_git(
+            parent,
+            ["rev-parse", "--verify", f"{resolved_anchor}^{{commit}}"],
+            env=env,
+        )
+        .stdout.decode()
+        .strip()
+    )
     parent_branch = current_branch(parent, env=env)
     default_branches = classify_default_branches(parent, env=env)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        run_git(
+    claimed = False
+
+    def create() -> None:
+        nonlocal claimed
+        result = run_git(
             parent,
-            ["worktree", "add", "-b", branch, str(destination), resolved_anchor],
+            ["branch", "--no-track", branch, anchor_commit],
             env=env,
+            check=False,
         )
-    except GitCommandError as error:
-        branch_now_exists = (
-            run_git(
-                parent,
-                ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
-                env=env,
-                check=False,
-            ).returncode
-            == 0
-        )
-        if branch_now_exists:
-            raise PreconditionError(
-                "conflict_branch_exists",
-                f"branch {branch!r} won a concurrent creation race; "
-                "nothing was created",
+        if result.returncode != 0:
+            exists = (
+                run_git(
+                    parent,
+                    ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+                    env=env,
+                    check=False,
+                ).returncode
+                == 0
+            )
+            if exists:
+                raise PreconditionError(
+                    "conflict_branch_exists",
+                    f"branch {branch!r} won a concurrent creation race; "
+                    "nothing was created",
+                ) from GitCommandError(result)
+            raise GitCommandError(result)
+        claimed = True
+        try:
+            run_git(parent, ["worktree", "add", str(destination), branch], env=env)
+        except GitCommandError as error:
+            removal = _remove_own_creation(
+                parent, branch, destination, anchor_commit, env=env
+            )
+            raise AgentForkError(
+                f"git worktree add failed: {escape_terminal_text(str(error))}; "
+                + _removal_outcome(branch, removal)
             ) from error
-        raise
+
+    # The branch exists from the moment it is claimed, before the pipeline's
+    # rollback is installed, so an interrupt in between must remove it here.
+    # Signal handlers can only be installed from the main thread.
+    try:
+        if threading.current_thread() is threading.main_thread():
+            run_with_interruption_handler(
+                create,
+                message=(
+                    f"fork was interrupted while creating branch {branch!r}; "
+                    f"if it exists, delete it with 'git branch -D {branch}'"
+                ),
+            )
+        else:
+            create()
+    except (OperationInterrupted, KeyboardInterrupt) as interrupted:
+        if not claimed:
+            raise
+        signum = (
+            interrupted.signum
+            if isinstance(interrupted, OperationInterrupted)
+            else signal.SIGINT
+        )
+        removal = _remove_own_creation(
+            parent, branch, destination, anchor_commit, env=env
+        )
+        raise OperationInterrupted(
+            signum,
+            "fork was interrupted while creating its worktree; "
+            + _removal_outcome(branch, removal),
+        ) from interrupted
     return WorktreeCreation(
         path=destination.resolve(),
         branch=branch,
@@ -523,4 +624,75 @@ def create_worktree_at_anchor(
         parent_branch=parent_branch,
         parent_detached=parent_branch is None,
         parent_on_default=parent_branch in default_branches.candidates,
+    )
+
+
+def _remove_own_creation(
+    parent: Path,
+    branch: str,
+    destination: Path,
+    anchor_commit: str,
+    *,
+    env: Mapping[str, str] | None,
+) -> Exception | None:
+    """Remove what a failed or interrupted creation left of this call's fork.
+
+    Git can stop after registering the worktree (a failing post-checkout hook,
+    an interrupt during checkout) or before (an unwritable destination). The
+    branch is this call's either way, so the worktree is removed only when it
+    is ours at our destination, and the branch only while it still points at
+    the anchor. Returns the error that prevented removal, or None.
+
+    It runs with SIGINT and SIGTERM ignored: the user has already asked to
+    stop, and a second Ctrl-C landing mid-cleanup would otherwise strand the
+    branch. Ignoring, unlike blocking, leaves no pending signal to fire after.
+    """
+    with _terminal_signals_ignored():
+        try:
+            attached = _worktree_branches(parent, env=env).get(branch)
+            if attached is not None:
+                if attached.resolve() != destination.resolve():
+                    return RuntimeError(f"branch is checked out at {attached}")
+                # Double force: an interrupted checkout leaves Git's
+                # `initializing` lock, which one --force will not remove. Safe
+                # because this is our own worktree at our own destination.
+                run_git(
+                    parent,
+                    ["worktree", "remove", "-f", "-f", str(attached)],
+                    env=env,
+                )
+            run_git(
+                parent,
+                ["update-ref", "-d", f"refs/heads/{branch}", anchor_commit],
+                env=env,
+            )
+        except Exception as error:
+            return error
+    return None
+
+
+@contextmanager
+def _terminal_signals_ignored() -> Iterator[None]:
+    # Signal dispositions can only be changed from the main thread.
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = {
+        signum: signal.signal(signum, signal.SIG_IGN)
+        for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def _removal_outcome(branch: str, failure: Exception | None) -> str:
+    if failure is None:
+        return f"the branch {branch!r} and its worktree, if any, were removed"
+    return (
+        f"the branch {branch!r} this attempt created could not be removed "
+        f"({escape_terminal_text(str(failure))}); delete it with "
+        f"'git branch -D {branch}' once nothing uses it"
     )

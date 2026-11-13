@@ -267,7 +267,7 @@ def test_race_loss_between_guard_pass_and_worktree_add(repo_scenario):
         winner_path = world.parent_path.parent / "winner"
         validate_fork_guards(world.parent_path, branch, loser_path, env=world.env)
         anchor = resolve_anchor(world.parent_path, env=world.env)
-        with shim_git(park_at="worktree add") as shim:
+        with shim_git(park_at="branch --no-track") as shim:
             loser_env = dict(world.env)
             loser_env["PATH"] = f"{shim.directory}:{loser_env['PATH']}"
             with ThreadPoolExecutor(max_workers=1) as executor:
@@ -282,7 +282,7 @@ def test_race_loss_between_guard_pass_and_worktree_add(repo_scenario):
                 deadline = time.monotonic() + 3
                 while not shim.ready.exists() and time.monotonic() < deadline:
                     time.sleep(0.01)
-                assert shim.ready.exists(), "race shim did not reach worktree add"
+                assert shim.ready.exists(), "race shim did not reach branch creation"
                 winner = create_worktree_at_anchor(
                     world.parent_path,
                     branch,
@@ -298,3 +298,251 @@ def test_race_loss_between_guard_pass_and_worktree_add(repo_scenario):
         assert winner_path.exists()
         assert not loser_path.exists()
         assert not list((world.parent_path / ".agent-fork").glob("**/*"))
+
+
+@pytest.mark.matrix("T-GRD-37")
+def test_destination_still_registered_as_missing_worktree_refuses(repo_scenario):
+    """T-GRD-37 — P02 A15 — a destination Git still records as a worktree refuses.
+
+    Given:  Git still holds worktree metadata for the destination, whose
+            directory was deleted (`git worktree list` marks it prunable)
+    Expect: refusal before any mutation as conflict_worktree_path with a
+            `git worktree prune` remedy; the fork leaves no branch behind,
+            rather than failing as a misreported concurrent-creation race
+    Source: P02 A15 (found during P02-TS07)
+    """
+    import shutil
+    import subprocess
+
+    from agent_fork.errors import PreconditionError
+    from agent_fork.pipeline import ForkRequest, fork
+    from agent_fork.repository import validate_fork_guards
+
+    world = repo_scenario("plain@main")
+    destination = world.parent_path.parent / "stale"
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(world.parent_path), *args],
+            env=world.env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+
+    git("worktree", "add", "-q", "-b", "earlier", str(destination))
+    shutil.rmtree(destination)
+    assert "prunable" in git("worktree", "list", "--porcelain")
+    branches_before = git("branch", "--list", "--format=%(refname:short)")
+
+    with pytest.raises(PreconditionError) as guard:
+        validate_fork_guards(world.parent_path, "fork/new", destination, env=world.env)
+    assert guard.value.code == "conflict_worktree_path"
+    assert "git worktree prune" in str(guard.value)
+
+    request = ForkRequest(
+        parent=world.parent_path,
+        destination=destination,
+        name="new",
+        branch="fork/new",
+        agent=None,
+    )
+    with pytest.raises(PreconditionError) as forked:
+        fork(request, env=world.env)
+    assert forked.value.code == "conflict_worktree_path"
+    assert git("branch", "--list", "--format=%(refname:short)") == branches_before
+
+
+def _git_out(world, *args):
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-C", str(world.parent_path), *args],
+        env=world.env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+@pytest.mark.matrix("T-GRD-38")
+def test_case_variant_of_registered_missing_worktree_refuses(repo_scenario):
+    """T-GRD-38 — P02 A15 review F1 — the stale-record guard honours core.ignorecase.
+
+    Given:  Git still records a missing worktree at `Stale`, and the repository
+            reports core.ignorecase (the macOS default)
+    Expect: forking to `stale` refuses as conflict_worktree_path, and no branch leaks
+    Source: P02 A15 gate-6 review
+    """
+    import shutil
+
+    from agent_fork.errors import PreconditionError
+    from agent_fork.pipeline import ForkRequest, fork
+
+    world = repo_scenario("plain@main")
+    if (
+        _git_out(
+            world, "config", "--bool", "--default", "false", "core.ignorecase"
+        ).strip()
+        != "true"
+    ):
+        pytest.skip("repository is case-sensitive")
+    registered = world.parent_path.parent / "Stale"
+    _git_out(world, "worktree", "add", "-q", "-b", "earlier", str(registered))
+    shutil.rmtree(registered)
+    branches_before = _git_out(world, "branch", "--list", "--format=%(refname:short)")
+
+    request = ForkRequest(
+        parent=world.parent_path,
+        destination=world.parent_path.parent / "stale",
+        name="case",
+        branch="fork/case",
+        agent=None,
+    )
+    with pytest.raises(PreconditionError) as caught:
+        fork(request, env=world.env)
+    assert caught.value.code == "conflict_worktree_path"
+    assert _git_out(world, "branch", "--list", "--format=%(refname:short)") == (
+        branches_before
+    )
+
+
+@pytest.mark.matrix("T-GRD-39")
+def test_worktree_add_failure_after_branch_creation_rolls_branch_back(repo_scenario):
+    """T-GRD-39 — P02 A15 review F2 — a failure Git hits after creating the branch.
+
+    Given:  the destination's parent directory is read-only, which no guard
+            detects, so `git worktree add -b` creates the branch and then fails
+    Expect: the branch this attempt created is removed and Git's real failure is
+            reported, never conflict_branch_exists ("won a concurrent creation race")
+    Source: P02 A15 gate-6 review
+    """
+    import os
+
+    from agent_fork.errors import PreconditionError
+    from agent_fork.pipeline import ForkRequest, fork
+
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    world = repo_scenario("plain@main")
+    locked = world.parent_path.parent / "read-only"
+    locked.mkdir()
+    locked.chmod(0o555)
+    branches_before = _git_out(world, "branch", "--list", "--format=%(refname:short)")
+    request = ForkRequest(
+        parent=world.parent_path,
+        destination=locked / "child",
+        name="ro",
+        branch="fork/ro",
+        agent=None,
+    )
+    try:
+        with pytest.raises(Exception) as caught:
+            fork(request, env=world.env)
+    finally:
+        locked.chmod(0o755)
+    assert not (
+        isinstance(caught.value, PreconditionError)
+        and caught.value.code == "conflict_branch_exists"
+    ), caught.value
+    assert _git_out(world, "branch", "--list", "--format=%(refname:short)") == (
+        branches_before
+    )
+
+
+@pytest.mark.matrix("T-GRD-40")
+def test_race_loser_never_deletes_a_winners_unattached_branch(repo_scenario):
+    """T-GRD-40 — P02 A15 gate-6 round 2 — ownership is explicit, never inferred.
+
+    Given:  after the guards pass, a concurrent creator's branch appears at the
+            same anchor with no worktree yet (mid-flight `git worktree add -b`)
+    Expect: the loser reports conflict_branch_exists and the winner's branch
+            survives untouched
+    Source: P02 A15 gate-6 round 2
+    """
+    from agent_fork.errors import PreconditionError
+    from agent_fork.repository import (
+        create_worktree_at_anchor,
+        resolve_anchor,
+        validate_fork_guards,
+    )
+
+    world = repo_scenario("plain@main")
+    destination = world.parent_path.parent / "loser"
+    validate_fork_guards(world.parent_path, "fork/x", destination, env=world.env)
+    anchor = resolve_anchor(world.parent_path, env=world.env)
+    _git_out(world, "branch", "fork/x", anchor)
+    with pytest.raises(PreconditionError) as caught:
+        create_worktree_at_anchor(
+            world.parent_path, "fork/x", destination, anchor=anchor, env=world.env
+        )
+    assert caught.value.code == "conflict_branch_exists"
+    assert _git_out(world, "rev-parse", "refs/heads/fork/x").strip() == anchor
+    assert not destination.exists()
+
+
+@pytest.mark.matrix("T-GRD-41")
+def test_failing_post_checkout_hook_rolls_back_its_worktree_and_branch(
+    repo_scenario,
+):
+    """T-GRD-41 — P02 A15 gate-6 round 2 — Git fails after registering the worktree.
+
+    Given:  a post-checkout hook that exits 1, and an anchor given as `HEAD`
+            rather than a commit ID
+    Expect: a runtime_error naming the Git failure (never conflict_branch_exists),
+            with neither the worktree nor the branch left behind
+    Source: P02 A15 gate-6 round 2
+    """
+    from agent_fork.errors import AgentForkError
+    from agent_fork.repository import create_worktree_at_anchor
+
+    world = repo_scenario("plain@main")
+    hooks = world.parent_path.parent / "hooks"
+    hooks.mkdir()
+    hook = hooks / "post-checkout"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    _git_out(world, "config", "core.hooksPath", str(hooks))
+    branches_before = _git_out(world, "branch", "--list", "--format=%(refname:short)")
+    destination = world.parent_path.parent / "hooked"
+    with pytest.raises(AgentForkError) as caught:
+        create_worktree_at_anchor(
+            world.parent_path, "fork/hk", destination, anchor="HEAD", env=world.env
+        )
+    assert caught.value.code == "runtime_error", caught.value
+    assert "concurrent creation race" not in str(caught.value)
+    assert str(destination) not in _git_out(world, "worktree", "list", "--porcelain")
+    assert _git_out(world, "branch", "--list", "--format=%(refname:short)") == (
+        branches_before
+    )
+
+
+@pytest.mark.matrix("T-GRD-42")
+def test_stale_record_guard_folds_ascii_case_only(repo_scenario):
+    """T-GRD-42 — P02 A15 gate-6 round 2 — case folding matches Git's.
+
+    Given:  core.ignorecase, and a missing-but-registered worktree at `Straße`
+    Expect: `strasse` is not refused, because Git folds ASCII case only
+    Source: P02 A15 gate-6 round 2
+    """
+    import shutil
+
+    from agent_fork.repository import validate_fork_guards
+
+    world = repo_scenario("plain@main")
+    if (
+        _git_out(
+            world, "config", "--bool", "--default", "false", "core.ignorecase"
+        ).strip()
+        != "true"
+    ):
+        pytest.skip("repository is case-sensitive")
+    registered = world.parent_path.parent / "Straße"
+    _git_out(world, "worktree", "add", "-q", "-b", "earlier", str(registered))
+    shutil.rmtree(registered)
+    validate_fork_guards(
+        world.parent_path,
+        "fork/s",
+        world.parent_path.parent / "strasse",
+        env=world.env,
+    )

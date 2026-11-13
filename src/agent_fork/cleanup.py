@@ -737,6 +737,24 @@ def cleanup(
 
     def mutate() -> None:
         if not plan.owned:
+            # No record guards an unregistered target, so the confirmed pair is
+            # the only evidence of what the user agreed to remove. Re-establish
+            # it after consent: a worktree switched to another branch, or a
+            # path another repository now occupies, is not what was confirmed.
+            changed = PreconditionError(
+                "cleanup_target_changed",
+                "the cleanup target changed while the removal was awaiting "
+                "confirmation; nothing was removed",
+            )
+            try:
+                anchor_common_dir = inspect_repository(plan.anchor, env=env).common_dir
+                observed = live_worktree_pairs(plan.anchor, env=env)
+            except Exception as error:
+                raise changed from error
+            if anchor_common_dir != plan.git_root:
+                raise changed
+            if (str(plan.worktree), plan.branch) not in observed:
+                raise changed
             destroy()
             return
 

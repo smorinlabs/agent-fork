@@ -190,6 +190,57 @@ def test_cleanup_force_extends_targeting_and_overrides_guards(repo_scenario):
     assert result.removed and not target.exists()
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(
+            "branch-switched", id="T-CLN-34", marks=pytest.mark.matrix("T-CLN-34")
+        ),
+        pytest.param(
+            "path-replaced", id="T-CLN-35", marks=pytest.mark.matrix("T-CLN-35")
+        ),
+    ],
+)
+def test_cleanup_force_unregistered_target_changed_while_confirming_refuses(
+    repo_scenario, change
+):
+    """P02 A14: consent has no time bound, so an unregistered target is
+    re-established after confirmation exactly as a registered one is."""
+    from agent_fork.cleanup import cleanup, resolve_cleanup_target
+    from agent_fork.errors import PreconditionError
+    from agent_fork.repository import create_worktree_at_anchor
+    from conftest import origin
+
+    world = repo_scenario("plain@main", remote=origin())
+    target = world.parent_path.parent / "outside"
+    create_worktree_at_anchor(world.parent_path, "outside", target, env=world.env)
+    plan = resolve_cleanup_target(
+        str(target), cwd=world.parent_path, env=world.env, force=True
+    )
+    assert not plan.owned
+
+    # The prompt is waiting; the target changes underneath it.
+    def git(*args, cwd):
+        subprocess.run(["git", *args], cwd=cwd, env=world.env, check=True)
+
+    if change == "branch-switched":
+        git("switch", "-q", "-c", "replacement", cwd=target)
+    else:
+        other = world.parent_path.parent / "other-repo"
+        git("init", "-q", "-b", "main", str(other), cwd=world.parent_path.parent)
+        git("commit", "-q", "--allow-empty", "-m", "other", cwd=other)
+        git("worktree", "remove", str(target), cwd=world.parent_path)
+        git("worktree", "add", "-q", "-b", "outside", str(target), cwd=other)
+    (target / "unsaved.txt").write_text("precious\n")
+
+    with pytest.raises(PreconditionError) as caught:
+        cleanup(plan, cwd=world.parent_path, env=world.env, force=True)
+    assert caught.value.code == "cleanup_target_changed"
+    assert (target / "unsaved.txt").read_text() == "precious\n"
+    if change == "branch-switched":
+        assert _branch_exists(world, "outside")
+
+
 @pytest.mark.matrix("T-CLN-14")
 def test_cleanup_force_does_not_override_cwd_guard(repo_scenario):
     from agent_fork.cleanup import cleanup, resolve_cleanup_target

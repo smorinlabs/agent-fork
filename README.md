@@ -275,7 +275,10 @@ a different repository or to a fork that has since been removed — and `--force
 does not override that refusal, because it is the only evidence that the
 worktree still belongs to the repository its record names. If several records
 claim one target, `cleanup` refuses with `cleanup_registry_ambiguous` rather
-than choosing.
+than choosing. A target with no record, reached with `--force`, is checked again
+after you confirm: if its worktree is now on another branch, or its path now
+belongs to a different worktree, `cleanup` refuses with `cleanup_target_changed`
+and removes nothing.
 
 Two consequences are worth knowing. **Run `cleanup <name>` from inside the
 repository**: a fork name is resolved against the invoking repository, so the
@@ -891,7 +894,7 @@ same paths.
 | 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy`, `entry_unreadable`, `strict_skip_refused` |
 | 2 | Usage error or required prompt disabled | `config_error` |
 | 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown`, `claude_parent_incomplete_analysis` |
-| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable`, `submodule_cold_content`, `submodule_transport_unsafe`, `conflict_fork_registered`, `cleanup_registry_stale`, `cleanup_registry_ambiguous` |
+| 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable`, `submodule_cold_content`, `submodule_transport_unsafe`, `conflict_fork_registered`, `cleanup_registry_stale`, `cleanup_registry_ambiguous`, `cleanup_target_changed` |
 | 130 / 143 | Interrupted by SIGINT / SIGTERM | `interrupted_sigint`, `interrupted_sigterm` |
 
 Exit 4 remains reserved because this local tool has no authentication failure

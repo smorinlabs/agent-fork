@@ -178,7 +178,7 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-11 | unborn HEAD, bare repo → refuse, exit 5, repo_no_commits, remedy text asserted | topology=unborn(bare) | F | live | REQ-19 (A2) |
 | T-GRD-12 | unmerged index, conflict markers present → refuse, exit 5, unmerged_index, conflicted paths listed | baseline | F | live | REQ-19 (A4) |
 | T-GRD-13 | unmerged index, markerless (no conflict markers) → refuse, exit 5, unmerged_index, conflicted paths listed | baseline | F | live | REQ-19 (A4) |
-| T-GRD-14 | race loss — shim-barrier parks run A between guard-pass and `worktree add`; B completes first; A released → A exits 5, conflict_branch_exists, nothing left | baseline | F | live | REQ-11 (A1); spec §6.6 |
+| T-GRD-14 | race loss — shim-barrier parks run A between guard-pass and branch creation; B completes first; A released → A exits 5, conflict_branch_exists, nothing left | baseline | F | live | REQ-11 (A1); spec §6.6 |
 | T-GRD-15 | issue #32 — the `conflict_branch_worktree` refusal escapes the attached worktree path, so a hostile directory name cannot drive the terminal | baseline | F | live | issue #32 |
 | T-GRD-16 | issue #32 — the `unmerged_index` refusal escapes conflicted filenames | baseline | F | live | issue #32 |
 | T-GRD-17 | issue #35 — injected `core.symlinks=false` cannot flatten a committed symlink in the child; the path is unmodified so no verification rung covers it | baseline | F | live | issue #35; A2 design doc §C3 |
@@ -201,6 +201,12 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-34 | Production finding 4 — direct index stages 1–3 inside an initialized submodule refuse a real fork as `unmerged_index` before mutation even when the top-level index is merged | baseline | F | live | post-merge production review |
 | T-GRD-35 | Production finding 4 — dry-run applies the same recursive unmerged-index guard and qualified path reporting as a real fork | baseline | F | live | post-merge production review |
 | T-GRD-36 | Production finding 4 — recursive unmerged-index inspection reaches depth two and remains scoped to `with_state and with_submodules`, preserving both opt-outs | baseline | F | live | post-merge production review |
+| T-GRD-37 | P02 A15 — a destination whose directory is gone but which Git still records as a (prunable) worktree refuses before mutation as `conflict_worktree_path` with a `git worktree prune` remedy, and the fork leaves no branch behind instead of reporting a concurrent-creation race | baseline | F | live | P02 A15 |
+| T-GRD-38 | P02 A15 review — with core.ignorecase, a destination that differs only in letter case from a missing-but-registered worktree refuses as `conflict_worktree_path` and leaks no branch | baseline | F | live | P02 A15 gate-6 |
+| T-GRD-39 | P02 A15 review — when `git worktree add -b` fails after creating the branch for a reason no guard sees (read-only destination parent), the branch this attempt created is removed and Git's real failure is reported instead of `conflict_branch_exists` | baseline | F | live | P02 A15 gate-6 |
+| T-GRD-40 | P02 A15 round 2 — a concurrent creator's branch that appears at the same anchor with no worktree yet makes the loser report `conflict_branch_exists`, and the winner's branch survives | baseline | F | live | P02 A15 gate-6 r2 |
+| T-GRD-41 | P02 A15 round 2 — a failing post-checkout hook (Git fails after registering the worktree), with a non-SHA anchor, reports `runtime_error` naming the Git failure and leaves neither worktree nor branch | baseline | F | live | P02 A15 gate-6 r2 |
+| T-GRD-42 | P02 A15 round 2 — under core.ignorecase the stale-record guard folds ASCII case only, matching Git, so `strasse` is not refused by a registered `Straße` | baseline | F | live | P02 A15 gate-6 r2 |
 
 ---
 
@@ -469,6 +475,9 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 | T-RBK-11 | A12 gate-6 review (CodeRabbit) — `terminate_active_setup_hook()` runs the full SIGTERM-then-SIGKILL reap ladder rather than sending SIGKILL directly, so a live hook that traps SIGTERM to clean up actually gets the chance; complements T-RBK-10's SIGTERM-ignoring-survivor case | baseline | F | live | REQ-22; P02 A12 gate-6 (CodeRabbit, PR #65) |
 | T-RBK-12 | SIGTERM during `cleanup`'s `git worktree remove --force` → active Git process group killed, exit 143 with partial-removal warning and `agent-fork prune` remedy, registry record retained | baseline | F | live | REQ-31; cleanup signal window |
 | T-RBK-13 | SIGTERM in `run_git` after `Popen` starts Git but before `_ACTIVE.process` registration → signal stays blocked until registration, then the handler kills the Git process group and exits 143 | baseline | F | live | REQ-22; PR #66 review |
+| T-RBK-14 | SIGINT while `fork` is parked in `git worktree add` (after it claimed the branch) → exit 130, the claimed branch is removed, and the message names the branch instead of claiming no mutation happened | baseline | F | live | P02 A15 gate-6 r3 |
+| T-RBK-15 | SIGTERM at the same point → exit 143 with a rendered message naming the branch (not a bare default-handler death), and the claimed branch is removed | baseline | F | live | P02 A15 gate-6 r3 |
+| T-RBK-16 | SIGINT while `git worktree add` is mid-checkout (Git's `initializing` lock is on the new worktree) → exit 130, and the locked worktree, its admin directory, the destination, and the claimed branch are all removed | baseline | F | live | P02 A15 gate-6 r4 |
 
 ---
 
@@ -566,6 +575,8 @@ the group.
 | T-CLN-31 | a structurally invalid freshness-index file degrades cleanup disclosure to the neutral empty `retained_metadata` plus its own notice, never a crash and never a partial, misleading result | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
 | T-CLN-32 | a hostile session ID (embedded newline and shell metacharacters) in a generated removal command round-trips through `shlex` as one safely-quoted argument, never letting the command break out of its argument position | freshness=A10 | C | live | P02 A10 gate-6; REQ-17 |
 | T-CLN-33 | an unreadable freshness index nulls only the freshness half of disclosure; an unrelated, independently-readable retained lineage claim is still disclosed, not suppressed by the freshness fault | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
+| T-CLN-34 | P02 A14 — a `--force` unregistered cleanup target whose worktree is switched to another branch and given an uncommitted file while confirmation is pending refuses with `cleanup_target_changed`, destroying neither the worktree, the file, nor its branch | baseline | F | live | P02 A14 |
+| T-CLN-35 | P02 A14 — a `--force` unregistered cleanup target whose path is taken over by another repository's worktree (same branch name) while confirmation is pending refuses with `cleanup_target_changed` (before the fix this shape failed as a raw Git `runtime_error`; a target directory deleted or moved while confirming still does, with nothing destroyed — a known limit), and the occupant's files survive | baseline | F | live | P02 A14 |
 
 ---
 
