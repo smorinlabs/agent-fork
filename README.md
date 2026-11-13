@@ -275,7 +275,10 @@ a different repository or to a fork that has since been removed — and `--force
 does not override that refusal, because it is the only evidence that the
 worktree still belongs to the repository its record names. If several records
 claim one target, `cleanup` refuses with `cleanup_registry_ambiguous` rather
-than choosing.
+than choosing. A target with no record, reached with `--force`, is checked again
+after you confirm: if its worktree is now on another branch, or its path now
+belongs to a different worktree, `cleanup` refuses with `cleanup_target_changed`
+and removes nothing.
 
 Two consequences are worth knowing. **Run `cleanup <name>` from inside the
 repository**: a fork name is resolved against the invoking repository, so the
