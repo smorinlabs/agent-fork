@@ -10,8 +10,10 @@
 
 ## [ ] Project P09: OpenCode as a full agent-fork agent (v1.5.0)
 **Goal**: agent-fork treats OpenCode the way it treats Claude Code and Codex:
-it detects an OpenCode session, then forks it, resumes it, reports how to read
-its transcript, and reports an exact command to message it.
+it detects an OpenCode session, forks it, and resumes it. Owner decision
+2026-11-13: same capabilities as Claude Code and Codex, mapped the same way,
+with no contract extensions. The report fields that already exist for every
+agent (`transcript`, `message_route`, `messaging`) keep their contracts.
 
 ### Scope
 1. **Detection.** `opencode` becomes an agent in the single
@@ -24,30 +26,35 @@ its transcript, and reports an exact command to message it.
    session.get --param sessionID=<id>` must succeed. A refusal is a new typed
    error in `ERROR_CATALOG` (`errors.py`) and in the README exit-code table.
    Reason: `opencode --session <unknown>` silently creates a new session.
-3. **Fork (owner decision 2026-11-13, design A).** After the worktree exists,
-   agent-fork calls `session.fork` and then `session.move` into the worktree,
-   and prints `cd <worktree> && opencode --session <child>`. No model turn
-   runs. If a later pipeline step fails, rollback deletes the child session.
-   This is the first fork in which agent-fork changes agent state itself;
-   Claude and Codex forks happen only when the owner pastes the command.
+3. **Fork as the last step (owner decision 2026-11-13, design A, lighter
+   ordering).** The worktree, file copy, submodules, setup hook, and fork
+   registry run unchanged first. Only after they all succeed does agent-fork
+   call `session.fork` and then `session.move` into the worktree. It then
+   builds the paste command `cd <worktree> && opencode --session <child>`
+   from the child ID. No model turn runs. The only compensation is: if
+   `session.move` fails, delete the just-created child. Worktree rollback
+   (`run_with_rollback`) needs no OpenCode knowledge. This is the first fork
+   in which agent-fork changes agent state itself; Claude and Codex forks
+   happen only when the owner pastes the command. The OpenCode paste command
+   is built after the fork, not before; Claude and Codex keep their order.
 4. **Resume.** `resume_command` is `cd <session directory> && opencode
-   --session <id>`, after the existence preflight.
-5. **Transcript (owner decision, option C).** `transcript` gains a `command`
-   field. OpenCode reports `{path: null, exists: true, command: "opencode
-   session export <id>"}`; Claude and Codex report `command: null`. The
-   `SessionTranscript` invariant changes from "exists needs a path" to
-   "exists needs a path or a command".
-6. **Messaging (owner decision, option B).** OpenCode's `message_route`
-   becomes `available` with `command: opencode api session.prompt --param
-   sessionID=<id> -d` and a new `message_via: json_body`: the final argument
-   is the JSON object `{"text": <message>, "delivery": "queue"}`.
+   --session <id>`, after the existence preflight. The session report's
+   `fork_command` and `resume_command` are filled for OpenCode as for
+   Claude and Codex.
+5. **Transcript: existing contract.** OpenCode has no per-session file, so
+   `transcript` reports `{path: null, exists: false}`. No new field.
+6. **Messaging: unchanged.** `message_route` stays `address_only`, the
+   same status Claude reports (P07). `messaging` stays Claude-only.
 
 ### Out of scope
 - Muse (P08).
 - The P02 fault register.
 - Changing Claude or Codex behavior, beyond the additive `transcript.command: null`.
 - `--standalone` and custom `--server` OpenCode servers; only the background service.
-- `steer` delivery (injecting into a running turn).
+- Contract extensions (owner decision 2026-11-13): a transcript `command`
+  field (`opencode session export <id>`) and a `message_via: json_body`
+  route for `opencode api session.prompt`. Both were proven by probes (see
+  Evidence) and can return as a separate idea.
 - A minimum OpenCode version: 2.2.7 is recorded as observed, not as a floor.
   The server describes its API as an "Experimental HttpApi surface".
 
@@ -79,6 +86,17 @@ created through the API and deleted afterwards; no model turn ran.
   (`session.inbox.cancel`). `session.active` stayed empty while the TUI was
   idle, so it reports running turns, not open TUIs.
 
+- Manual proof of the last-step fork (2026-11-13): scratch repo
+  `~/tmp/p09-poc-repo` with linked worktree `~/tmp/p09-poc-wt` created first;
+  then `session.fork` (child `ses_e28dc03bdffey68mUW28f9PNEU`) and
+  `session.move` into the worktree both exited 0. `opencode session list`
+  run inside the worktree lists the child. The child holds the parent's 1
+  user and 2 assistant messages, plus `idle` and `location-switched` marker
+  rows; the parent is unchanged. Failure path: `session.move` to a missing
+  directory returns HTTP 400 `Directory does not exist` (exit 1), and
+  `session.remove` then deletes the child. Pending: the owner opens the
+  child in a TUI with the paste command.
+
 ### Open questions
 - [answered 2026-11-13] Is there a supported way to deliver a message into a
   running OpenCode session? Yes: `opencode api session.prompt` with
@@ -87,7 +105,8 @@ created through the API and deleted afterwards; no model turn ran.
   through the background service, or a separate copy? The same session: a
   queued message appeared in the owner's open TUI.
 - [answered 2026-11-13] Fork through the API or through a paste command?
-  Through the API (design A); `run --fork` requires a message and a model turn.
+  Through the API (design A), as the last step; `run --fork` requires a
+  message and a model turn.
 - What does `opencode api` do when the background service is stopped:
   auto-start it, or fail? Not probed, to avoid stopping the owner's service.
   Cover both cases with fakes and probe during implementation.
