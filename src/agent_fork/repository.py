@@ -373,6 +373,18 @@ def validate_fork_guards(
         raise PreconditionError(
             "conflict_worktree_path", f"worktree path already exists: {destination}"
         )
+    # A deleted worktree directory leaves Git's record of it behind. `git
+    # worktree add -b` then creates the branch before refusing the path, so
+    # this must refuse first, while nothing has been created.
+    wanted = destination.resolve()
+    for record in list_worktrees(info.parent_path, env=env):
+        if record.path.resolve() == wanted:
+            raise PreconditionError(
+                "conflict_worktree_path",
+                f"worktree path is still registered with Git although its "
+                f"directory is missing: {escape_terminal_text(str(destination))}; "
+                "run 'git worktree prune' to clear the stale record",
+            )
     operation = mid_operation(info)
     if operation is not None:
         raise PreconditionError(
