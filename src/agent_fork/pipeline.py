@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import shutil
 import subprocess
 import uuid
 from collections.abc import Callable, Mapping
@@ -40,6 +41,7 @@ from agent_fork.include import (
 from agent_fork.lineage import LineageClaim, add_lineage
 from agent_fork.materialize import materialize
 from agent_fork.models import RegistryEntry
+from agent_fork.opencode_api import fork_into
 from agent_fork.registry import add_entry, occupied_fork, remove_entry
 from agent_fork.repository import (
     WorktreeCreation,
@@ -182,17 +184,24 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
         else None
     )
     launch_directory = request.destination.resolve()
+    opencode = resolved_agent is not None and resolved_agent.agent == "opencode"
     launch = (
         build_launch_command(
             resolved_agent,
             worktree=launch_directory,
             name=request.name,
             extra_args=request.extra_args,
-            child_session_id=planned_child_id,
+            # OpenCode's child exists only after the last step forks it. Render
+            # with the parent ID now so unsafe input refuses before mutation;
+            # the real command is rebuilt from the child below.
+            child_session_id=(
+                resolved_agent.parent_session_id if opencode else planned_child_id
+            ),
         )
         if resolved_agent is not None
         else LaunchCommand(f"cd {shlex.quote(str(launch_directory))}", None, ())
     )
+    forked_child: list[str] = []
     parent_status = run_git(
         request.parent, ["status", "--porcelain=v1", "-z"], env=env
     ).stdout
@@ -351,9 +360,39 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                 with suppress(Exception):
                     remove_entry(entry.token(), env=env)
                 raise
+        if opencode:
+            assert resolved_agent is not None
+            # The last step: everything that can fail has succeeded, so the
+            # only OpenCode change is made once. A failure here removes this
+            # call's record; rollback then removes the worktree, and
+            # `fork_into` has already deleted a child it could not move.
+            try:
+                forked_child.append(
+                    fork_into(
+                        request.agent_executable
+                        or shutil.which("opencode", path=env.get("PATH"))
+                        or "opencode",
+                        resolved_agent.parent_session_id,
+                        creation.path,
+                        env,
+                    )
+                )
+            except BaseException:
+                with suppress(Exception):
+                    remove_entry(entry.token(), env=env)
+                raise
         return included.copied, setup_hook
 
     included, setup_hook = run_with_rollback(creation, finish, env=env)
+    if forked_child:
+        assert resolved_agent is not None
+        launch = build_launch_command(
+            resolved_agent,
+            worktree=launch_directory,
+            name=request.name,
+            extra_args=request.extra_args,
+            child_session_id=forked_child[0],
+        )
     return ForkResult(
         creation,
         launch,

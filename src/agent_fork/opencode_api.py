@@ -10,13 +10,17 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Mapping
+from contextlib import suppress
+from pathlib import Path
 
+from agent_fork.agents import OPENCODE_SESSION_ID
+from agent_fork.errors import AgentForkError
 from agent_fork.text import escape_terminal_text
 
 OPENCODE_API_TIMEOUT = 30.0
 
 
-class OpencodeApiError(Exception):
+class OpencodeApiError(AgentForkError):
     """An `opencode api` call failed; `not_found` marks an unknown session."""
 
     def __init__(self, message: str, *, not_found: bool = False) -> None:
@@ -69,3 +73,25 @@ def call(
     if not isinstance(data, dict):
         raise OpencodeApiError(f"`opencode api {operation}` returned no data object")
     return data
+
+
+def fork_into(
+    binary: str, parent_id: str, directory: Path, env: Mapping[str, str]
+) -> str:
+    """Fork `parent_id` and move the child into `directory`; return the child ID.
+
+    The child exists from the moment `session.fork` answers, so any failure
+    after it, an interrupt included, deletes the child before re-raising.
+    """
+    data = call(binary, "session.fork", parent_id, env, body={})
+    child = data.get("id")
+    if not isinstance(child, str) or OPENCODE_SESSION_ID.fullmatch(child) is None:
+        raise OpencodeApiError("`opencode api session.fork` returned no child ID")
+    try:
+        call(binary, "session.move", child, env, body={"directory": str(directory)})
+    except BaseException:
+        # Best-effort: the failure that triggered this is the one to report.
+        with suppress(Exception):
+            call(binary, "session.remove", child, env)
+        raise
+    return child

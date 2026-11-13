@@ -488,6 +488,10 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 | T-RBK-14 | SIGINT while `fork` is parked in `git worktree add` (after it claimed the branch) → exit 130, the claimed branch is removed, and the message names the branch instead of claiming no mutation happened | baseline | F | live | P02 A15 gate-6 r3 |
 | T-RBK-15 | SIGTERM at the same point → exit 143 with a rendered message naming the branch (not a bare default-handler death), and the claimed branch is removed | baseline | F | live | P02 A15 gate-6 r3 |
 | T-RBK-16 | SIGINT while `git worktree add` is mid-checkout (Git's `initializing` lock is on the new worktree) → exit 130, and the locked worktree, its admin directory, the destination, and the claimed branch are all removed | baseline | F | live | P02 A15 gate-6 r4 |
+| T-RBK-17 | a failed OpenCode `session.fork` leaves no worktree, no registry record, and no child session | agent=opencode | F | live | P09 |
+| T-RBK-18 | a failed OpenCode `session.move` deletes the just-forked child, then rolls back the worktree and record | agent=opencode | F | live | P09 |
+| T-RBK-19 | an interrupt between OpenCode fork and move deletes the child and rolls back the worktree and record | agent=opencode | F | live | P09 |
+| T-RBK-20 | a failure before the last step (the setup hook) makes no OpenCode change beyond the preflight lookup | agent=opencode | F | live | P09 |
 
 ---
 
@@ -647,6 +651,7 @@ Varying axes: agent (claude/codex, must vary per §4 — templates differ by age
 | T-EMT-11 | Claude session inspection resume command is byte-exact — `cd '<directory>' && claude --resume '<parent-id>'`, no child session ID, no `--fork-session` | agent=claude | U | live | P04; REQ-50; D21 |
 | T-EMT-12 | Codex session inspection resume command is byte-exact — `codex resume '<parent-thread-id>' -C '<directory>'` | agent=codex | U | live | P04; REQ-50; D21 |
 | T-EMT-13 | resume-mode native rendering rejects a passed child session ID, quotes hostile shell values, and rejects terminal-unsafe IDs or directories before mutation | baseline | U | live | P04; REQ-42; REQ-50; D21 |
+| T-EMT-14 | an OpenCode fork forks and moves the parent session only after the worktree exists, and the paste command opens the child there: `cd <wt> && opencode --session <child>` | agent=opencode | F | live | P09 |
 
 ---
 
