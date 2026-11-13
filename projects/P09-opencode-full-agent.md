@@ -8,7 +8,7 @@
 - **Prior art:** [P05 — session transcript path](P05-session-transcript-path.md) (the `transcript` contract; OpenCode has no transcript file)
 - **Prior art:** [README `message_route` section](../README.md) (its OpenCode row and "no messaging command" text change)
 
-## [ ] Project P09: OpenCode as a full agent-fork agent (v1.5.0)
+## [~] Project P09: OpenCode as a full agent-fork agent (v1.5.0)
 **Goal**: agent-fork treats OpenCode the way it treats Claude Code and Codex:
 it detects an OpenCode session, forks it, and resumes it. Owner decision
 2026-11-13: same capabilities as Claude Code and Codex, mapped the same way,
@@ -22,10 +22,10 @@ agent (`transcript`, `message_route`, `messaging`) keep their contracts.
    signals are `ambiguous`, as in P07. `fork --agent` accepts `opencode`. IDs
    are validated by `OPENCODE_SESSION_ID` (`ses_…`); the shared
    `SAFE_SESSION_ID` stays unchanged.
-2. **Existence preflight.** Before a fork or resume, `opencode api
-   session.get --param sessionID=<id>` must succeed. A refusal is a new typed
-   error in `ERROR_CATALOG` (`errors.py`) and in the README exit-code table.
-   Reason: `opencode --session <unknown>` silently creates a new session.
+2. **Existence preflight.** Before a fork, `opencode api session.get
+   --param sessionID=<id>` must succeed; otherwise the fork refuses with
+   `session_not_found` (see item 8). Reason: `opencode --session <unknown>`
+   silently creates a new session.
 3. **Fork as the last step (owner decision 2026-11-13, design A, lighter
    ordering).** The worktree, file copy, submodules, setup hook, and fork
    registry run unchanged first. Only after they all succeed does agent-fork
@@ -37,10 +37,25 @@ agent (`transcript`, `message_route`, `messaging`) keep their contracts.
    in which agent-fork changes agent state itself; Claude and Codex forks
    happen only when the owner pastes the command. The OpenCode paste command
    is built after the fork, not before; Claude and Codex keep their order.
-4. **Resume.** `resume_command` is `cd <session directory> && opencode
-   --session <id>`, after the existence preflight. The session report's
-   `fork_command` and `resume_command` are filled for OpenCode as for
-   Claude and Codex.
+4. **Resume and the session report's commands.** `resume_command` is
+   `cd <dir> && opencode --session <id>`. `fork_command` (owner decision
+   2026-11-13) is one copy-paste line that forks the conversation through
+   the API and then opens the child:
+   `cd <dir> && child=$(opencode api session.fork --param sessionID=<id> -d '{}' | sed -n 's/^{"data":{"id":"\(ses_[A-Za-z0-9]*\)".*/\1/p') && [ -n "$child" ] && opencode --session "$child"`.
+   `sed` instead of `jq` adds no dependency. The `[ -n "$child" ]` guard
+   is required because the pipeline hides `opencode api`'s exit status;
+   probed: an unknown parent stops the line with exit 1.
+7. **Name and lineage, as for Codex (owner decision 2026-11-13).** The
+   session report's `current_session` name and `parent_session` come from
+   `opencode api session.get` (`title`, `fork.sessionID`), as Codex reads
+   `name` and `forked_from_id` from its app server. A failed call reports
+   `unavailable` with a notice, as Codex does.
+8. **Parity surfaces.** `session validate --agent` accepts `opencode`.
+   `agent-fork doctor` checks the OpenCode version and that `opencode --help`
+   declares `--session`, as it does for the Claude and Codex recipe flags.
+   A missing parent session reuses `AgentPreflightError` (`session_not_found`,
+   exit 3), the error Codex uses for a missing rollout, so no new error code
+   is added.
 5. **Transcript: existing contract.** OpenCode has no per-session file, so
    `transcript` reports `{path: null, exists: false}`. No new field.
 6. **Messaging: unchanged.** `message_route` stays `address_only`, the
@@ -127,3 +142,44 @@ use `session.fork` plus `session.move` instead. Transcript: `opencode session
 export <id>` (JSON).
 
 ### Tests & Tasks
+Test IDs are the next free rows in `docs/testing/TEST-MATRIX.md`; tests use a
+fake `opencode` executable, never the real service.
+- [ ] [P09-TS01] RED: detection. OpenCode signals assess as `detected` with
+      an OpenCode context; one of `OPENCODE=1` / `OPENCODE_SESSION_ID` alone is
+      `incomplete` (as for Claude); OpenCode plus Claude or Codex signals are
+      `ambiguous`; an ID failing `OPENCODE_SESSION_ID` is refused; explicit
+      `--agent opencode --parent-session <id>` wins (T-DET-27…)
+- [ ] [P09-TS02] RED: preflight. Missing binary, version read, `session.get`
+      404 and unreachable server both refuse with `session_not_found` (exit 3)
+      before any mutation; help lacking `--session` adds a notice (T-PRE-31…)
+- [ ] [P09-TS03] RED: fork pipeline (tier F). The OpenCode fork runs only
+      after the worktree, copy, hook, and registry succeed; the printed command
+      is `cd <wt> && opencode --session <child>`; a failed `session.fork`
+      rolls the worktree back; a failed `session.move` deletes the child and
+      rolls the worktree back (T-RBK-17…, T-EMT-14…)
+- [ ] [P09-TS04] RED: session report. `fork_command` is the one-line API fork
+      with the `[ -n "$child" ]` guard; `resume_command`; `transcript` is
+      `{path: null, exists: false}`; name and parent from `session.get`, and
+      `unavailable` plus a notice when it fails; `message_route` unchanged
+      (T-SES-58…)
+- [ ] [P09-TS05] RED: CLI and doctor. `fork --agent opencode` and
+      `session validate --agent opencode` accepted, help text names OpenCode;
+      doctor reports the OpenCode version and its `--session` flag (T-CLI-71…)
+- [ ] [P09-T01] GREEN: `AgentName` gains `opencode`; `assess_agent_signals`
+      and `detect_agent`
+- [ ] [P09-T02] GREEN: OpenCode branch in `preflight_agent`
+- [ ] [P09-T03] GREEN: last-step fork in `pipeline.fork` with child deletion
+      on a failed move
+- [ ] [P09-T04] GREEN: session report commands, transcript, name and lineage
+- [ ] [P09-T05] GREEN: CLI choices, help, and doctor checks
+- [ ] [P09-T06] Version bump to 1.5.0; TEST-MATRIX rows and the `agent` axis;
+      `just check-matrix`
+- [ ] [P09-T07] README (OpenCode as an agent, fork and resume rows) and the
+      `agent-fork` skill
+- [ ] Regression Test Status: `make check`, `just all`, `just check-matrix`,
+      `just strict-collect`, `just clean-install`
+- [ ] [P09-TS06] Live verification: from inside a real OpenCode session, run
+      `agent-fork fork` and open the printed command; run the session
+      report's `fork_command` line
+- [ ] [P09-T08] Adversarial review gate including Codex; fix findings
+- [ ] [P09-T09] One PR, merge commit, tag v1.5.0
