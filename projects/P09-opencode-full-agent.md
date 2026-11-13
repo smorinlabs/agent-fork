@@ -97,9 +97,23 @@ created through the API and deleted afterwards; no model turn ran.
   `messages`; an unknown ID exits 1 with `Session not found`.
 - Live TUI (owner opened one): a `queue` message sent with `session.prompt`
   appeared in the open TUI, so the TUI and the API share one session through
-  the background service. The probe message was then cancelled
-  (`session.inbox.cancel`). `session.active` stayed empty while the TUI was
-  idle, so it reports running turns, not open TUIs.
+  the background service. `session.inbox.cancel` then exited 0 and the
+  inbox listed empty, yet the message was delivered about 51 seconds later
+  and ran a model turn: once a TUI shows a queued message, cancelling it
+  through the API does not stop it. `session.active` stayed empty while the
+  TUI was idle, so it reports running turns, not open TUIs.
+- Stopped service (isolated `HOME` and XDG directories, own port 49991):
+  `opencode api` starts the background service itself (about 1 second) and
+  leaves it running; on a port already in use it fails after about 21
+  seconds. `opencode service status` reports `stopped` or the URL and starts
+  nothing. The owner's service was untouched.
+- Mid-turn fork (owner's TUI ran `opencode api session.fork --param
+  sessionID=$OPENCODE_SESSION_ID -d '{}'` from its shell tool): exit 0,
+  child "Greeting (fork #1)" with boundary `through` the in-flight assistant
+  message. The child's history excludes that unfinished assistant message
+  and ends on the user prompt that asked for the fork, unanswered. Opening
+  the child in a TUI started no turn and no second fork; the prompt simply
+  shows as the last message. The child was deleted afterwards.
 
 - Manual proof of the last-step fork (2026-11-13): scratch repo
   `~/tmp/p09-poc-repo` with linked worktree `~/tmp/p09-poc-wt` created first;
@@ -126,9 +140,11 @@ created through the API and deleted afterwards; no model turn ran.
 - [answered 2026-11-13] Fork through the API or through a paste command?
   Through the API (design A), as the last step; `run --fork` requires a
   message and a model turn.
-- What does `opencode api` do when the background service is stopped:
-  auto-start it, or fail? Not probed, to avoid stopping the owner's service.
-  Cover both cases with fakes and probe during implementation.
+- [answered 2026-11-13] What does `opencode api` do when the background
+  service is stopped? It starts the service. So the fork path may start it,
+  while the read-only session report first runs `opencode service status`
+  and reports name and lineage `unavailable` when the service is stopped.
+  Every `opencode api` call gets a time limit.
 
 ### Notes
 OpenCode sets `OPENCODE=1` and `OPENCODE_SESSION_ID` (`ses_` plus letters and
