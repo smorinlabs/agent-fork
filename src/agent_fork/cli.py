@@ -246,10 +246,13 @@ def _parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  agent-fork session          # human inspection, transcript, commands\n"
             "  agent-fork session --json   # exact commands in fork_command.command "
-            "and resume_command.command; transcript file in transcript.path\n\n"
+            "and resume_command.command; transcript file in transcript.path; "
+            "messaging name in messaging.name\n\n"
             "Command availability means constructible, not preflighted.\n"
             "A transcript path is reported even when the file is not yet on disk; "
-            "transcript.exists says which."
+            "transcript.exists says which.\n"
+            "messaging.name is the name other Claude Code sessions can message this "
+            "one by; it exists only while the session runs and can change."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1462,6 +1465,13 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 state = "exists" if transcript.exists else "missing"
                 print(f"transcript: {terminal_text(transcript.path)} ({state})")
+            messaging = inspection.messaging
+            if messaging.name is None:
+                print(f"message as: unavailable ({messaging.status})")
+            else:
+                print(
+                    f"message as: {terminal_text(messaging.name)} ({messaging.status})"
+                )
             return 0
         if args.command == "prune":
             from agent_fork.prune import apply_prune, plan_prune, render

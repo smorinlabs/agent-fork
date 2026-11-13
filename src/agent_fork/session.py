@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 from collections.abc import Mapping
@@ -31,6 +32,9 @@ from agent_fork.repository import (
 
 CLAUDE_TRANSCRIPT_LIMIT = 1_048_576
 CLAUDE_RECORD_LIMIT = 10_000
+# Claude Code's live-session registry holds one small file per running process.
+SESSION_REGISTRY_ENTRY_LIMIT = 4_096
+SESSION_REGISTRY_FILE_LIMIT = 65_536
 SAFE_SESSION_ID = re.compile(r"[A-Za-z0-9-]+")
 SessionForkStatus = Literal["available", "not_detected", "ambiguous", "unsafe_input"]
 
@@ -169,6 +173,33 @@ class SessionTranscript:
 
 
 @dataclass(frozen=True)
+class SessionMessaging:
+    """The name other Claude Code sessions can message this one by, right now.
+
+    Read from the live-session registry, so it exists only while the session's
+    process runs and can change; it is not the transcript's `/rename` title.
+    """
+
+    name: str | None
+    status: Literal["live", "not_running", "unavailable", "not_applicable"]
+    name_source: str | None
+
+    def __post_init__(self) -> None:
+        if (self.status == "live") != (self.name is not None):
+            raise ValueError("a live messaging entry needs a name, and only it has one")
+
+    def document(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "status": self.status,
+            "name_source": self.name_source,
+        }
+
+
+_MESSAGING_NOT_APPLICABLE = SessionMessaging(None, "not_applicable", None)
+
+
+@dataclass(frozen=True)
 class SessionParentInference:
     """Retained Claude parent-inference evidence, always present and never strict.
 
@@ -210,6 +241,7 @@ class SessionInspection:
     resume_command: SessionResumeCommand
     transcript: SessionTranscript
     notices: tuple[str, ...] = ()
+    messaging: SessionMessaging = _MESSAGING_NOT_APPLICABLE
     agent_signal: AgentSignalAssessment = field(
         default_factory=lambda: assess_agent_signals({})
     )
@@ -238,6 +270,7 @@ class SessionInspection:
             "fork_command": self.fork_command.document(),
             "resume_command": self.resume_command.document(),
             "transcript": self.transcript.document(),
+            "messaging": self.messaging.document(),
         }
 
 
@@ -273,6 +306,61 @@ def _session_transcript(
         return SessionTranscript(path, path.is_file())
     rollout = codex_rollout_path(AgentContext("codex", session_id), env)
     return SessionTranscript(rollout, rollout is not None)
+
+
+def _process_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by another user
+    except (OSError, OverflowError):  # OverflowError: pid beyond the platform's range
+        return False
+    return True
+
+
+def _session_messaging(env: Mapping[str, str], session_id: str) -> SessionMessaging:
+    """Find the live registry entry naming this Claude Code session."""
+    root = (
+        Path(env.get("CLAUDE_CONFIG_DIR", Path(env.get("HOME", "~")) / ".claude"))
+        .expanduser()
+        .resolve()
+    )
+    registry = root / "sessions"
+    files: list[Path] = []
+    try:
+        # Enumerate incrementally so an oversized registry stops at the limit
+        # instead of being listed and sorted in full.
+        with os.scandir(registry) as entries:
+            for item in entries:
+                if item.name.endswith(".json") and not item.name.startswith("."):
+                    files.append(Path(item.path))
+                    if len(files) > SESSION_REGISTRY_ENTRY_LIMIT:
+                        return SessionMessaging(None, "unavailable", None)
+    except OSError:
+        files = []
+    for path in sorted(files):
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+            with path.open("rb") as stream:
+                data = stream.read(SESSION_REGISTRY_FILE_LIMIT + 1)
+            if len(data) > SESSION_REGISTRY_FILE_LIMIT:
+                continue
+            entry = json.loads(data)
+        # ValueError covers JSONDecodeError, UnicodeDecodeError, and the integer
+        # digit limit; RecursionError covers deep nesting within the byte bound.
+        except (OSError, ValueError, RecursionError):
+            continue
+        if not isinstance(entry, dict) or entry.get("sessionId") != session_id:
+            continue
+        name, pid = entry.get("name"), entry.get("pid")
+        if not isinstance(name, str) or not name or type(pid) is not int or pid <= 0:
+            continue
+        if _process_running(pid):
+            return SessionMessaging(name, "live", "claude-session-registry")
+    return SessionMessaging(None, "not_running", None)
 
 
 def _claude_name(
@@ -445,6 +533,11 @@ def inspect_session(
         resume_command = SessionResumeCommand("unsafe_input", None)
 
     transcript = _session_transcript(agent, current_id, env, directory)
+    messaging = (
+        _session_messaging(env, current_id)
+        if agent == "claude"
+        else _MESSAGING_NOT_APPLICABLE
+    )
 
     def _inspection(
         agent: str,
@@ -464,6 +557,7 @@ def inspect_session(
             resume_command=resume_command,
             transcript=transcript,
             notices=tuple(notices),
+            messaging=messaging,
             agent_signal=assessment,
             parent_inference=parent_inference,
         )
