@@ -150,8 +150,11 @@ def test_malformed_app_server_is_typed(repo_scenario, tmp_path):
     from agent_fork.errors import SessionResolutionUnavailableError
 
     repo_scenario()
+    # The server reads the initialize request before replying, so it cannot
+    # exit (and break the client's first stdin write) before the client has
+    # written; the malformed reply is then the only possible failure.
     server = tmp_path / "codex"
-    server.write_text("#!/bin/sh\nprintf 'not-json\\n'\n")
+    server.write_text("#!/bin/sh\nread -r _\nprintf 'not-json\\n'\n")
     server.chmod(0o755)
     with pytest.raises(SessionResolutionUnavailableError, match="malformed JSON"):
         list_named_threads(str(server), "hello", {})
