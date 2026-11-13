@@ -1217,3 +1217,166 @@ def stall_filter(world: WorldHandle):
     _run_git(world.env, world.parent_path, "config", "filter.stall.smudge", "cat")
     world.go_files.append(release)
     return StallFilter(ready=ready, release=release, script=script)
+
+
+_FAKE_OPENCODE = r'''#!/usr/bin/env python3
+"""Fake `opencode` for P09 tests: a JSON state file stands in for the service."""
+import json, os, sys, time
+
+STATE = os.environ.get("FAKE_OPENCODE_STATE") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "state.json"
+)
+with open(STATE) as handle:
+    state = json.load(handle)
+args = sys.argv[1:]
+with open(state["log"], "a") as log:
+    log.write(json.dumps(args) + "\n")
+
+
+def save():
+    with open(STATE, "w") as handle:
+        json.dump(state, handle)
+
+
+def fail(op, default_code=1, default_err=""):
+    spec = state.get("fail", {}).get(op)
+    if spec is None:
+        return False
+    time.sleep(spec.get("sleep", 0))
+    sys.stdout.write(spec.get("stdout", ""))
+    sys.stderr.write(spec.get("stderr", default_err))
+    sys.exit(spec.get("code", default_code))
+
+
+if args == ["--version"]:
+    print(state["version"]); sys.exit(0)
+if args == ["--help"]:
+    print(state["help"]); sys.exit(0)
+if args[:2] == ["service", "status"]:
+    print(state["service"]); sys.exit(0)
+if args[:1] == ["api"]:
+    op = args[1]
+    params = {}
+    body = None
+    rest = args[2:]
+    while rest:
+        flag, value, rest = rest[0], rest[1], rest[2:]
+        if flag == "--param":
+            key, _, val = value.partition("=")
+            params[key] = val
+        elif flag == "-d":
+            body = json.loads(value)
+    time.sleep(state.get("sleep", {}).get(op, 0))
+    fail(op)
+    sid = params.get("sessionID", "")
+    sessions = state["sessions"]
+    if sid not in sessions:
+        print(json.dumps({"_tag": "SessionNotFoundError", "sessionID": sid,
+                          "message": f"Session not found: {sid}"}))
+        print("HTTP 404 Not Found"); sys.exit(1)
+    session = sessions[sid]
+    if op == "session.get":
+        data = {"id": sid, "title": session.get("title"),
+                "location": {"directory": session["directory"]}}
+        if session.get("parent"):
+            data["fork"] = {"sessionID": session["parent"]}
+        print(json.dumps({"data": data})); sys.exit(0)
+    if op == "session.fork":
+        state["forks"] = state.get("forks", 0) + 1
+        child = f"ses_child{state['forks']}"
+        sessions[child] = {"title": f"{session.get('title')} (fork #1)",
+                           "directory": session["directory"], "parent": sid}
+        save()
+        print(json.dumps({"data": {"id": child, "fork": {"sessionID": sid},
+                                   "location": {"directory": session["directory"]}}}))
+        sys.exit(0)
+    if op == "session.move":
+        target = body["directory"]
+        if not os.path.isdir(target):
+            print(json.dumps({"_tag": "InvalidRequestError",
+                              "message": f"Directory does not exist: {target}"}))
+            print("HTTP 400 Bad Request"); sys.exit(1)
+        session["directory"] = target
+        save(); sys.exit(0)
+    if op == "session.remove":
+        del sessions[sid]
+        save(); sys.exit(0)
+print(f"fake opencode: unsupported {args}", file=sys.stderr)
+sys.exit(2)
+'''
+
+FAKE_OPENCODE_HELP = (
+    "USAGE\n  opencode <subcommand> [flags]\n\nFLAGS\n"
+    "  --session, -s string    Session ID to continue, or to create if it "
+    "does not exist\n"
+)
+
+
+@dataclass
+class FakeOpencode:
+    root: Path
+    binary: Path
+    state_path: Path
+    log_path: Path
+
+    def state(self) -> dict[str, Any]:
+        import json
+
+        return json.loads(self.state_path.read_text())
+
+    def update(self, **changes: Any) -> None:
+        import json
+
+        state = self.state()
+        state.update(changes)
+        self.state_path.write_text(json.dumps(state))
+
+    def calls(self) -> list[list[str]]:
+        import json
+
+        if not self.log_path.exists():
+            return []
+        return [json.loads(line) for line in self.log_path.read_text().splitlines()]
+
+    def api_ops(self) -> list[str]:
+        return [call[1] for call in self.calls() if call[:1] == ["api"]]
+
+    def path_env(self, env: dict[str, str]) -> dict[str, str]:
+        return {**env, "PATH": f"{self.root}{os.pathsep}{env.get('PATH', '')}"}
+
+
+@pytest.fixture
+def fake_opencode(tmp_path):
+    """Build a fake `opencode` whose sessions live in a JSON state file."""
+    import json
+
+    def build(
+        sessions: dict[str, dict[str, Any]] | None = None,
+        *,
+        version: str = "opencode v2.2.7",
+        help_text: str = FAKE_OPENCODE_HELP,
+        service: str = "http://127.0.0.1:49374",
+    ) -> FakeOpencode:
+        root = tmp_path / "fake-opencode-bin"
+        root.mkdir(exist_ok=True)
+        binary = root / "opencode"
+        binary.write_text(_FAKE_OPENCODE)
+        binary.chmod(0o755)
+        state_path = root / "state.json"
+        log_path = root / "calls.jsonl"
+        state_path.write_text(
+            json.dumps(
+                {
+                    "version": version,
+                    "help": help_text,
+                    "service": service,
+                    "sessions": sessions or {},
+                    "log": str(log_path),
+                    "fail": {},
+                    "sleep": {},
+                }
+            )
+        )
+        return FakeOpencode(root, binary, state_path, log_path)
+
+    return build

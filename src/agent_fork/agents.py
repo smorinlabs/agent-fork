@@ -21,7 +21,7 @@ from agent_fork.errors import (
     SessionResolutionUnavailableError,
 )
 from agent_fork.git import PRODUCT_GIT_MIN
-from agent_fork.text import BIDI_CONTROLS
+from agent_fork.text import BIDI_CONTROLS, escape_terminal_text
 
 AgentName = Literal["claude", "codex", "opencode"]
 AgentSignalStatus = Literal["absent", "incomplete", "detected", "ambiguous"]
@@ -31,6 +31,10 @@ AgentSignalName = Literal[
     "CODEX_THREAD_ID",
     "OPENCODE_SESSION_ID",
 ]
+# OpenCode session IDs are `ses_` plus letters and digits; kept separate so
+# SAFE_SESSION_ID (session.py), which guards the Claude transcript path, stays
+# strict.
+OPENCODE_SESSION_ID = re.compile(r"ses_[A-Za-z0-9]+")
 _SIGNAL_AGENT: dict[str, str] = {
     "CLAUDECODE=1": "Claude",
     "CLAUDE_CODE_SESSION_ID": "Claude",
@@ -177,6 +181,7 @@ CODEX_ENV_MIN = (0, 95, 0)
 # for these instead. T-PRE-26 keeps the lists in step with the renderer.
 CLAUDE_RECIPE_FLAGS = ("--session-id", "--resume", "--fork-session", "-n")
 CODEX_RECIPE_FLAGS = ("-C",)
+OPENCODE_RECIPE_FLAGS = ("--session",)
 # Codex declares the recipe's flags on the `fork` subcommand, not the root, so
 # the two agents are probed with different argument tails. Diagnostics name the
 # tail that actually ran: for Codex, `codex --help` succeeds even when `fork`
@@ -184,6 +189,7 @@ CODEX_RECIPE_FLAGS = ("-C",)
 _HELP_ARGS: dict[str, tuple[str, ...]] = {
     "claude": ("--help",),
     "codex": ("fork", "--help"),
+    "opencode": ("--help",),
 }
 _VERSION = re.compile(r"(?<![\d.])(\d+)\.(\d+)(?:\.(\d+))?")
 
@@ -208,7 +214,11 @@ def version_tokens(output: str) -> tuple[tuple[int, int, int], ...]:
 
 
 def recipe_flags(agent: AgentName) -> tuple[str, ...]:
-    return CLAUDE_RECIPE_FLAGS if agent == "claude" else CODEX_RECIPE_FLAGS
+    return {
+        "claude": CLAUDE_RECIPE_FLAGS,
+        "codex": CODEX_RECIPE_FLAGS,
+        "opencode": OPENCODE_RECIPE_FLAGS,
+    }[agent]
 
 
 def option_declarations(help_output: str) -> str:
@@ -305,6 +315,14 @@ def preflight_agent(
     codex_session_name_resolution: bool = True,
 ) -> PreflightResult:
     """Refuse unsupported native forks before any repository mutation."""
+    if (
+        context.agent == "opencode"
+        and OPENCODE_SESSION_ID.fullmatch(context.parent_session_id) is None
+    ):
+        raise _diagnosis(
+            f"{escape_terminal_text(repr(context.parent_session_id))} is not a "
+            "valid OpenCode session ID (`ses_` plus letters and digits)"
+        )
     binary = (
         executable
         if executable is not None
@@ -352,7 +370,24 @@ def preflight_agent(
         )
     resolved_context = context
     resolved_name: str | None = None
-    if context.agent == "claude":
+    if context.agent == "opencode":
+        # No version floor: 2.2.7 is the version observed, not a minimum.
+        # `opencode --session <unknown>` silently creates a session, so the
+        # parent must be confirmed before anything is created.
+        from agent_fork import opencode_api
+
+        try:
+            opencode_api.call(binary, "session.get", context.parent_session_id, env)
+        except opencode_api.OpencodeApiError as error:
+            if error.not_found:
+                raise _diagnosis(
+                    f"OpenCode session {context.parent_session_id} was not found"
+                ) from error
+            raise _diagnosis(
+                f"could not confirm OpenCode session {context.parent_session_id}: "
+                f"{error}"
+            ) from error
+    elif context.agent == "claude":
         if version < CLAUDE_FORK_MIN:
             raise _diagnosis(
                 f"detected Claude {_render(version)}; pinned-session fork requires "
@@ -510,6 +545,14 @@ def _render_native_command(
         raise UnsafeCommandInputError(
             "session identity or directory contains terminal-unsafe controls"
         )
+    if context.agent == "opencode" and any(
+        OPENCODE_SESSION_ID.fullmatch(value) is None
+        for value in (context.parent_session_id, child_session_id)
+        if value is not None
+    ):
+        raise UnsafeCommandInputError(
+            "OpenCode session ID is not `ses_` plus letters and digits"
+        )
 
     quote = shlex.quote
     suffix = "".join(f" {quote(value)}" for value in extra_args)
@@ -522,6 +565,11 @@ def _render_native_command(
                 f"--resume {quote(context.parent_session_id)}{suffix}"
             )
             return command.rstrip()
+        if context.agent == "opencode":
+            return (
+                f"cd {quote(str(directory))} && opencode "
+                f"--session {quote(context.parent_session_id)}{suffix}"
+            )
         return (
             f"codex resume {quote(context.parent_session_id)} "
             f"-C {quote(str(directory))}{suffix}"
@@ -538,6 +586,22 @@ def _render_native_command(
             command += f"-n {quote(name)}"
         command += suffix
         return command.rstrip()
+    if context.agent == "opencode":
+        if child_session_id is not None:
+            return (
+                f"cd {quote(str(directory))} && opencode "
+                f"--session {quote(child_session_id)}{suffix}"
+            )
+        # No single OpenCode command forks and opens a session without a model
+        # turn, so fork through the API, then open the child. The pipeline
+        # hides `opencode api`'s exit status; the empty-ID guard stops the line.
+        extract = quote(r's/^{"data":{"id":"\(ses_[A-Za-z0-9]*\)".*/\1/p')
+        return (
+            f"cd {quote(str(directory))} && child=$(opencode api session.fork "
+            f"--param {quote('sessionID=' + context.parent_session_id)} -d '{{}}' "
+            f'| sed -n {extract}) && [ -n "$child" ] && '
+            f'opencode --session "$child"{suffix}'
+        )
     return (
         f"codex fork {quote(context.parent_session_id)} "
         f"-C {quote(str(directory))}{suffix}"
@@ -556,6 +620,10 @@ def build_launch_command(
     child = None
     if context.agent == "claude":
         child = child_session_id or str(uuid.uuid4())
+    elif context.agent == "opencode":
+        if child_session_id is None:
+            raise ValueError("OpenCode launch command requires the forked child ID")
+        child = child_session_id
     command = _render_native_command(
         context,
         directory=worktree,

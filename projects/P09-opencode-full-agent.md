@@ -165,7 +165,7 @@ fake `opencode` executable, never the real service.
       `incomplete` (as for Claude); OpenCode plus Claude or Codex signals are
       `ambiguous`; an ID failing `OPENCODE_SESSION_ID` is refused; explicit
       `--agent opencode --parent-session <id>` wins (T-DET-27…)
-- [ ] [P09-TS02] RED: preflight. Missing binary, version read, `session.get`
+- [x] [P09-TS02] RED: preflight. Missing binary, version read, `session.get`
       404 and unreachable server both refuse with `session_not_found` (exit 3)
       before any mutation; help lacking `--session` adds a notice (T-PRE-31…)
 - [ ] [P09-TS03] RED: fork pipeline (tier F). The OpenCode fork runs only
@@ -183,7 +183,7 @@ fake `opencode` executable, never the real service.
       doctor reports the OpenCode version and its `--session` flag (T-CLI-71…)
 - [x] [P09-T01] GREEN: `AgentName` gains `opencode`; `assess_agent_signals`
       and `detect_agent`
-- [ ] [P09-T02] GREEN: OpenCode branch in `preflight_agent`
+- [x] [P09-T02] GREEN: OpenCode branch in `preflight_agent`
 - [ ] [P09-T03] GREEN: last-step fork in `pipeline.fork` with child deletion
       on a failed move
 - [ ] [P09-T04] GREEN: session report commands, transcript, name and lineage

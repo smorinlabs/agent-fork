@@ -144,6 +144,11 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 | T-PRE-19 | app-server notifications are tolerated and the subprocess is reaped | agent=codex | U | live | REQ-46; D17 |
 | T-PRE-20 | an app-server notification flood is stopped by the pending-message bound | agent=codex | U | live | REQ-46; D17 |
 | T-PRE-30 | app-server closing its input mid-handshake yields the typed closed-input failure even under default (fatal) SIGPIPE disposition | agent=codex | U | live | REQ-46; D17 |
+| T-PRE-31 | OpenCode preflight confirms the parent session with one `opencode api session.get` call and applies no version floor | agent=opencode | U | live | P09 |
+| T-PRE-32 | an unknown OpenCode session refuses with `session_not_found` (exit 3) before mutation, because `opencode --session <unknown>` would create one | agent=opencode | U | live | P09 |
+| T-PRE-33 | an unreachable, malformed, or slow (timed-out) OpenCode session lookup refuses as unconfirmed | agent=opencode | U | live | P09 |
+| T-PRE-34 | an OpenCode session ID outside `ses_` plus letters and digits refuses before any `opencode api` call | agent=opencode | U | live | P09 |
+| T-PRE-35 | the OpenCode paste command's only flag, `--session`, is the declared recipe flag; help lacking it adds a notice | agent=opencode | U | live | P09; P02 A4 |
 | T-PRE-06 | PRODUCT_GIT_MIN boundary — injected `git --version` just below 2.19.0 → the named check fails | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-07 | PRODUCT_GIT_MIN boundary — injected `git --version` at/above 2.19.0 → the named check passes | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
 | T-PRE-08 | A14 — below-2.19.0 `fork` refusal, exit 5, remedy names installed version/floor/upgrade path | baseline | F | live | REQ-19 (A14); PRODUCT-GIT-MIN-AUDIT |

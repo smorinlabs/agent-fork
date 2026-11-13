@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 from agent_fork.agents import (
+    OPENCODE_SESSION_ID,
     AgentContext,
     AgentSignalAssessment,
     UnsafeCommandInputError,
@@ -39,9 +40,6 @@ CLAUDE_RECORD_LIMIT = 10_000
 SESSION_REGISTRY_ENTRY_LIMIT = 4_096
 SESSION_REGISTRY_FILE_LIMIT = 65_536
 SAFE_SESSION_ID = re.compile(r"[A-Za-z0-9-]+")
-# OpenCode session IDs are `ses_` plus letters and digits; kept separate so
-# SAFE_SESSION_ID, which guards the Claude transcript path, stays strict.
-OPENCODE_SESSION_ID = re.compile(r"ses_[A-Za-z0-9]+")
 MUSE_SESSIONS_TIMEOUT = 3.0
 MUSE_SESSIONS_OUTPUT_LIMIT = 1_048_576
 SessionForkStatus = Literal["available", "not_detected", "ambiguous", "unsafe_input"]
