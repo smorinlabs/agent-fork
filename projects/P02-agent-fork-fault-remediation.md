@@ -7,6 +7,7 @@
 
 ## [~] Project P02: agent-fork fault remediation (v1.x)
 **Goal**: Work the thirteen faults A1–A13 found in the 2026-08-16 analysis,
+plus A14–A15 found during A7's verification (2026-11-13),
 one at a time in order, each through the gated process below. A fault is
 closed when its fix has passed adversarial post-implementation review, or
 when its adversarial verification refutes the hypothesis (recorded as
@@ -638,10 +639,41 @@ repository-controlled text raw).
   (`materialize.py:175`) — efficiency.
   Impact: low→medium individually. Type: mixed (UX, robustness,
   data-safety, efficiency).
+- **A14 — Forced cleanup of an unregistered target does not revalidate
+  after confirmation.** Found by Codex during `P02-TS07` (2026-11-13,
+  `origin/main` @ `6078d35`). `cleanup <path> --force` on a worktree with no
+  usable registry row (for example, a fork moved by `git worktree move`)
+  prompted for branch `fork/sample`. While the prompt waited, the worktree
+  was switched to a new branch `replacement` and given an uncommitted file.
+  Answering `yes` returned exit 0, `removed:true`, destroyed the worktree and
+  the uncommitted file, and deleted `fork/sample`. A registered target in the
+  same race refused as `cleanup_registry_stale` and preserved everything.
+  Cause: the unowned-path branch calls `destroy()` early
+  (`cleanup.py:738-741`), skipping the repository and live-pair
+  revalidation that registered targets get (`cleanup.py:760-775`), and
+  `--force` waives the dirty guard. Proposed direction: apply the same
+  repository and live-pair revalidation to unregistered targets inside the
+  mutation, before destruction. This is narrower than the A8 plan-token
+  remedy, which the owner declined, and does not reopen it. Impact: high
+  (data loss). Type: data-safety.
+- **A15 — Forking onto a path Git still records as `prunable` leaks a
+  branch and misreports a race.** Found during `P02-TS07` (2026-11-13,
+  `origin/main` @ `6078d35`). When Git still holds worktree metadata for a
+  deleted directory (`git worktree list` shows `prunable`), `fork
+  --worktree-dir <that path>` fails as `conflict_branch_exists` with
+  `branch 'fork/main-1113' won a concurrent creation race; nothing was
+  created` (exit 5). No concurrent process existed, and the run left the new
+  branch `fork/main-1113` behind with no worktree. Reproduced with no
+  agent-fork registry involvement: a plain `git worktree add -b x <path>`
+  followed by `rm -rf <path>` is enough. The A7 flow makes it likely,
+  because hand-deleting a fork leaves that metadata. Proposed direction:
+  classify Git's "already registered worktree" refusal correctly, roll back
+  the branch created in the same attempt, and say how to clear the stale
+  metadata. Impact: medium. Type: correctness and rollback honesty.
 
 ### Tests & Tasks
 
-Order is A1 → A13; each item's TS gate precedes its T fix (TDD bias).
+Order is A1 → A15; each item's TS gate precedes its T fix (TDD bias).
 A T task is skipped (flipped `[-]`) if its TS verdict is *refuted* or the
 owner decides will-not-fix (per `PROJECTS.md` status legend).
 
@@ -670,7 +702,7 @@ swept with the rest.
 - [x] [P02-T05] A5 fix per process — qualifying unreadable or unsupported untracked/ignored entries now skip with one named notice and a final metadata sentinel; tracked paths, failed `lstat`, and any skip while carrying a deletion fail as typed `entry_unreadable`. `--strict` aggregates capture/materialize/include skips into one byte-wise ordered exit-1 `strict_skip_refused` and rolls back. JSON additively exposes `skipped[]`; `.worktreeinclude` shares the readability policy without reopening known skips. Gate 6 and PR review found and fixed five implementation defects (same-observation sentinel, verify re-open, undocumented reason values, duplicate include reporting, and post-`lstat` symlink following) and filled the missing evidence rows. Final gate: 682 passed, 1 expected skip, 20 deselected; 623-row matrix clean. See the [A5 design and evidence record](../docs/superpowers/plans/2026-08-20-p02-a5-skip-and-race-policy.md).
 - [x] [P02-TS06] A6 adversarial verification (incl. Codex): CONFIRMED-WITH-CORRECTIONS 2026-08-17 — matrix 1 reproduced the rollback across four dirty shapes and refuted the "unforkable by default" breadth (staged gitlink advance already forks); matrix 2 showed identical carry is feasible across eight local depth-1 cells. Codex second lens returned CONFIRM-WITH-CORRECTIONS; its findings 5 and 6 narrowed the verdict wording and corrected the cleanup evidence provenance. Register entry rewritten; see the [design doc](../docs/superpowers/plans/2026-08-17-p02-a6-dirty-submodules.md)
 - [~] [P02-T06] A6 remediation umbrella — close after **A6a** (unblock: `--ignore-submodules` filtering plus an accurate notice; evidence already validated; merged to `main`) and **A6b** (carry submodules identically by default, `--with-submodules` / `--no-with-submodules`, owner decision 2026-08-17) both merge. Split 2026-08-20 after two gate-4 passes returned NOT-READY on integration complexity, not on the carry mechanism. **A6b status (2026-08-22):** implementation complete on `worktree-p02-a6b-carry-submodules`, synchronized with `origin/main` at `68ded9b`, and under review in PR #67. Gate 6 (adversarial implementation review) completed four rounds; subsequent independent production review and PR feedback were absorbed with evidence rows through T-OUT-35. Current gate: `just all` 760 passed/1 skipped/20 deselected, the 701-row test matrix is clean, and `just test-git-matrix` is green on Git 2.50.1 and 2.54.0. Plan and all gate reports are in the [design doc](../docs/superpowers/plans/2026-08-17-p02-a6-dirty-submodules.md).
-- [ ] [P02-TS07] A7 adversarial verification (incl. Codex): stale-entry dead-end repro (already reproduced once; re-verify + bound the fix)
+- [x] [P02-TS07] A7 adversarial verification (incl. Codex) — **CONFIRMED-WITH-CORRECTIONS, IMPACT LOWERED TO MEDIUM 2026-11-13.** Executed against `origin/main` @ `6078d35` (`agent-fork 1.4.0`, Git 2.54.0) with real `--no-agent` forks in scratch repositories under isolated `XDG_*` roots, re-scoped against A3's shipped `prune` and typed refusal per the 2026-08-17 amendment; Codex independently re-executed its own matrix (270 commands, 173 CLI invocations, 11 fixtures) and agreed on every case. **Case 1, hand-deleted directory — original claim REFUTED on current main:** `cleanup` by name, branch, or path now refuses as typed `cleanup_registry_stale`/exit 5 with a `prune` hint (no raw `runtime_error`), and `prune --yes` removes the row, so hand-editing `forks.json` is no longer required. Residual, low: `prune` is registry-only, so the fork branch and Git's `prunable` worktree metadata survive, and no verb selects them afterwards (`cleanup <branch> [--force]` → `cleanup_target_unknown`/exit 3). `cleanup --missing` is redundant with `prune`; drop it from T07. **Case 2, `git worktree move` — CONFIRMED as a repair gap, PARTIALLY REFUTED as "orphaned":** `list` reports the live moved fork as `worktree_exists:false`; cleanup of the recorded name, branch, or path refuses `cleanup_registry_stale`; the new path is `cleanup_target_unknown` without `--force`; and `prune --dry-run` says only `would remove main-1113 … <old path>`, then drops the row for live work (bookkeeping only, not contents). The fork *is* reachable with `cleanup <new-path> --force`, before or after pruning (Codex), but `--force` also waives the dirty/unpushed guards: a real `--force --yes` destroyed an uncommitted file and an unpushed commit (the dry run warned), and `--allow-dirty`/`--allow-unpushed` cannot reach it without `--force`, whereas the same state in an unmoved fork refused as `cleanup_dirty_worktree`. Worth fixing, medium. **Case 3, path occupied by another worktree — CONFIRMED, safe dead-end:** with another repository's worktree (same or different branch) or the same repository on another branch at the recorded path, `cleanup` refuses `cleanup_registry_stale` even with `--force` while its message says to run `prune`, and `prune` keeps the row as displaced, so each command points at the other. `list` reports `worktree_exists:true`, and `prune --yes` returns `pruned:true` with `removed:[]`. The occupant was never harmed. The row clears only once the occupant leaves. Worth fixing, medium: an explicit registry-only forget for a selected row; do not let `cleanup --force` override the stale-row veto. **Misleading output (low):** `worktree_exists` measures path existence, not fork identity (`models.py:99-110`, `cli.py:1633-1640`); forced fallback invents `mode:"agent"`, `agent:"unknown"`, a fresh `created_at`, and a directory-derived name, and claims a resumable agent session for a Git-only fork (`cleanup.py:330-335`, `cleanup.py:720-723`); `doctor` reports `ok:true` with no registry check. **Bound for T07:** moved-worktree detection and guarded cleanup without `--force`; explicit displaced-row forget; honest `list`/`prune`/forced-fallback output; optional low-priority branch/metadata cleanup for pruned forks. Drop `cleanup --missing`. **Two out-of-scope defects found, not folded into T07, registered as A14 and A15 (owner decision 2026-11-13):** (1) **A14, high, Codex** — unregistered `cleanup <path> --force` revalidates nothing after confirmation: switching the worktree to a new branch with an uncommitted file while the prompt waited, then answering `yes`, destroyed both (exit 0); a registered target in the same race refused (`cleanup.py:738-741` calls `destroy()` before the repository/pair revalidation at lines 760-775). This does not reopen the declined A8 plan-token remedy. (2) **A15, medium** — `fork` onto a path that Git still holds as a `prunable` worktree fails as `conflict_branch_exists` "won a concurrent creation race; nothing was created", but there was no race and it leaks the new branch; reproduced with no agent-fork registry involvement. Evidence (session-local, not repo-tracked): `/private/tmp/claude-501/-Users-stevemorin-c-agent-fork/2eed6382-ce5d-4ba2-9dca-ad1e60b1fdf7/scratchpad/a7/` (`repro.sh`/`out3.txt`, `probe2.sh`/`probe2.txt`, `probe3.sh`, and `codex/` with Codex's report, probes, and 270-line `evidence.jsonl`).
 - [ ] [P02-T07] A7 fix per process
 - [x] [P02-TS08] A8 adversarial verification (incl. Codex) — **CONFIRMED-WITH-CORRECTIONS 2026-08-17.** Executed dry-run/real pairs reproduced collision suffix drift, local-midnight name drift, cross-confirmation anchor drift, same-count carried-file substitution, and distinct dry-run/real Claude child UUIDs; an instrumented real fork also observed three independent `HEAD^{commit}` resolutions and produced a detached-derived name from one commit while materializing another. P01-T51 covers only candidate-name drift and is absorbed here. The proposed `{name, branch, destination, anchor, child_session_id}` tuple is incomplete: the immutable execution plan must also bind carry mode plus the complete approved source-state inventory or a collision-resistant digest and refuse pre-mutation on drift. Owner declined that remedy in T08; confirmation-boundary drift remains a known limitation.
 - [-] [P02-T08] A8 fix per process — **WILL NOT FIX (owner decision 2026-08-18).** Plan-token/immutable-plan remedy (opaque plan ID binding name/branch/destination/anchor/carry-mode/source-state digest, `fork --plan <token>` execution, typed `plan_stale` refusal on drift) judged overly complex for this CLI's needs; confirmation-boundary drift accepted as a known limitation. Also declines P01-T51's narrower deferred plan-token fix (absorbed here per TS08).
@@ -692,11 +724,15 @@ swept with the rest.
   - [x] [P02-T13F] Explain remote setup when cleanup refuses unpushed commits in a repository with no remote
   - [ ] [P02-T13G] Prevent cleanup from deleting changed ignored worktree-local data; tracked separately in [issue #44](https://github.com/smorinlabs/agent-fork/issues/44)
   - [ ] [P02-T13H1] Bound staged-binary materialization memory; tracked separately in [issue #45](https://github.com/smorinlabs/agent-fork/issues/45)
+- [ ] [P02-TS14] A14 adversarial verification (incl. Codex): confirmation-window destruction of a changed unregistered `--force` target (reproduced once, by Codex only, during TS07; re-verify with a Claude-side execution and bound the fix)
+- [ ] [P02-T14] A14 fix per process
+- [ ] [P02-TS15] A15 adversarial verification (incl. Codex): `fork` onto a `prunable` path leaks a branch and misreports a race (reproduced once, Claude-side only, during TS07; re-verify with Codex and bound the fix)
+- [ ] [P02-T15] A15 fix per process
 - [ ] Regression Test Status
 
 ### Deliverable
 
-All thirteen register entries closed — fixed (with tests) or recorded as
+All fifteen register entries closed — fixed (with tests) or recorded as
 refuted — with `just all` green and no v1 behavioral contract broken except
 where a fix's approved plan says otherwise.
 
