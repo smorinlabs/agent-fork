@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import signal
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +12,7 @@ from pathlib import Path
 from agent_fork.content import gitlink_paths, nul_paths
 from agent_fork.errors import AgentForkError, PreconditionError
 from agent_fork.git import GitCommandError, run_git
+from agent_fork.interrupts import OperationInterrupted, run_with_interruption_handler
 from agent_fork.text import escape_terminal_text
 from agent_fork.worktree_list import list_worktrees
 
@@ -541,32 +544,75 @@ def create_worktree_at_anchor(
     parent_branch = current_branch(parent, env=env)
     default_branches = classify_default_branches(parent, env=env)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    claimed = run_git(
-        parent, ["branch", "--no-track", branch, anchor_commit], env=env, check=False
-    )
-    if claimed.returncode != 0:
-        exists = (
-            run_git(
-                parent,
-                ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
-                env=env,
-                check=False,
-            ).returncode
-            == 0
+    claimed = False
+
+    def create() -> None:
+        nonlocal claimed
+        result = run_git(
+            parent,
+            ["branch", "--no-track", branch, anchor_commit],
+            env=env,
+            check=False,
         )
-        if exists:
-            raise PreconditionError(
-                "conflict_branch_exists",
-                f"branch {branch!r} won a concurrent creation race; "
-                "nothing was created",
-            ) from GitCommandError(claimed)
-        raise GitCommandError(claimed)
+        if result.returncode != 0:
+            exists = (
+                run_git(
+                    parent,
+                    ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+                    env=env,
+                    check=False,
+                ).returncode
+                == 0
+            )
+            if exists:
+                raise PreconditionError(
+                    "conflict_branch_exists",
+                    f"branch {branch!r} won a concurrent creation race; "
+                    "nothing was created",
+                ) from GitCommandError(result)
+            raise GitCommandError(result)
+        claimed = True
+        try:
+            run_git(parent, ["worktree", "add", str(destination), branch], env=env)
+        except GitCommandError as error:
+            removal = _remove_own_creation(
+                parent, branch, destination, anchor_commit, env=env
+            )
+            raise AgentForkError(
+                f"git worktree add failed: {escape_terminal_text(str(error))}; "
+                + _removal_outcome(branch, removal)
+            ) from error
+
+    # The branch exists from the moment it is claimed, before the pipeline's
+    # rollback is installed, so an interrupt in between must remove it here.
+    # Signal handlers can only be installed from the main thread.
     try:
-        run_git(parent, ["worktree", "add", str(destination), branch], env=env)
-    except GitCommandError as error:
-        raise _discard_failed_creation(
-            parent, branch, destination, anchor_commit, error, env=env
-        ) from error
+        if threading.current_thread() is threading.main_thread():
+            run_with_interruption_handler(
+                create,
+                message=(
+                    f"fork was interrupted while creating branch {branch!r}; "
+                    f"if it exists, delete it with 'git branch -D {branch}'"
+                ),
+            )
+        else:
+            create()
+    except (OperationInterrupted, KeyboardInterrupt) as interrupted:
+        if not claimed:
+            raise
+        signum = (
+            interrupted.signum
+            if isinstance(interrupted, OperationInterrupted)
+            else signal.SIGINT
+        )
+        removal = _remove_own_creation(
+            parent, branch, destination, anchor_commit, env=env
+        )
+        raise OperationInterrupted(
+            signum,
+            "fork was interrupted while creating its worktree; "
+            + _removal_outcome(branch, removal),
+        ) from interrupted
     return WorktreeCreation(
         path=destination.resolve(),
         branch=branch,
@@ -580,41 +626,43 @@ def create_worktree_at_anchor(
     )
 
 
-def _discard_failed_creation(
+def _remove_own_creation(
     parent: Path,
     branch: str,
     destination: Path,
     anchor_commit: str,
-    error: GitCommandError,
     *,
     env: Mapping[str, str] | None,
-) -> AgentForkError:
-    """Remove what a failed `git worktree add` left of this call's own fork.
+) -> Exception | None:
+    """Remove what a failed or interrupted creation left of this call's fork.
 
-    Git can fail after registering the worktree (a failing post-checkout hook)
-    or before (an unwritable destination). Either way the branch is this
-    call's, so the worktree is removed only when it is ours at our
-    destination, and the branch only while it still points at the anchor.
+    Git can stop after registering the worktree (a failing post-checkout hook,
+    an interrupt during checkout) or before (an unwritable destination). The
+    branch is this call's either way, so the worktree is removed only when it
+    is ours at our destination, and the branch only while it still points at
+    the anchor. Returns the error that prevented removal, or None.
     """
-    git_message = escape_terminal_text(str(error))
     try:
         attached = _worktree_branches(parent, env=env).get(branch)
         if attached is not None:
             if attached.resolve() != destination.resolve():
-                raise GitCommandError(error.result)
+                return RuntimeError(f"branch is checked out at {attached}")
             run_git(parent, ["worktree", "remove", "--force", str(attached)], env=env)
         run_git(
             parent,
             ["update-ref", "-d", f"refs/heads/{branch}", anchor_commit],
             env=env,
         )
-    except Exception:
-        return AgentForkError(
-            f"git worktree add failed: {git_message}; the branch {branch!r} "
-            "this attempt created could not be removed — delete it with "
-            f"'git branch -D {branch}' once nothing uses it"
-        )
-    return AgentForkError(
-        f"git worktree add failed: {git_message}; the branch {branch!r} and "
-        "anything this attempt created were removed"
+    except Exception as error:
+        return error
+    return None
+
+
+def _removal_outcome(branch: str, failure: Exception | None) -> str:
+    if failure is None:
+        return f"the branch {branch!r} and its worktree, if any, were removed"
+    return (
+        f"the branch {branch!r} this attempt created could not be removed "
+        f"({escape_terminal_text(str(failure))}); delete it with "
+        f"'git branch -D {branch}' once nothing uses it"
     )
