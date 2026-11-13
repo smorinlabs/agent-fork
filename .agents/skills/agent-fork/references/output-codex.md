@@ -14,6 +14,7 @@ reconstruct a command from.
 |---|---|
 | Session | `11111111-1111-4111-8111-111111111111` (from `CODEX_THREAD_ID`) |
 | Session name | `auth-refactor` (via codex app-server) |
+| Message route | `codex queue --thread 11111111-1111-4111-8111-111111111111 --message` (message as final argument) |
 | Parent | `22222222-2222-4222-8222-222222222222` "auth-main" (forked from, resolved) |
 | Repository | `/Users/dev/project` |
 | Branch | `feature/auth-refresh` |

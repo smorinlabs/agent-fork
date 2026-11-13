@@ -196,7 +196,7 @@ agent-fork --version
 readlink ~/.claude/skills/agent-fork ~/.agents/skills/agent-fork
 ```
 
-The version command must print `agent-fork 1.3.0`. <!-- x-release-please-version -->
+The version command must print `agent-fork 1.4.0`. <!-- x-release-please-version -->
 Both symlinks must resolve
 to this repository's `.agents/skills/agent-fork` directory.
 
@@ -379,6 +379,36 @@ transcript. `messaging.status` is `live` when the entry is found,
 `not_applicable` for Codex or when no agent is detected. The name exists only
 while the session runs, and Claude Code can change a derived name, so treat it
 as an address for now, not as the session's identity.
+
+Inspection also reports `message_route`: how another session can send this
+one a message, for Claude Code, Codex, Muse, and OpenCode. It is printed as
+`message route:`. Muse and OpenCode sessions get a route even though
+agent-fork does not fork or resume them (`agent` stays null).
+
+| Tool | Detected by | `status` | `address` | `command` (message goes…) |
+|---|---|---|---|---|
+| Claude Code | `CLAUDECODE=1` | `address_only`, or `not_running` | live registry name, as in `messaging` | none: use the `SendMessage` tool |
+| Codex | `CODEX_THREAD_ID` | `available` | thread ID | `codex queue --thread <id> --message` (as the final argument) |
+| Muse | `MUSE_SESSION_ID` | `address_only` | session ID; `name` from `muse sessions --json` | none: `muse session-message send` refuses unverified senders |
+| OpenCode | `OPENCODE=1` or `OPENCODE_SESSION_ID` | `address_only` | `ses_…` session ID | none |
+
+Other statuses: `not_detected` (no tool's signal), `ambiguous` (signals from
+more than one tool: presence alone cannot show which session is nested in
+which, so none is guessed), and `unsafe_input` (an ID with characters that
+are unsafe to print or quote). When Muse or OpenCode signals are present,
+`messaging` reports `not_applicable`, so a nested session never borrows the
+outer Claude session's name.
+
+What has been verified (2026-11-12; Codex 0.167.2, Muse Code 1.4.18, OpenCode
+2.2.7): `codex queue` queued a message to a thread; Muse and OpenCode
+detection and the Muse name lookup were run inside live sessions. Muse is
+address-only because `muse session-message send --target <id>` found an
+interactive target session but refused the sender with `sender_unverified`,
+both from a plain shell and from inside a headless `muse exec` session; Muse
+appears to accept messages only through its own in-session tool. OpenCode has
+no messaging command: `opencode run --session <id>` starts a model turn and
+creates the session if the ID is unknown, so it is not offered as a send
+command.
 
 JSON inspection also reports `agent_signal`, an additive object with
 `status`, `present`, and `missing`. Its status is `absent`, `incomplete`,

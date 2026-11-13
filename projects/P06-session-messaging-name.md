@@ -9,7 +9,7 @@
   Option A chosen: a separate "Message as" field read from Claude Code's
   live-session registry.
 
-## [~] Project P06: session messaging name (v1.3.0)
+## [x] Project P06: session messaging name (v1.3.0)
 **Goal**: `agent-fork session` reports the name the current Claude Code session
 can be messaged by right now. Claude Code keeps one live-session registry file
 per running process at `<CLAUDE_CONFIG_DIR|~/.claude>/sessions/<pid>.json`;
@@ -51,4 +51,4 @@ Statuses:
       gains the row
 - [x] [P06-T06] README: document the field and its liveness caveat
 - [x] Regression Test Status: `just all` (765 passed, 1 skipped) and `just check-matrix` green; `make check` green. Live check in Claude Code session `shelf-0c`: `message as: shelf-0c (live)`
-- [ ] [P06-T07] PR merged; tag `v1.3.0`
+- [x] [P06-T07] PR #75 merged as `bf96e86` (review fixes: out-of-range pid, decoder errors, bounded enumeration). No tag: agent-fork has never tagged releases

@@ -116,6 +116,20 @@ and say it is valid while this session runs and can change. For any other
 status, show `—` with the exact status. Older CLIs omit `messaging`; its
 absence is not an older-contract diagnostic and never triggers recovery.
 
+When `message_route` is present, also show it under the label "Message
+route": how another session can message this one, for Claude Code, Codex,
+Muse, or OpenCode. For status `available`, show `message_route.command`
+character-for-character and say where the message goes: as the command's
+final argument (`message_via: argument`) or on stdin (`message_via: stdin`).
+Never execute the command. For `address_only`, show `message_route.address`
+terminal-escaped and name the channel (`claude-sendmessage` means the
+`SendMessage` tool; `muse-session-message` means Muse's in-session
+messaging; `opencode-session` has no verified delivery command). For
+any other status, show `—` with the exact status. Show `message_route.name`,
+terminal-escaped, when it is non-null. `message_route` is optional and
+informational: its absence never triggers recovery, and an unrecognized
+status or field is shown raw rather than treated as invalid output.
+
 ### Print only the current session's fork command
 
 For exact skill argument `--session-only`, run exactly:
