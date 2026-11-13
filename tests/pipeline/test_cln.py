@@ -190,8 +190,17 @@ def test_cleanup_force_extends_targeting_and_overrides_guards(repo_scenario):
     assert result.removed and not target.exists()
 
 
-@pytest.mark.matrix("T-CLN-34")
-@pytest.mark.parametrize("change", ["branch-switched", "path-replaced"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(
+            "branch-switched", id="T-CLN-34", marks=pytest.mark.matrix("T-CLN-34")
+        ),
+        pytest.param(
+            "path-replaced", id="T-CLN-35", marks=pytest.mark.matrix("T-CLN-35")
+        ),
+    ],
+)
 def test_cleanup_force_unregistered_target_changed_while_confirming_refuses(
     repo_scenario, change
 ):
