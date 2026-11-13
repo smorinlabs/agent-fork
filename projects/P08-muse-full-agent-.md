@@ -2,17 +2,43 @@
 
 Detect Muse sessions and support fork, resume, transcript, and messaging.
 
+### Scope
+agent-fork treats a Muse (Muse Code) session the way it treats Claude Code and Codex: detect it, fork it with its project files, resume it in place, and locate its transcript.
+- **Detection:** `MUSE_SESSION_ID` joins the single shared assessment `assess_agent_signals` in `agents.py`. It is not a parallel copy (P02-A9 consolidated five of those into one). The extension point is shaped so a fourth agent (P09, OpenCode) is one more table entry.
+- **CLI:** `fork --agent muse` and `--parent-session` for Muse, in `cli.py` and `detect_agent`.
+- **Preflight:** the `muse` binary is on PATH, its version meets a floor, and the parent session exists in the Muse store. Each refusal is a typed error in `errors.py` `ERROR_CATALOG` and in the README exit-code table.
+- **Fork (lazy, at paste time):** a hidden agent-fork subcommand starts `muse serve` with bounded timeouts and output caps (the `codex_app_server.py` pattern), calls `initialize`, sends the `initialized` notification, calls `session/fork` for the parent, and prints the new session ID. The paste command is `cd <worktree> && muse resume "$(agent-fork <hidden-subcommand> <parent-id>)"`. The pipeline itself creates no Muse state, so `--dry-run` and rollback stay git-only.
+- **Resume in place:** `cd <dir> && muse resume <id>`.
+- **Session inspection:** Muse sessions report `agent: "muse"`, a transcript path (`session.jsonl`), and fork and resume commands, through `--session` and `--session-only`.
+- **Docs:** README agent support, exit codes, and the Muse section; TEST-MATRIX rows for every new test.
+
+### Out of scope
+- Messaging: Muse stays address-only, as P07 shipped it (`sender_unverified`). An MSP `turn/start` route would inject input as the target's own user; the owner declined it on 2026-11-13.
+- OpenCode (P09, scoped in parallel); expect a merge on the shared extension point.
+- Any change to Claude or Codex behavior; the P02 fault register.
+- Auto-trusting the fork worktree: the paste command does not pass `--trust-workspace`, so Muse asks the user.
+- Deleting forks: MSP has no `session/delete`.
+
 ### Open questions
-- Does Muse have a native fork command, or must agent-fork fork the transcript itself? (`muse export --help` says exports include "fork/subagent lineage", so Muse has a fork concept; no `fork` subcommand is listed in `muse --help`.)
-- Where is a Muse session's transcript file, and is `muse export` the supported read path?
+- Version floor: only 1.4.20 has been probed (the idea notes saw 1.4.18). Should the floor be 1.4.20, or should an older version be probed?
+- Live confirmation: does a paste-time fork of a real (non-echo) session include the turn that invoked agent-fork? The schema says it copies completed turns only.
+- Hidden subcommand: its name, its visibility in `--help`, and its exit-code contract when `muse serve` or `session/fork` fails at paste time.
+- Transcript lookup: deterministic path, `session-index.db` (an unpublished schema), or MSP `session/read` `Session.path`.
+- Signal precedence when `MUSE_SESSION_ID` coexists with Claude or Codex variables (nested agents). Coordinate with P09.
+
+### Resolved day-1 questions
+- Native fork? Yes, the MSP method `session/fork` via `muse serve`; there is no CLI verb. See the probe findings.
+- Transcript? `sessions/YYYY/MM/DD/<uuid>/session.jsonl`; `muse export --session <uuid> --out <file>` is the supported export.
 
 ### Notes
 Muse sets MUSE_SESSION_ID and MUSE_THREAD_ID (same value) for commands; no Claude variables (probed 2026-11-12, Muse Code 1.4.18, clean environment).
-Sessions: ~/.local/share/muse/session-index.db; resume with `cd <workspace> && muse resume <uuid>` (`muse resume --help`: takes "an exact session UUID or Session Name", scoped to the current workspace; not run interactively). Running sessions via `muse sessions --json`: verified 2026-11-12, a live `muse exec` session listed itself with `sessionId` equal to its MUSE_SESSION_ID and `name` `gold-asteroid`.
+Running sessions via `muse sessions --json`: verified 2026-11-12, a live `muse exec` session listed itself with `sessionId` equal to its MUSE_SESSION_ID and `name` `gold-asteroid`.
 
-### Decisions so far (scoping with the owner, 2026-11-13)
-- References: Successor of P07 (cross-tool message route, PR #76); Prior art `src/agent_fork/codex_app_server.py` (bounded JSON-RPC stdio client); Discussion P09 (OpenCode full agent, same extension point).
-- Fork method: **A, full native fork.** agent-fork calls MSP `session/fork` itself, then prints `cd <worktree> && muse resume <fork-id>`. The real-terminal gate passed (see the probe findings above).
+### Decisions (scoping with the owner, 2026-11-13)
+- References: all three candidates (below).
+- Fork method: full native fork (MSP `session/fork`); the real-terminal resume gate passed.
+- Messaging: keep address-only.
+- Fork timing: lazy, at paste time.
 
 ### Probe findings (2026-11-13, Muse Code 1.4.20, `--provider echo`, isolated `XDG_DATA_HOME`)
 - **Native fork exists, only over MSP.** `muse schema generate-json-schema` lists stable method `session/fork` (`SessionForkParams`: `commandId` UUIDv7, `sessionId`, optional `cutPoint.lastTurnId`, `excludeItems`). Reached via `muse serve` (newline-delimited JSON-RPC on stdio: `initialize`, then the `initialized` notification, then calls). No CLI `fork` verb. The real index's 4 existing forks all carry `msp_fork_command_id`.
