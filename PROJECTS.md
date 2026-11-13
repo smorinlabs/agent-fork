@@ -49,4 +49,5 @@ file plus those.
 - [ ] **P03** — [agent-fork core enhancements](projects/P03-agent-fork-core-enhancements.md)
 - [x] **P04** — [session resume (rehydrate) command](projects/P04-session-resume-command.md)
 - [x] **P05** — [session transcript path](projects/P05-session-transcript-path.md)
-- [~] **P06** — [session messaging name](projects/P06-session-messaging-name.md)
+- [x] **P06** — [session messaging name](projects/P06-session-messaging-name.md)
+- [~] **P07** — [cross-tool message route](projects/P07-cross-tool-message-route.md)
