@@ -30,7 +30,6 @@ agent-fork treats a Muse (Muse Code) session the way it treats Claude Code and C
 - Version floor: only 1.4.20 has been probed (the idea notes saw 1.4.18). Should the floor be 1.4.20, or should an older version be probed?
 - Paste-command shape: in `muse resume "$(agent-fork …)"`, a failed fork still runs `muse resume ""`. Use a form that propagates the failure, such as `id=$(agent-fork …) && cd <worktree> && muse resume "$id"`.
 - The paste command now needs `agent-fork` itself to resolve in the user's shell; Claude and Codex pastes need only the vendor CLI. How should the executable be named (absolute path, `uvx`, or bare name)?
-- Re-pasting forks again and creates a second fork. Would minting the `commandId` at pipeline time and passing it in the paste command make `session/fork` idempotent?
 - Target version `v1.5.0` is an assumption; P09 may claim the same minor version.
 - Hidden subcommand: its name, its visibility in `--help`, and its exit-code contract when `muse serve` or `session/fork` fails at paste time.
 - Transcript lookup: deterministic path, `session-index.db` (an unpublished schema), or MSP `session/read` `Session.path`.
@@ -49,6 +48,7 @@ Running sessions via `muse sessions --json`: verified 2026-11-12, a live `muse e
 - Fork method: full native fork (MSP `session/fork`); the real-terminal resume gate passed.
 - Messaging: keep address-only.
 - Fork timing: lazy, at paste time.
+- Parity (Q3.A, 2026-11-13): match Claude Code and Codex. Re-pasting makes a second fork, as with them; Muse-only idempotency is out of scope.
 
 ### Tests & Tasks
 - [x] [P08-T01] Pilot gate, before any implementation, with owner consent (it leaves a fork that cannot be deleted). Use a real-provider parent open in the Muse TUI. Run the fork step from the untrusted fork worktree, recording which provider and credentials `muse serve` needs. Accept the trust prompt and resume. Confirm that a real tool call such as `pwd` lands in the worktree, and that the invoking turn is present in the fork. If the pilot fails, fall back to option B: refuse `fork --agent muse` with a typed error.
