@@ -196,7 +196,7 @@ agent-fork --version
 readlink ~/.claude/skills/agent-fork ~/.agents/skills/agent-fork
 ```
 
-The version command must print `agent-fork 1.2.1`. <!-- x-release-please-version -->
+The version command must print `agent-fork 1.3.0`. <!-- x-release-please-version -->
 Both symlinks must resolve
 to this repository's `.agents/skills/agent-fork` directory.
 
@@ -360,6 +360,25 @@ linked worktree the session moved into — resolves correctly. The Codex path is
 Codex `transcript.path` is null whenever no rollout matches. A session ID that
 is not `[A-Za-z0-9-]+` never reaches the filesystem and reports a null path.
 Inspection reports the location only; it never reads the transcript.
+
+For a Claude Code session, inspection also reports `messaging`: the name other
+Claude Code sessions can message this one by (the `to` value for
+`SendMessage`, and the name `ListAgents` shows), printed as `message as:`.
+
+```text
+message as: c-87 (live)
+```
+
+It comes from Claude Code's live-session registry,
+`<CLAUDE_CONFIG_DIR|~/.claude>/sessions/<pid>.json`: the entry whose
+`sessionId` matches and whose process is still running. This is a different
+value from the session name, which is only a `/rename` title read from the
+transcript. `messaging.status` is `live` when the entry is found,
+`not_running` when there is no entry or its process has exited,
+`unavailable` when the registry exceeds agent-fork's read bounds, and
+`not_applicable` for Codex or when no agent is detected. The name exists only
+while the session runs, and Claude Code can change a derived name, so treat it
+as an address for now, not as the session's identity.
 
 JSON inspection also reports `agent_signal`, an additive object with
 `status`, `present`, and `missing`. Its status is `absent`, `incomplete`,

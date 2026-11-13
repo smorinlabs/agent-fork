@@ -554,6 +554,48 @@ def test_session_outputs_transcript_path_or_unavailable(repo_scenario):
     assert b"transcript: unavailable" in unsafe.stdout
 
 
+@pytest.mark.matrix("T-SES-53")
+def test_session_outputs_messaging_name_or_its_status(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    registry = Path(world.env["HOME"]) / ".claude" / "sessions"
+
+    document = json.loads(run_cli(["session", "--json"], env, world.parent_path).stdout)
+    assert document["messaging"] == {
+        "name": None,
+        "status": "not_running",
+        "name_source": None,
+    }
+    human = run_cli(["session"], env, world.parent_path)
+    assert b"message as: unavailable (not_running)" in human.stdout
+
+    registry.mkdir(parents=True)
+    entry = {"sessionId": "claude-child", "pid": os.getpid(), "name": "c-87"}
+    (registry / "1.json").write_text(json.dumps(entry))
+    live = run_cli(["session"], env, world.parent_path)
+    assert b"message as: c-87 (live)" in live.stdout
+    live_document = json.loads(
+        run_cli(["session", "--json"], env, world.parent_path).stdout
+    )
+    assert live_document["messaging"]["name"] == "c-87"
+
+    hostile = {**entry, "name": "evil\x1b]52;c;Zm9v\x07\nnext‮"}
+    (registry / "1.json").write_text(json.dumps(hostile))
+    escaped = run_cli(["session"], env, world.parent_path)
+    assert b"\x1b" not in escaped.stdout and b"\x07" not in escaped.stdout
+    assert "‮".encode() not in escaped.stdout
+    assert b"message as: evil" in escaped.stdout
+
+    absent = run_cli(["session"], world.env, world.parent_path)
+    assert b"message as: unavailable (not_applicable)" in absent.stdout
+
+
 @pytest.mark.matrix("T-SES-46")
 def test_codex_session_distinguishes_absent_lineage_from_read_failures(repo_scenario):
     from conftest import run_cli

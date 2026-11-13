@@ -107,6 +107,15 @@ Escaping makes the value safe to display; it never licenses rewriting,
 shortening, or re-encoding the path itself. Never read, summarize, copy, or
 quote the file's contents — this field is a location only.
 
+When `messaging` is present, also show it under the label "Message as": the
+name other Claude Code sessions can use to message this one (the `to` value
+for `SendMessage`, and the name `ListAgents` lists). It is distinct from
+"Session name", which is only a `/rename` title. For status `live`, show
+`messaging.name`, terminal-escaped like every other session-controlled value,
+and say it is valid while this session runs and can change. For any other
+status, show `—` with the exact status. Older CLIs omit `messaging`; its
+absence is not an older-contract diagnostic and never triggers recovery.
+
 ### Print only the current session's fork command
 
 For exact skill argument `--session-only`, run exactly:
@@ -333,7 +342,10 @@ route fields:
   requires a null `command`. `transcript` must be an object whose
   `transcript.path` is a non-empty string or null and whose
   `transcript.exists` is a boolean; a null `path` with `exists` true is
-  invalid output.
+  invalid output. `messaging` is optional; when present it must be an object
+  whose `status` is exactly `live`, `not_running`, `unavailable`, or
+  `not_applicable`, whose `name` is a non-empty string for `live` and null
+  otherwise, and whose `name_source` is a string or null.
 - Fork: a non-empty string `command` and non-empty strings `fork.name`, `fork.branch`, and `fork.worktree`.
 
 Otherwise report `Invalid agent-fork JSON output` and stop. Do not invent

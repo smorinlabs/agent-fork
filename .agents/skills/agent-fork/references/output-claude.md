@@ -14,6 +14,7 @@ reconstruct a command from.
 |---|---|
 | Session | `11111111-1111-4111-8111-111111111111` (from `CLAUDE_CODE_SESSION_ID`) |
 | Session name | `review-auth` (via Claude transcript) |
+| Message as | `c-87` (live — valid while this session runs; can change) |
 | Parent | none recorded (lineage: `not_found`) |
 | Repository | `/Users/dev/project` |
 | Branch | `main` (default branch) |
@@ -42,7 +43,10 @@ invocation directory — and never otherwise rewritten. `(on disk)` renders
 `transcript.exists: true` and `(not yet written)` renders `false`. When
 `transcript.path` is null the row reads `not located`.
 
-Row variants: an unnamed session shows `—` for Session name; a known parent
+Row variants: a non-live messaging status shows `—` with the status, for
+example `— (not_running)`, and the Message as row is omitted when the CLI
+output has no `messaging` object. An unnamed session shows `—` for Session
+name; a known parent
 shows its ID with the lineage status, for example
 `22222222-2222-4222-8222-222222222222 (lineage: claimed)`; qualify an
 `inferred` parent with the CLI's exact staleness notice; a dirty repository

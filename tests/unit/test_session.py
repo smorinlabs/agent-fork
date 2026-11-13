@@ -1027,3 +1027,137 @@ def test_validate_has_parent_requires_current_status(repo_scenario):
     result = inspect_session(env, cwd=world.parent_path)
     assert result.parent_inference.status == "current"
     validate_session(result, SessionAssertions(has_parent=True))
+
+
+def _registry(env: dict[str, str]) -> Path:
+    root = Path(env.get("CLAUDE_CONFIG_DIR", Path(env["HOME"]) / ".claude"))
+    path = root / "sessions"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _register(env: dict[str, str], file: str, **entry: object) -> Path:
+    path = _registry(env) / file
+    path.write_text(json.dumps(entry))
+    return path
+
+
+def _exited_pid() -> int:
+    import subprocess
+    import sys
+
+    process = subprocess.Popen([sys.executable, "-c", "pass"])
+    process.wait()
+    return process.pid
+
+
+@pytest.mark.matrix("T-SES-51")
+def test_messaging_name_comes_from_the_live_session_registry(
+    repo_scenario, monkeypatch
+):
+    import os
+
+    import agent_fork.session as session_module
+
+    world = repo_scenario()
+    claude_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+
+    def messaging(env):
+        return session_module.inspect_session(env, cwd=world.parent_path).messaging
+
+    # No agent and Codex sessions have no messaging registry.
+    assert messaging(world.env).status == "not_applicable"
+    assert messaging(world.env).name is None
+    codex = messaging({**world.env, "CODEX_THREAD_ID": "codex-thread"})
+    assert codex.status == "not_applicable" and codex.name is None
+
+    # No registry directory at all.
+    absent = messaging(claude_env)
+    assert (absent.status, absent.name) == ("not_running", None)
+
+    # Another session's live entry, a malformed file, an oversized file, a
+    # non-string name, and a symlink never match.
+    _register(claude_env, "1.json", sessionId="other", pid=os.getpid(), name="other-1")
+    (_registry(claude_env) / "2.json").write_text("{not json")
+    _register(claude_env, "3.json", sessionId="claude-child", pid=os.getpid(), name=7)
+    big = _registry(claude_env) / "4.json"
+    big.write_text(
+        json.dumps({"sessionId": "claude-child", "pid": os.getpid(), "name": "big"})
+        + " " * session_module.SESSION_REGISTRY_FILE_LIMIT
+    )
+    outside = world.parent_path.parent / "outside.json"
+    outside.write_text(
+        json.dumps({"sessionId": "claude-child", "pid": os.getpid(), "name": "linked"})
+    )
+    (_registry(claude_env) / "5.json").symlink_to(outside)
+    skipped = messaging(claude_env)
+    assert (skipped.status, skipped.name) == ("not_running", None)
+
+    # The matching entry of an exited process is not addressable.
+    _register(
+        claude_env, "6.json", sessionId="claude-child", pid=_exited_pid(), name="gone"
+    )
+    exited = messaging(claude_env)
+    assert (exited.status, exited.name) == ("not_running", None)
+
+    # A live matching entry reports its name and where it came from.
+    _register(
+        claude_env, "7.json", sessionId="claude-child", pid=os.getpid(), name="c-87"
+    )
+    live = messaging(claude_env)
+    assert (live.status, live.name) == ("live", "c-87")
+    assert live.name_source == "claude-session-registry"
+
+    # CLAUDE_CONFIG_DIR relocates the registry.
+    relocated = {
+        **claude_env,
+        "CLAUDE_CONFIG_DIR": str(world.parent_path.parent / "cfg"),
+    }
+    assert messaging(relocated).status == "not_running"
+    _register(
+        relocated, "9.json", sessionId="claude-child", pid=os.getpid(), name="moved"
+    )
+    assert messaging(relocated).name == "moved"
+
+    # Too many registry files to scan within bounds.
+    monkeypatch.setattr(session_module, "SESSION_REGISTRY_ENTRY_LIMIT", 3)
+    bounded = messaging(claude_env)
+    assert (bounded.status, bounded.name) == ("unavailable", None)
+
+    with pytest.raises(ValueError, match="needs a name"):
+        session_module.SessionMessaging(None, "live", None)
+
+
+@pytest.mark.matrix("T-SES-52")
+def test_document_includes_messaging(repo_scenario):
+    import os
+
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+    claude_env = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-child",
+    }
+    assert inspect_session(claude_env, cwd=world.parent_path).document()[
+        "messaging"
+    ] == {
+        "name": None,
+        "status": "not_running",
+        "name_source": None,
+    }
+    _register(
+        claude_env, "1.json", sessionId="claude-child", pid=os.getpid(), name="c-87"
+    )
+    assert inspect_session(claude_env, cwd=world.parent_path).document()[
+        "messaging"
+    ] == {
+        "name": "c-87",
+        "status": "live",
+        "name_source": "claude-session-registry",
+    }
