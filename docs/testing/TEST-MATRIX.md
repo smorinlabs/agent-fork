@@ -566,6 +566,7 @@ the group.
 | T-CLN-31 | a structurally invalid freshness-index file degrades cleanup disclosure to the neutral empty `retained_metadata` plus its own notice, never a crash and never a partial, misleading result | freshness=A10 | C | live | P02 A10; REQ-17; REQ-32 |
 | T-CLN-32 | a hostile session ID (embedded newline and shell metacharacters) in a generated removal command round-trips through `shlex` as one safely-quoted argument, never letting the command break out of its argument position | freshness=A10 | C | live | P02 A10 gate-6; REQ-17 |
 | T-CLN-33 | an unreadable freshness index nulls only the freshness half of disclosure; an unrelated, independently-readable retained lineage claim is still disclosed, not suppressed by the freshness fault | freshness=A10 | C | live | P02 A10 gate-6; REQ-17; REQ-32 |
+| T-CLN-34 | a `--force` unregistered cleanup target that changes while confirmation is pending (worktree switched to another branch, or path taken over by another repository's worktree) refuses with `cleanup_target_changed` and destroys nothing, matching the revalidation registered targets already get | baseline | C | live | P02 A14 |
 
 ---
 
