@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_fork.content import gitlink_paths, nul_paths
-from agent_fork.errors import PreconditionError
+from agent_fork.errors import AgentForkError, PreconditionError
 from agent_fork.git import GitCommandError, run_git
 from agent_fork.text import escape_terminal_text
 from agent_fork.worktree_list import list_worktrees
@@ -329,6 +329,9 @@ def _unrepresentable_submodules(
     return sorted(gitlinks.intersection(nul_paths(changed.stdout)))
 
 
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
 def validate_fork_guards(
     parent: Path,
     branch: str,
@@ -392,7 +395,8 @@ def validate_fork_guards(
 
     def comparable(path: Path) -> str:
         text = str(path.resolve())
-        return text.casefold() if ignorecase else text
+        # Git folds ASCII only (strcasecmp), so `ß` must not match `ss`.
+        return text.translate(_ASCII_LOWER) if ignorecase else text
 
     wanted = comparable(destination)
     for record in list_worktrees(info.parent_path, env=env):
@@ -515,52 +519,54 @@ def create_worktree_at_anchor(
     anchor: str | None = None,
     env: Mapping[str, str] | None = None,
 ) -> WorktreeCreation:
-    """Atomically ask Git to create branch+worktree and classify race losses."""
+    """Create the fork branch, then its worktree, owning what this call made.
+
+    The branch is created first and on its own. Git refuses that atomically
+    when the name already exists, so a refusal there is a genuine lost race and
+    nothing was created. Once the branch exists this call provably owns it, so
+    a worktree failure afterwards can be rolled back without guessing whether
+    a concurrent creator's branch is being deleted.
+    """
     info = inspect_repository(parent, env=env)
     resolved_anchor = anchor or resolve_anchor(parent, env=env)
+    anchor_commit = (
+        run_git(
+            parent,
+            ["rev-parse", "--verify", f"{resolved_anchor}^{{commit}}"],
+            env=env,
+        )
+        .stdout.decode()
+        .strip()
+    )
     parent_branch = current_branch(parent, env=env)
     default_branches = classify_default_branches(parent, env=env)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        run_git(
-            parent,
-            ["worktree", "add", "-b", branch, str(destination), resolved_anchor],
-            env=env,
-        )
-    except GitCommandError as error:
-        probe = run_git(
-            parent,
-            ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}"],
-            env=env,
-            check=False,
-        )
-        branch_now_exists = probe.returncode == 0
-        # `git worktree add -b` creates the branch before it validates or
-        # creates the path, and keeps it when a later step fails. The guards
-        # proved the branch absent, so a branch at our anchor that no worktree
-        # has checked out is this attempt's own leftover, not a concurrent
-        # winner (whose branch is checked out in its worktree). Delete it with
-        # compare-and-delete, so a ref that moved meanwhile is left alone, and
-        # report Git's real failure rather than a race that did not happen.
-        if (
-            branch_now_exists
-            and probe.stdout.decode().strip() == resolved_anchor
-            and branch not in _worktree_branches(parent, env=env)
-        ):
+    claimed = run_git(
+        parent, ["branch", "--no-track", branch, anchor_commit], env=env, check=False
+    )
+    if claimed.returncode != 0:
+        exists = (
             run_git(
                 parent,
-                ["update-ref", "-d", f"refs/heads/{branch}", resolved_anchor],
+                ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
                 env=env,
                 check=False,
-            )
-            raise
-        if branch_now_exists:
+            ).returncode
+            == 0
+        )
+        if exists:
             raise PreconditionError(
                 "conflict_branch_exists",
                 f"branch {branch!r} won a concurrent creation race; "
                 "nothing was created",
-            ) from error
-        raise
+            ) from GitCommandError(claimed)
+        raise GitCommandError(claimed)
+    try:
+        run_git(parent, ["worktree", "add", str(destination), branch], env=env)
+    except GitCommandError as error:
+        raise _discard_failed_creation(
+            parent, branch, destination, anchor_commit, error, env=env
+        ) from error
     return WorktreeCreation(
         path=destination.resolve(),
         branch=branch,
@@ -571,4 +577,44 @@ def create_worktree_at_anchor(
         parent_branch=parent_branch,
         parent_detached=parent_branch is None,
         parent_on_default=parent_branch in default_branches.candidates,
+    )
+
+
+def _discard_failed_creation(
+    parent: Path,
+    branch: str,
+    destination: Path,
+    anchor_commit: str,
+    error: GitCommandError,
+    *,
+    env: Mapping[str, str] | None,
+) -> AgentForkError:
+    """Remove what a failed `git worktree add` left of this call's own fork.
+
+    Git can fail after registering the worktree (a failing post-checkout hook)
+    or before (an unwritable destination). Either way the branch is this
+    call's, so the worktree is removed only when it is ours at our
+    destination, and the branch only while it still points at the anchor.
+    """
+    git_message = escape_terminal_text(str(error))
+    try:
+        attached = _worktree_branches(parent, env=env).get(branch)
+        if attached is not None:
+            if attached.resolve() != destination.resolve():
+                raise GitCommandError(error.result)
+            run_git(parent, ["worktree", "remove", "--force", str(attached)], env=env)
+        run_git(
+            parent,
+            ["update-ref", "-d", f"refs/heads/{branch}", anchor_commit],
+            env=env,
+        )
+    except Exception:
+        return AgentForkError(
+            f"git worktree add failed: {git_message}; the branch {branch!r} "
+            "this attempt created could not be removed — delete it with "
+            f"'git branch -D {branch}' once nothing uses it"
+        )
+    return AgentForkError(
+        f"git worktree add failed: {git_message}; the branch {branch!r} and "
+        "anything this attempt created were removed"
     )
