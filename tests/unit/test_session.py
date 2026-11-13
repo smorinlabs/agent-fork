@@ -1094,6 +1094,10 @@ def test_messaging_name_comes_from_the_live_session_registry(
         json.dumps({"sessionId": "claude-child", "pid": os.getpid(), "name": "linked"})
     )
     (_registry(claude_env) / "5.json").symlink_to(outside)
+    # PR #75 review: inputs that raise outside OSError/JSONDecodeError are skipped.
+    _register(claude_env, "5a.json", sessionId="claude-child", pid=10**100, name="huge")
+    (_registry(claude_env) / "5b.json").write_text('{"pid": ' + "9" * 5000 + "}")
+    (_registry(claude_env) / "5c.json").write_text("[" * 20_000 + "]" * 20_000)
     skipped = messaging(claude_env)
     assert (skipped.status, skipped.name) == ("not_running", None)
 

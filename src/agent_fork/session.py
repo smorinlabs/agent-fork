@@ -315,7 +315,7 @@ def _process_running(pid: int) -> bool:
         return False
     except PermissionError:
         return True  # exists, owned by another user
-    except OSError:
+    except (OSError, OverflowError):  # OverflowError: pid beyond the platform's range
         return False
     return True
 
@@ -328,13 +328,19 @@ def _session_messaging(env: Mapping[str, str], session_id: str) -> SessionMessag
         .resolve()
     )
     registry = root / "sessions"
+    files: list[Path] = []
     try:
-        files = sorted(registry.glob("*.json"))
+        # Enumerate incrementally so an oversized registry stops at the limit
+        # instead of being listed and sorted in full.
+        with os.scandir(registry) as entries:
+            for item in entries:
+                if item.name.endswith(".json") and not item.name.startswith("."):
+                    files.append(Path(item.path))
+                    if len(files) > SESSION_REGISTRY_ENTRY_LIMIT:
+                        return SessionMessaging(None, "unavailable", None)
     except OSError:
         files = []
-    if len(files) > SESSION_REGISTRY_ENTRY_LIMIT:
-        return SessionMessaging(None, "unavailable", None)
-    for path in files:
+    for path in sorted(files):
         try:
             if path.is_symlink() or not path.is_file():
                 continue
@@ -343,7 +349,9 @@ def _session_messaging(env: Mapping[str, str], session_id: str) -> SessionMessag
             if len(data) > SESSION_REGISTRY_FILE_LIMIT:
                 continue
             entry = json.loads(data)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        # ValueError covers JSONDecodeError, UnicodeDecodeError, and the integer
+        # digit limit; RecursionError covers deep nesting within the byte bound.
+        except (OSError, ValueError, RecursionError):
             continue
         if not isinstance(entry, dict) or entry.get("sessionId") != session_id:
             continue
