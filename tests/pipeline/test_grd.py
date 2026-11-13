@@ -380,7 +380,12 @@ def test_case_variant_of_registered_missing_worktree_refuses(repo_scenario):
     from agent_fork.pipeline import ForkRequest, fork
 
     world = repo_scenario("plain@main")
-    if _git_out(world, "config", "--bool", "core.ignorecase").strip() != "true":
+    if (
+        _git_out(
+            world, "config", "--bool", "--default", "false", "core.ignorecase"
+        ).strip()
+        != "true"
+    ):
         pytest.skip("repository is case-sensitive")
     registered = world.parent_path.parent / "Stale"
     _git_out(world, "worktree", "add", "-q", "-b", "earlier", str(registered))
@@ -525,7 +530,12 @@ def test_stale_record_guard_folds_ascii_case_only(repo_scenario):
     from agent_fork.repository import validate_fork_guards
 
     world = repo_scenario("plain@main")
-    if _git_out(world, "config", "--bool", "core.ignorecase").strip() != "true":
+    if (
+        _git_out(
+            world, "config", "--bool", "--default", "false", "core.ignorecase"
+        ).strip()
+        != "true"
+    ):
         pytest.skip("repository is case-sensitive")
     registered = world.parent_path.parent / "Straße"
     _git_out(world, "worktree", "add", "-q", "-b", "earlier", str(registered))
