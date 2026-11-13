@@ -477,6 +477,7 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 | T-RBK-13 | SIGTERM in `run_git` after `Popen` starts Git but before `_ACTIVE.process` registration → signal stays blocked until registration, then the handler kills the Git process group and exits 143 | baseline | F | live | REQ-22; PR #66 review |
 | T-RBK-14 | SIGINT while `fork` is parked in `git worktree add` (after it claimed the branch) → exit 130, the claimed branch is removed, and the message names the branch instead of claiming no mutation happened | baseline | F | live | P02 A15 gate-6 r3 |
 | T-RBK-15 | SIGTERM at the same point → exit 143 with a rendered message naming the branch (not a bare default-handler death), and the claimed branch is removed | baseline | F | live | P02 A15 gate-6 r3 |
+| T-RBK-16 | SIGINT while `git worktree add` is mid-checkout (Git's `initializing` lock is on the new worktree) → exit 130, and the locked worktree, its admin directory, the destination, and the claimed branch are all removed | baseline | F | live | P02 A15 gate-6 r4 |
 
 ---
 
