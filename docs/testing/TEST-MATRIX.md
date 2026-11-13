@@ -201,6 +201,7 @@ Varying axes: topology (unborn(plain)/unborn(bare) for A2); markerless-unmerged 
 | T-GRD-34 | Production finding 4 — direct index stages 1–3 inside an initialized submodule refuse a real fork as `unmerged_index` before mutation even when the top-level index is merged | baseline | F | live | post-merge production review |
 | T-GRD-35 | Production finding 4 — dry-run applies the same recursive unmerged-index guard and qualified path reporting as a real fork | baseline | F | live | post-merge production review |
 | T-GRD-36 | Production finding 4 — recursive unmerged-index inspection reaches depth two and remains scoped to `with_state and with_submodules`, preserving both opt-outs | baseline | F | live | post-merge production review |
+| T-GRD-37 | P02 A15 — a destination whose directory is gone but which Git still records as a (prunable) worktree refuses before mutation as `conflict_worktree_path` with a `git worktree prune` remedy, and the fork leaves no branch behind instead of reporting a concurrent-creation race | baseline | F | live | P02 A15 |
 
 ---
 

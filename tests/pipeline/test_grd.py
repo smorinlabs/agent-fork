@@ -298,3 +298,56 @@ def test_race_loss_between_guard_pass_and_worktree_add(repo_scenario):
         assert winner_path.exists()
         assert not loser_path.exists()
         assert not list((world.parent_path / ".agent-fork").glob("**/*"))
+
+
+@pytest.mark.matrix("T-GRD-37")
+def test_destination_still_registered_as_missing_worktree_refuses(repo_scenario):
+    """T-GRD-37 — P02 A15 — a destination Git still records as a worktree refuses.
+
+    Given:  Git still holds worktree metadata for the destination, whose
+            directory was deleted (`git worktree list` marks it prunable)
+    Expect: refusal before any mutation as conflict_worktree_path with a
+            `git worktree prune` remedy; the fork leaves no branch behind,
+            rather than failing as a misreported concurrent-creation race
+    Source: P02 A15 (found during P02-TS07)
+    """
+    import shutil
+    import subprocess
+
+    from agent_fork.errors import PreconditionError
+    from agent_fork.pipeline import ForkRequest, fork
+    from agent_fork.repository import validate_fork_guards
+
+    world = repo_scenario("plain@main")
+    destination = world.parent_path.parent / "stale"
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(world.parent_path), *args],
+            env=world.env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+
+    git("worktree", "add", "-q", "-b", "earlier", str(destination))
+    shutil.rmtree(destination)
+    assert "prunable" in git("worktree", "list", "--porcelain")
+    branches_before = git("branch", "--list", "--format=%(refname:short)")
+
+    with pytest.raises(PreconditionError) as guard:
+        validate_fork_guards(world.parent_path, "fork/new", destination, env=world.env)
+    assert guard.value.code == "conflict_worktree_path"
+    assert "git worktree prune" in str(guard.value)
+
+    request = ForkRequest(
+        parent=world.parent_path,
+        destination=destination,
+        name="new",
+        branch="fork/new",
+        agent=None,
+    )
+    with pytest.raises(PreconditionError) as forked:
+        fork(request, env=world.env)
+    assert forked.value.code == "conflict_worktree_path"
+    assert git("branch", "--list", "--format=%(refname:short)") == branches_before
