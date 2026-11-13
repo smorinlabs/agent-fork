@@ -7,7 +7,7 @@
   current session for Codex, Muse, and OpenCode as well as Claude Code, without
   making Muse or OpenCode full agents (that is P08 and P09).
 
-## [~] Project P07: cross-tool message route (v1.4.0)
+## [x] Project P07: cross-tool message route (v1.4.0)
 **Goal**: `agent-fork session` reports a new `message_route` object saying how
 another session can send this session a message, for Claude Code, Codex, Muse,
 and OpenCode. The P06 `messaging` object keeps its shipped contract.
@@ -63,4 +63,4 @@ Also: when Muse or OpenCode signals are present, P06 `messaging` reports
 - [x] [P07-T05] README section
 - [x] Regression Test Status: `just all` (769 passed, 1 skipped), `make check`, and `just check-matrix` green
 - [x] [P07-TS04] Live verification 2026-11-12: inside a real Muse session the CLI printed the Muse route with the name `wood-fenrir` from `muse sessions --json`; inside a real OpenCode session it printed the `ses_` address; `codex queue` queued a message to a throwaway thread (exit 0). `muse session-message send` to an interactive session (`dawn-asteroid`, opened by the owner) found the target but returned `sender_unverified` from a shell and from `muse exec`, so the Muse route was changed to `address_only`
-- [ ] [P07-T06] PR merged
+- [x] [P07-T06] PR merged (#76, merge 33c294d, tag v1.4.0)
