@@ -17,7 +17,8 @@ if args == ["--version"]:
     sys.exit(0)
 if args == ["--help"]:
     print(os.environ.get("FAKE_MUSE_HELP",
-        "Commands:\n  resume  Resume a previous session\n  serve  Serve an MSP session host"))
+        "Commands:\n  resume  Resume a previous session\n"
+        "  serve  Serve an MSP session host"))
     sys.exit(0)
 if args == ["sessions", "--json"]:
     print(os.environ.get("FAKE_MUSE_SESSIONS", '{"sessions":[]}'))
@@ -52,7 +53,8 @@ for line in sys.stdin:
             sid = "not a uuid; rm -rf" if mode == "badid" else fork_id
             out({"jsonrpc": "2.0", "id": ident, "result": {
                 "session": {"sessionId": sid, "workspaceRoot": "/parent",
-                            "forkedFrom": {"sessionId": message["params"]["sessionId"]}},
+                            "forkedFrom": {
+                                "sessionId": message["params"]["sessionId"]}},
                 "history": {}, "pendingRequests": [], "viewCursor": "v"}})
     elif method == "session/leave":
         out({"jsonrpc": "2.0", "id": ident, "result": {"status": "accepted"}})

@@ -574,7 +574,8 @@ def test_session_outputs_message_route(repo_scenario):
     document = json.loads(
         run_cli(["session", "--json"], muse_env, world.parent_path).stdout
     )
-    assert document["agent"] is None
+    # P08 made Muse a full agent; its message route stays address-only.
+    assert document["agent"] == "muse"
     assert document["message_route"]["status"] == "address_only"
     assert document["message_route"]["command"] is None
     human = run_cli(["session"], muse_env, world.parent_path).stdout

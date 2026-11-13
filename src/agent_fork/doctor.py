@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_fork.agents import (
+    AGENT_NAMES,
     CLAUDE_FORK_MIN,
     CODEX_ENV_MIN,
     assess_agent_signals,
@@ -44,7 +45,7 @@ def _recipe_flag_check(env: Mapping[str, str], selected: str) -> DoctorCheck:
     name = "agent recipe flags"
     details: list[str] = []
     drifted = False
-    for agent in ("claude", "codex"):
+    for agent in AGENT_NAMES:
         binary = shutil.which(agent, path=env.get("PATH"))
         if binary is None:
             details.append(f"{agent}: not installed (skipped)")
@@ -66,12 +67,15 @@ def _recipe_flag_check(env: Mapping[str, str], selected: str) -> DoctorCheck:
 def _version_check(
     name: str,
     executable: str | None,
-    floor: tuple[int, int, int],
+    floor: tuple[int, int, int] | None,
     env: Mapping[str, str],
 ) -> DoctorCheck:
-    minimum = ".".join(map(str, floor))
+    """`floor=None` means no version is required (Muse: 1.4.20 is observed)."""
+    minimum = ".".join(map(str, floor)) if floor is not None else None
     if executable is None:
-        return DoctorCheck(name, False, f"missing; requires >= {minimum}")
+        return DoctorCheck(
+            name, False, f"missing; requires >= {minimum}" if minimum else "missing"
+        )
     completed = subprocess.run(
         [executable, "--version"], env=dict(env), capture_output=True, text=True
     )
@@ -82,8 +86,9 @@ def _version_check(
         return DoctorCheck(name, False, f"unreadable version: {output}")
     return DoctorCheck(
         name,
-        completed.returncode == 0 and version >= floor,
-        f"{'.'.join(map(str, version))} (minimum {minimum})",
+        completed.returncode == 0 and (floor is None or version >= floor),
+        f"{'.'.join(map(str, version))} "
+        + (f"(minimum {minimum})" if minimum else "(no minimum)"),
     )
 
 
@@ -204,6 +209,9 @@ def run_doctor(
         CODEX_ENV_MIN,
         env,
     )
+    muse = _version_check(
+        "Muse CLI", shutil.which("muse", path=env.get("PATH")), None, env
+    )
     hook_policy: str | None = None
     hook_timeout = 0
     try:
@@ -258,13 +266,14 @@ def run_doctor(
     def optional(check: DoctorCheck) -> DoctorCheck:
         return DoctorCheck(check.name, True, f"{check.detail} (optional)")
 
+    # Only the selected agent's CLI is required; under ambiguity none is
+    # selected, so every agent's row keeps its real result.
     if selected_mode == "git-only" or assessment.status == "absent":
-        claude, codex = optional(claude), optional(codex)
+        claude, codex, muse = optional(claude), optional(codex), optional(muse)
     elif assessment.status != "ambiguous":
-        if selected == "claude":
-            codex = optional(codex)
-        else:
-            claude = optional(claude)
+        claude = claude if selected == "claude" else optional(claude)
+        codex = codex if selected == "codex" else optional(codex)
+        muse = muse if selected == "muse" else optional(muse)
     state = Path(
         env.get(
             "XDG_STATE_HOME",
@@ -292,6 +301,7 @@ def run_doctor(
         git,
         claude,
         codex,
+        muse,
         recipes,
         signals,
         config,

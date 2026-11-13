@@ -62,8 +62,7 @@ def test_fork_agent_muse_dry_run_prints_the_paste_command(repo_scenario):
     worktree = document["plan"]["worktree"]["path"]
     q = shlex.quote
     assert document["command"] == (
-        f"cd {q(worktree)} && muse resume "
-        f'"$({q(_executable())} muse-fork {q(PARENT)})"'
+        f'cd {q(worktree)} && muse resume "$({q(_executable())} muse-fork {q(PARENT)})"'
     )
 
 

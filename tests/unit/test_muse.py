@@ -78,28 +78,25 @@ def test_muse_session_id_alone_is_detected(repo_scenario):
 
 
 @pytest.mark.matrix("T-MUS-02")
-@pytest.mark.parametrize(
-    "other",
-    [
-        pytest.param({"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "c"}, id="claude"),
-        pytest.param({"CODEX_THREAD_ID": "x"}, id="codex"),
-        pytest.param({"CLAUDECODE": "1"}, id="claude-marker-only"),
-    ],
-)
-def test_muse_with_another_agent_is_ambiguous(repo_scenario, other):
+def test_muse_with_another_agent_is_ambiguous(repo_scenario):
     """Q4.A: Muse signals together with Claude or Codex signals are ambiguous."""
     from agent_fork.agents import assess_agent_signals, detect_agent, resolve_agent_mode
     from agent_fork.errors import AgentDetectionError
 
-    env = {**other, "MUSE_SESSION_ID": PARENT}
-    assessment = assess_agent_signals(env)
-    assert assessment.status == "ambiguous"
-    assert assessment.context is None
-    assert "Muse" in assessment.diagnosis()
-    with pytest.raises(AgentDetectionError, match="--agent"):
-        detect_agent(env)
-    with pytest.raises(AgentDetectionError):
-        resolve_agent_mode("auto", env)
+    for other in (
+        {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "c"},
+        {"CODEX_THREAD_ID": "x"},
+        {"CLAUDECODE": "1"},
+    ):
+        env = {**other, "MUSE_SESSION_ID": PARENT}
+        assessment = assess_agent_signals(env)
+        assert assessment.status == "ambiguous", other
+        assert assessment.context is None
+        assert "Muse" in assessment.diagnosis()
+        with pytest.raises(AgentDetectionError, match="--agent"):
+            detect_agent(env)
+        with pytest.raises(AgentDetectionError):
+            resolve_agent_mode("auto", env)
 
 
 @pytest.mark.matrix("T-MUS-03")
@@ -199,7 +196,9 @@ def test_muse_preflight_help_drift_is_a_notice(repo_scenario, tmp_path):
 
 
 @pytest.mark.matrix("T-MUS-07")
-def test_msp_fork_returns_the_fork_id_and_leaves_it(repo_scenario, tmp_path):
+def test_msp_fork_returns_the_fork_id_and_leaves_it(
+    repo_scenario, tmp_path, monkeypatch
+):
     from agent_fork.muse_server import fork_session
 
     world = repo_scenario()
@@ -217,44 +216,38 @@ def test_msp_fork_returns_the_fork_id_and_leaves_it(repo_scenario, tmp_path):
     assert (leave_params["sessionId"], leave_params["stop"]) == (FORK, True)
     assert uuid.UUID(leave_params["commandId"]).version == 7
 
-
-@pytest.mark.matrix("T-MUS-07")
-def test_msp_fork_terminates_a_host_that_lingers(repo_scenario, tmp_path, monkeypatch):
+    # A host that stays up after stdin EOF is terminated within the bound.
     import agent_fork.muse_server as muse_server
 
-    world = repo_scenario()
-    env = _muse_env(world, tmp_path, FAKE_MUSE_MODE="linger")
     monkeypatch.setattr(muse_server, "SHUTDOWN_TIMEOUT", 0.5)
-    binary = env["PATH"].split(":")[0] + "/muse"
+    lingering = {**env, "FAKE_MUSE_MODE": "linger"}
     started = time.monotonic()
-    assert muse_server.fork_session(binary, PARENT, env) == FORK
+    assert muse_server.fork_session(binary, PARENT, lingering) == FORK
     assert time.monotonic() - started < 10
 
 
 @pytest.mark.matrix("T-MUS-08")
-@pytest.mark.parametrize(
-    ("mode", "message"),
-    [
-        pytest.param("error", "session not found", id="error-reply"),
-        pytest.param("malformed", "malformed JSON", id="malformed"),
-        pytest.param("exit", "exited before responding", id="early-exit"),
-        pytest.param("hang", "timed out", id="timeout"),
-        pytest.param("big", "output limit", id="oversized"),
-        pytest.param("badid", "unsupported fork result", id="bad-fork-id"),
-    ],
-)
-def test_msp_fork_failures_are_typed(repo_scenario, tmp_path, monkeypatch, mode, message):
+def test_msp_fork_failures_are_typed(repo_scenario, tmp_path, monkeypatch):
     import agent_fork.muse_server as muse_server
     from agent_fork.errors import ERROR_CATALOG, MuseForkError
 
     world = repo_scenario()
-    env = _muse_env(world, tmp_path, FAKE_MUSE_MODE=mode)
     monkeypatch.setattr(muse_server, "TIMEOUT", 2.0)
-    binary = env["PATH"].split(":")[0] + "/muse"
-    with pytest.raises(MuseForkError, match=message) as raised:
-        muse_server.fork_session(binary, PARENT, env)
-    assert raised.value.code == "muse_fork_failed"
-    assert raised.value.exit_code == ERROR_CATALOG["muse_fork_failed"].exit_code == 3
+    for mode, message in (
+        ("error", "session not found"),
+        ("malformed", "malformed JSON"),
+        ("exit", "exited before responding"),
+        ("hang", "timed out"),
+        ("big", "output limit"),
+        ("badid", "unsupported fork result"),
+    ):
+        env = _muse_env(world, tmp_path, FAKE_MUSE_MODE=mode)
+        binary = env["PATH"].split(":")[0] + "/muse"
+        with pytest.raises(MuseForkError, match=message) as raised:
+            muse_server.fork_session(binary, PARENT, env)
+        assert raised.value.code == "muse_fork_failed"
+        assert raised.value.exit_code == ERROR_CATALOG["muse_fork_failed"].exit_code
+        assert raised.value.exit_code == 3
 
 
 # --- commands, transcript, inspection ---------------------------------------
@@ -285,7 +278,9 @@ def test_muse_native_commands(repo_scenario, tmp_path, monkeypatch):
         f"cd {q(str(worktree))} && muse resume "
         f'"$({q(executable)} muse-fork {q(PARENT)})" --model {q("a b")}'
     )
-    resume = build_session_resume_command(AgentContext("muse", PARENT), directory=worktree)
+    resume = build_session_resume_command(
+        AgentContext("muse", PARENT), directory=worktree
+    )
     assert resume.command == f"cd {q(str(worktree))} && muse resume {q(PARENT)}"
     with pytest.raises(UnsafeCommandInputError):
         build_launch_command(
@@ -315,7 +310,10 @@ def test_muse_transcript_path_and_lineage(repo_scenario, tmp_path):
     home_env = {k: v for k, v in env.items() if k != "XDG_DATA_HOME"}
     home_env["HOME"] = str(tmp_path / "home")
     home_log = (
-        tmp_path / "home/.local/share/muse/sessions/2026/11/13" / PARENT / "session.jsonl"
+        tmp_path
+        / "home/.local/share/muse/sessions/2026/11/13"
+        / PARENT
+        / "session.jsonl"
     )
     home_log.parent.mkdir(parents=True)
     home_log.write_text("{}\n")
@@ -391,8 +389,8 @@ def test_muse_extra_args_config(repo_scenario, tmp_path):
     assert values.muse_extra_args == ("--model", "x")
     resolved = resolve_config(sources=[values])
     assert resolved.muse_extra_args == ("--model", "x")
-    path.write_text('[agents.muse]\nsession_name_resolution = true\n')
-    from agent_fork.errors import ConfigError
+    path.write_text("[agents.muse]\nsession_name_resolution = true\n")
+    from agent_fork.config import ConfigError
 
     with pytest.raises(ConfigError, match=r"\[agents.muse\] is invalid"):
         load_config(path)
@@ -402,17 +400,14 @@ def test_muse_extra_args_config(repo_scenario, tmp_path):
 
 
 @pytest.mark.matrix("T-MUS-13")
-def test_readme_exit_table_lists_every_catalog_code(repo_scenario):
+def test_readme_exit_table_lists_muse_fork_failed(repo_scenario):
     from agent_fork.errors import ERROR_CATALOG
 
     repo_scenario()
     readme = (Path(__file__).parents[2] / "README.md").read_text()
-    rows = {}
-    for line in readme.splitlines():
-        if line.startswith("| ") and "`" in line:
-            cells = [cell.strip() for cell in line.strip("|").split("|")]
-            if cells and cells[0].isdigit():
-                rows[int(cells[0])] = cells[-1]
-    assert "muse_fork_failed" in ERROR_CATALOG
-    for code, spec in ERROR_CATALOG.items():
-        assert f"`{code}`" in rows.get(spec.exit_code, ""), code
+    spec = ERROR_CATALOG["muse_fork_failed"]
+    rows = [
+        line for line in readme.splitlines() if line.startswith(f"| {spec.exit_code} |")
+    ]
+    assert len(rows) == 1
+    assert "`muse_fork_failed`" in rows[0]

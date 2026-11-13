@@ -32,6 +32,7 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
         3, "session-name resolver is unavailable"
     ),
     "session_validation_failed": ErrorSpec(3, "session assertions did not match"),
+    "muse_fork_failed": ErrorSpec(3, "Muse could not fork the parent session"),
     "claude_parent_unavailable": ErrorSpec(3, "Claude parent inference is unavailable"),
     "claude_parent_not_recordable": ErrorSpec(
         3, "Claude parent inference result is not recordable"
@@ -260,6 +261,13 @@ class SessionNameAmbiguousError(AgentForkError):
 
 class SessionResolutionUnavailableError(AgentForkError):
     code = "session_resolution_unavailable"
+    exit_code = 3
+
+
+class MuseForkError(AgentForkError):
+    """`muse serve` did not fork the parent session (`agent-fork muse-fork`)."""
+
+    code = "muse_fork_failed"
     exit_code = 3
 
 
