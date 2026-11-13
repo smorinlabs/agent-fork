@@ -554,6 +554,51 @@ def test_session_outputs_transcript_path_or_unavailable(repo_scenario):
     assert b"transcript: unavailable" in unsafe.stdout
 
 
+@pytest.mark.matrix("T-SES-56")
+def test_session_outputs_message_route(repo_scenario):
+    from conftest import run_cli
+
+    world = repo_scenario()
+    bin_dir = world.parent_path.parent / "fake-bin"
+    bin_dir.mkdir()
+    muse = bin_dir / "muse"
+    muse_id = "01a1d375-470a-73b0-939a-6381da238f05"
+    listing = json.dumps(
+        {"sessions": [{"sessionId": muse_id, "name": "gold\x1b]52;c;Zm9v\x07"}]}
+    )
+    muse.write_text(f"#!/bin/sh\ncat <<'JSON'\n{listing}\nJSON\n")
+    muse.chmod(0o755)
+    base = {**world.env, "PATH": f"{bin_dir}:{world.env['PATH']}"}
+
+    muse_env = {**base, "MUSE_SESSION_ID": muse_id}
+    document = json.loads(
+        run_cli(["session", "--json"], muse_env, world.parent_path).stdout
+    )
+    assert document["agent"] is None
+    assert document["message_route"]["command"] == (
+        f"muse session-message send --target {muse_id}"
+    )
+    human = run_cli(["session"], muse_env, world.parent_path).stdout
+    assert (
+        f"message route: muse session-message send --target {muse_id} "
+        "(muse, message on stdin)"
+    ).encode() in human
+    assert b"\x1b" not in human and b"\x07" not in human
+    assert b"message route name: gold" in human
+
+    oc_env = {**base, "OPENCODE": "1", "OPENCODE_SESSION_ID": "ses_abc123"}
+    oc = run_cli(["session"], oc_env, world.parent_path).stdout
+    assert b"message route: ses_abc123 (opencode, address only)" in oc
+
+    none = run_cli(["session"], base, world.parent_path).stdout
+    assert b"message route: unavailable (not_detected)" in none
+
+    mixed_env = {**base, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "c", **oc_env}
+    mixed = run_cli(["session"], mixed_env, world.parent_path).stdout
+    assert b"message route: unavailable (ambiguous)" in mixed
+    assert b"message as: unavailable (not_applicable)" in mixed
+
+
 @pytest.mark.matrix("T-SES-53")
 def test_session_outputs_messaging_name_or_its_status(repo_scenario):
     from conftest import run_cli

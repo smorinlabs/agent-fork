@@ -252,7 +252,11 @@ def _parser() -> argparse.ArgumentParser:
             "A transcript path is reported even when the file is not yet on disk; "
             "transcript.exists says which.\n"
             "messaging.name is the name other Claude Code sessions can message this "
-            "one by; it exists only while the session runs and can change."
+            "one by; it exists only while the session runs and can change.\n"
+            "message_route says how to message this session from Claude Code, "
+            "Codex, Muse, or OpenCode: an exact message_route.command (message as "
+            "its final argument or on stdin, per message_route.message_via), or an "
+            "address only."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1472,6 +1476,21 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     f"message as: {terminal_text(messaging.name)} ({messaging.status})"
                 )
+            route = inspection.message_route
+            if route.status == "available":
+                assert route.command is not None
+                via = "on stdin" if route.message_via == "stdin" else "as argument"
+                print(f"message route: {route.command} ({route.agent}, message {via})")
+            elif route.status == "address_only":
+                assert route.address is not None
+                print(
+                    f"message route: {terminal_text(route.address)} "
+                    f"({route.agent}, address only)"
+                )
+            else:
+                print(f"message route: unavailable ({route.status})")
+            if route.name is not None and route.name != route.address:
+                print(f"message route name: {terminal_text(route.name)}")
             return 0
         if args.command == "prune":
             from agent_fork.prune import apply_prune, plan_prune, render

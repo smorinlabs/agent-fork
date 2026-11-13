@@ -15,6 +15,7 @@ reconstruct a command from.
 | Session | `11111111-1111-4111-8111-111111111111` (from `CLAUDE_CODE_SESSION_ID`) |
 | Session name | `review-auth` (via Claude transcript) |
 | Message as | `c-87` (live — valid while this session runs; can change) |
+| Message route | `c-87` via the `SendMessage` tool (address only) |
 | Parent | none recorded (lineage: `not_found`) |
 | Repository | `/Users/dev/project` |
 | Branch | `main` (default branch) |

@@ -1165,3 +1165,183 @@ def test_document_includes_messaging(repo_scenario):
         "status": "live",
         "name_source": "claude-session-registry",
     }
+
+
+def _fake_muse(directory: Path, body: str) -> str:
+    """A `muse` stand-in whose `sessions --json` prints `body` (or runs it as shell)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    script = directory / "muse"
+    script.write_text(f"#!/bin/sh\n{body}\n")
+    script.chmod(0o755)
+    return str(directory)
+
+
+@pytest.mark.matrix("T-SES-54")
+def test_message_route_covers_each_tool_and_mixed_signals(repo_scenario, monkeypatch):
+    import os
+    import shlex
+
+    import agent_fork.session as session_module
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+    original_which = session_module.shutil.which
+    monkeypatch.setattr(
+        session_module.shutil,
+        "which",
+        lambda name, path=None: (
+            None if name == "codex" else original_which(name, path=path)
+        ),
+    )
+    no_muse = _fake_muse(world.parent_path.parent / "bin-none", "exit 1")
+    base = {**world.env, "PATH": f"{no_muse}:{world.env['PATH']}"}
+
+    def route(extra):
+        return inspect_session({**base, **extra}, cwd=world.parent_path).message_route
+
+    none = route({})
+    assert (none.agent, none.status, none.address, none.command) == (
+        None,
+        "not_detected",
+        None,
+        None,
+    )
+
+    # Claude: address is the live registry name; SendMessage is a tool, not a command.
+    claude_env = {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "claude-child"}
+    assert route(claude_env).status == "not_running"
+    _register(
+        {**base, **claude_env},
+        "1.json",
+        sessionId="claude-child",
+        pid=os.getpid(),
+        name="c-87",
+    )
+    claude = route(claude_env)
+    assert (claude.agent, claude.status, claude.address, claude.name) == (
+        "claude",
+        "address_only",
+        "c-87",
+        "c-87",
+    )
+    assert (claude.channel, claude.command, claude.message_via) == (
+        "claude-sendmessage",
+        None,
+        None,
+    )
+
+    # Codex: the thread ID is the address; the message is the final argument.
+    thread = "019fed92-fa7e-7262-b93e-6bd73a38ac72"
+    codex = route({"CODEX_THREAD_ID": thread})
+    assert (codex.agent, codex.status, codex.address) == ("codex", "available", thread)
+    assert codex.command == f"codex queue --thread {shlex.quote(thread)} --message"
+    assert (codex.channel, codex.message_via) == ("codex-queue", "argument")
+
+    # Muse: the session ID is the address; the body goes on stdin.
+    muse_id = "01a1d370-4c8a-7ee0-b5d6-13befc579f52"
+    muse = route({"MUSE_SESSION_ID": muse_id, "MUSE_THREAD_ID": muse_id})
+    assert (muse.agent, muse.status, muse.address) == ("muse", "available", muse_id)
+    assert muse.command == f"muse session-message send --target {muse_id}"
+    assert (muse.channel, muse.message_via, muse.name) == (
+        "muse-session-message",
+        "stdin",
+        None,
+    )
+
+    # OpenCode: address only; its IDs carry an underscore.
+    opencode = route(
+        {"OPENCODE": "1", "OPENCODE_SESSION_ID": "ses_e2c91a7afffe4l8DL2eUsdCt1n"}
+    )
+    assert (opencode.agent, opencode.status, opencode.address) == (
+        "opencode",
+        "address_only",
+        "ses_e2c91a7afffe4l8DL2eUsdCt1n",
+    )
+    assert (opencode.channel, opencode.command) == ("opencode-session", None)
+    marker_only = route({"OPENCODE": "1"})
+    assert (marker_only.agent, marker_only.status, marker_only.address) == (
+        "opencode",
+        "not_detected",
+        None,
+    )
+
+    # Unsafe identifiers never reach a command.
+    for extra, agent in (
+        ({"CODEX_THREAD_ID": "x\x1b]52;c;Zm9v\x07"}, "codex"),
+        ({"MUSE_SESSION_ID": "bad id;rm"}, "muse"),
+        ({"OPENCODE_SESSION_ID": "ses_bad\nnext"}, "opencode"),
+    ):
+        unsafe = route(extra)
+        assert (unsafe.agent, unsafe.status, unsafe.address, unsafe.command) == (
+            agent,
+            "unsafe_input",
+            None,
+            None,
+        )
+
+    # Signals from two tools cannot show which session is nested in which.
+    mixed = route({**claude_env, "MUSE_SESSION_ID": muse_id})
+    assert (mixed.agent, mixed.status, mixed.address) == (None, "ambiguous", None)
+    # ...and P06 messaging stops reporting the outer Claude session's name.
+    nested = inspect_session(
+        {**base, **claude_env, "MUSE_SESSION_ID": muse_id}, cwd=world.parent_path
+    )
+    assert nested.messaging.status == "not_applicable"
+    nested_oc = inspect_session(
+        {**base, **claude_env, "OPENCODE": "1"}, cwd=world.parent_path
+    )
+    assert nested_oc.messaging.status == "not_applicable"
+    assert route({**claude_env, "CODEX_THREAD_ID": thread}).status == "ambiguous"
+
+
+@pytest.mark.matrix("T-SES-55")
+def test_muse_route_name_comes_from_muse_sessions(repo_scenario):
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+    muse_id = "01a1d375-470a-73b0-939a-6381da238f05"
+    listing = json.dumps(
+        {
+            "sessions": [
+                {"sessionId": "other", "name": "nope"},
+                {"sessionId": muse_id, "name": "gold-asteroid"},
+            ]
+        }
+    )
+
+    def name_with(body, tag):
+        fake = _fake_muse(world.parent_path.parent / f"bin-{tag}", body)
+        env = {
+            **world.env,
+            "PATH": f"{fake}:{world.env['PATH']}",
+            "MUSE_SESSION_ID": muse_id,
+        }
+        result = inspect_session(env, cwd=world.parent_path).message_route
+        assert result.status == "available" and result.address == muse_id
+        return result.name
+
+    assert name_with(f"cat <<'JSON'\n{listing}\nJSON", "found") == "gold-asteroid"
+    assert name_with("echo '{\"sessions\": []}'", "absent") is None
+    assert name_with("echo 'not json'", "malformed") is None
+    assert (
+        name_with('echo \'{"sessions": [{"sessionId": "x"}]}\' ; exit 3', "failed")
+        is None
+    )
+    assert name_with("sleep 30", "slow") is None  # bounded by a timeout
+
+
+@pytest.mark.matrix("T-SES-57")
+def test_document_includes_message_route(repo_scenario):
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+    document = inspect_session(world.env, cwd=world.parent_path).document()
+    assert document["message_route"] == {
+        "agent": None,
+        "status": "not_detected",
+        "address": None,
+        "name": None,
+        "channel": None,
+        "command": None,
+        "message_via": None,
+    }

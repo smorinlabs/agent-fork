@@ -46,17 +46,19 @@ Also: when Muse or OpenCode signals are present, P06 `messaging` reports
   in 0.167.2, not as a minimum).
 
 ### Tests & Tasks
-- [ ] [P07-TS01] RED: route detection truth table (none, each tool alone,
+- [x] [P07-TS01] RED: route detection truth table (none, each tool alone,
       mixed signals ambiguous, unsafe IDs, OpenCode `ses_` pattern), and P06
       `messaging` becoming `not_applicable` under Muse/OpenCode signals (T-SES-54)
-- [ ] [P07-TS02] RED: Muse name lookup via a fake `muse sessions --json`:
+- [x] [P07-TS02] RED: Muse name lookup via a fake `muse sessions --json`:
       found, absent, timeout, malformed output (T-SES-55)
-- [ ] [P07-TS03] RED: CLI `message route:` line and `--json` object with exact,
-      quoted commands and terminal escaping (T-SES-56)
-- [ ] [P07-T01] GREEN: `SessionMessageRoute` and resolver in `session.py`
-- [ ] [P07-T02] GREEN: CLI line and help epilog
-- [ ] [P07-T03] Version bump to 1.4.0; TEST-MATRIX rows; `just check-matrix`
-- [ ] [P07-T04] Skill: show `message_route` when present; unknown status shown
+- [x] [P07-TS03] RED: CLI `message route:` line and `--json` object with exact,
+      quoted commands and terminal escaping (T-SES-56); `document()` shape (T-SES-57)
+- [x] [P07-T01] GREEN: `SessionMessageRoute` and resolver in `session.py`
+- [x] [P07-T02] GREEN: CLI line and help epilog
+- [x] [P07-T03] Version bump to 1.4.0; TEST-MATRIX rows; `just check-matrix`
+- [x] [P07-T04] Skill: show `message_route` when present; unknown status shown
       raw, never fatal; output references gain the row
-- [ ] [P07-T05] README section
-- [ ] Regression Test Status
+- [x] [P07-T05] README section
+- [x] Regression Test Status: `just all` (769 passed, 1 skipped), `make check`, and `just check-matrix` green
+- [x] [P07-TS04] Live verification 2026-11-12: inside a real Muse session the CLI printed `message route: muse session-message send --target <id> (muse, message on stdin)` and the name `wood-fenrir` from `muse sessions --json`; inside a real OpenCode session it printed the `ses_` address; `codex queue` queued a message to a throwaway thread (exit 0). Not verified: Muse delivery to an interactive session (headless `muse exec` targets return `target_surface_excluded`; an unattended interactive Muse session did not register)
+- [ ] [P07-T06] PR merged

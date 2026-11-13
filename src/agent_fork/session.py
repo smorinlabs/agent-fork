@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
+import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +17,7 @@ from agent_fork.agents import (
     AgentContext,
     AgentSignalAssessment,
     UnsafeCommandInputError,
+    _terminal_safe,
     assess_agent_signals,
     build_session_fork_command,
     build_session_resume_command,
@@ -36,6 +39,11 @@ CLAUDE_RECORD_LIMIT = 10_000
 SESSION_REGISTRY_ENTRY_LIMIT = 4_096
 SESSION_REGISTRY_FILE_LIMIT = 65_536
 SAFE_SESSION_ID = re.compile(r"[A-Za-z0-9-]+")
+# OpenCode session IDs are `ses_` plus letters and digits; kept separate so
+# SAFE_SESSION_ID, which guards the Claude transcript path, stays strict.
+OPENCODE_SESSION_ID = re.compile(r"ses_[A-Za-z0-9]+")
+MUSE_SESSIONS_TIMEOUT = 3.0
+MUSE_SESSIONS_OUTPUT_LIMIT = 1_048_576
 SessionForkStatus = Literal["available", "not_detected", "ambiguous", "unsafe_input"]
 
 
@@ -200,6 +208,157 @@ _MESSAGING_NOT_APPLICABLE = SessionMessaging(None, "not_applicable", None)
 
 
 @dataclass(frozen=True)
+class SessionMessageRoute:
+    """How another session can send this one a message, for any supported tool.
+
+    `command` is an exact shell command; the message goes as its final argument
+    (`message_via == "argument"`) or on stdin (`"stdin"`). Statuses other than
+    `available` carry no command.
+    """
+
+    agent: str | None
+    status: Literal[
+        "available",
+        "address_only",
+        "not_running",
+        "not_detected",
+        "ambiguous",
+        "unsafe_input",
+    ]
+    address: str | None = None
+    name: str | None = None
+    channel: str | None = None
+    command: str | None = None
+    message_via: Literal["argument", "stdin"] | None = None
+
+    def __post_init__(self) -> None:
+        if (self.status == "available") != (self.command is not None):
+            raise ValueError("only an available route carries a command")
+        if self.status in {"available", "address_only"} and self.address is None:
+            raise ValueError("an addressable route needs an address")
+
+    def document(self) -> dict[str, object]:
+        return {
+            "agent": self.agent,
+            "status": self.status,
+            "address": self.address,
+            "name": self.name,
+            "channel": self.channel,
+            "command": self.command,
+            "message_via": self.message_via,
+        }
+
+
+def _route_tools(env: Mapping[str, str]) -> list[str]:
+    """Every tool whose session signal is present, in a fixed order."""
+    tools = []
+    if env.get("CLAUDECODE") == "1":
+        tools.append("claude")
+    if env.get("CODEX_THREAD_ID"):
+        tools.append("codex")
+    if env.get("MUSE_SESSION_ID"):
+        tools.append("muse")
+    if env.get("OPENCODE") == "1" or env.get("OPENCODE_SESSION_ID"):
+        tools.append("opencode")
+    return tools
+
+
+def _foreign_session_signals(env: Mapping[str, str]) -> bool:
+    """Muse or OpenCode signals: the session may be nested in another tool's."""
+    return any(tool in {"muse", "opencode"} for tool in _route_tools(env))
+
+
+def _muse_session_name(env: Mapping[str, str], session_id: str) -> str | None:
+    """Look the session's name up with `muse sessions --json`; None on any failure."""
+    executable = shutil.which("muse", path=env.get("PATH"))
+    if executable is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [executable, "sessions", "--json"],
+            env=dict(env),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=MUSE_SESSIONS_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    output = completed.stdout[: MUSE_SESSIONS_OUTPUT_LIMIT + 1]
+    if len(output) > MUSE_SESSIONS_OUTPUT_LIMIT:
+        return None
+    try:
+        listing = json.loads(output)
+    except (ValueError, RecursionError):
+        return None
+    sessions = listing.get("sessions") if isinstance(listing, dict) else None
+    if not isinstance(sessions, list):
+        return None
+    for entry in sessions:
+        if isinstance(entry, dict) and entry.get("sessionId") == session_id:
+            name = entry.get("name")
+            return name if isinstance(name, str) and name else None
+    return None
+
+
+def _message_route(
+    env: Mapping[str, str],
+    messaging: SessionMessaging,
+    codex_name: str | None = None,
+) -> SessionMessageRoute:
+    tools = _route_tools(env)
+    if not tools:
+        return SessionMessageRoute(None, "not_detected")
+    if len(tools) > 1:
+        return SessionMessageRoute(None, "ambiguous")
+    tool = tools[0]
+    if tool == "claude":
+        if messaging.status != "live":
+            return SessionMessageRoute("claude", "not_running")
+        return SessionMessageRoute(
+            "claude",
+            "address_only",
+            messaging.name,
+            messaging.name,
+            "claude-sendmessage",
+        )
+    if tool == "opencode":
+        session_id = env.get("OPENCODE_SESSION_ID")
+        if not session_id:
+            return SessionMessageRoute("opencode", "not_detected")
+        if OPENCODE_SESSION_ID.fullmatch(session_id) is None:
+            return SessionMessageRoute("opencode", "unsafe_input")
+        return SessionMessageRoute(
+            "opencode", "address_only", session_id, None, "opencode-session"
+        )
+    session_id = env["CODEX_THREAD_ID"] if tool == "codex" else env["MUSE_SESSION_ID"]
+    if SAFE_SESSION_ID.fullmatch(session_id) is None or not _terminal_safe(session_id):
+        return SessionMessageRoute(tool, "unsafe_input")
+    quoted = shlex.quote(session_id)
+    if tool == "codex":
+        return SessionMessageRoute(
+            "codex",
+            "available",
+            session_id,
+            codex_name,
+            "codex-queue",
+            f"codex queue --thread {quoted} --message",
+            "argument",
+        )
+    return SessionMessageRoute(
+        "muse",
+        "available",
+        session_id,
+        _muse_session_name(env, session_id),
+        "muse-session-message",
+        f"muse session-message send --target {quoted}",
+        "stdin",
+    )
+
+
+@dataclass(frozen=True)
 class SessionParentInference:
     """Retained Claude parent-inference evidence, always present and never strict.
 
@@ -242,6 +401,9 @@ class SessionInspection:
     transcript: SessionTranscript
     notices: tuple[str, ...] = ()
     messaging: SessionMessaging = _MESSAGING_NOT_APPLICABLE
+    message_route: SessionMessageRoute = field(
+        default_factory=lambda: SessionMessageRoute(None, "not_detected")
+    )
     agent_signal: AgentSignalAssessment = field(
         default_factory=lambda: assess_agent_signals({})
     )
@@ -271,6 +433,7 @@ class SessionInspection:
             "resume_command": self.resume_command.document(),
             "transcript": self.transcript.document(),
             "messaging": self.messaging.document(),
+            "message_route": self.message_route.document(),
         }
 
 
@@ -490,6 +653,7 @@ def inspect_session(
             transcript=SessionTranscript(None, False),
             notices=tuple(notices),
             agent_signal=assessment,
+            message_route=_message_route(env, _MESSAGING_NOT_APPLICABLE),
         )
     if assessment.status in {"absent", "incomplete"}:
         if assessment.status == "incomplete":
@@ -506,6 +670,7 @@ def inspect_session(
             transcript=SessionTranscript(None, False),
             notices=tuple(notices),
             agent_signal=assessment,
+            message_route=_message_route(env, _MESSAGING_NOT_APPLICABLE),
         )
 
     context = assessment.context
@@ -535,7 +700,7 @@ def inspect_session(
     transcript = _session_transcript(agent, current_id, env, directory)
     messaging = (
         _session_messaging(env, current_id)
-        if agent == "claude"
+        if agent == "claude" and not _foreign_session_signals(env)
         else _MESSAGING_NOT_APPLICABLE
     )
 
@@ -558,6 +723,11 @@ def inspect_session(
             transcript=transcript,
             notices=tuple(notices),
             messaging=messaging,
+            message_route=_message_route(
+                env,
+                messaging,
+                current_session.name if agent == "codex" else None,
+            ),
             agent_signal=assessment,
             parent_inference=parent_inference,
         )
