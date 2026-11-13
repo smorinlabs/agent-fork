@@ -94,8 +94,12 @@ created through the API and deleted afterwards; no model turn ran.
   user and 2 assistant messages, plus `idle` and `location-switched` marker
   rows; the parent is unchanged. Failure path: `session.move` to a missing
   directory returns HTTP 400 `Directory does not exist` (exit 1), and
-  `session.remove` then deletes the child. Pending: the owner opens the
-  child in a TUI with the paste command.
+  `session.remove` then deletes the child. TUI check (run in a Rex tab with
+  `cd ~/tmp/p09-poc-wt && opencode --session <child>`, no prompt sent): the
+  TUI opened on the child "(fork #1)", showed the parent's conversation and
+  the marker `Moved to /Users/stevemorin/tmp/p09-poc-wt`, and its status bar
+  read `~/tmp/p09-poc-wt:poc-fork`. Child, repo, and worktree were deleted
+  afterwards.
 
 ### Open questions
 - [answered 2026-11-13] Is there a supported way to deliver a message into a
