@@ -27,7 +27,7 @@ agent-fork treats a Muse (Muse Code) session the way it treats Claude Code and C
 - Deleting forks: MSP has no `session/delete`.
 
 ### Open questions
-- Signal precedence when `MUSE_SESSION_ID` coexists with Claude or Codex variables: owner decision pending (Q4).
+- None open. Remaining unknowns are covered by `P08-TS06` (live verification).
 
 ### Resolved during decomposition (2026-11-13, executed probes)
 - Version floor: none. 1.4.20 is recorded as observed, not as a floor, matching P09; the preflight checks capability instead (`muse --help` lists `resume` and `serve`).
@@ -52,6 +52,8 @@ Running sessions via `muse sessions --json`: verified 2026-11-12, a live `muse e
 - Fork method: full native fork (MSP `session/fork`); the real-terminal resume gate passed.
 - Messaging: keep address-only.
 - Fork timing: lazy, at paste time.
+- Signal precedence (Q4.A, 2026-11-13): `MUSE_SESSION_ID` together with Claude or Codex signals is `ambiguous`; automatic detection refuses with `agent_not_detected` and the user passes `--agent`. This changes the result for such mixed environments only.
+- Live check (Q5.A, 2026-11-13): `P08-TS06` may create one more throwaway fork in the scratch pilot repository.
 - Parity (Q3.A, 2026-11-13): match Claude Code and Codex. Re-pasting makes a second fork, as with them; Muse-only idempotency is out of scope.
 
 ### Tests & Tasks
