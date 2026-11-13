@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 import signal
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -641,21 +642,50 @@ def _remove_own_creation(
     branch is this call's either way, so the worktree is removed only when it
     is ours at our destination, and the branch only while it still points at
     the anchor. Returns the error that prevented removal, or None.
+
+    It runs with SIGINT and SIGTERM ignored: the user has already asked to
+    stop, and a second Ctrl-C landing mid-cleanup would otherwise strand the
+    branch. Ignoring, unlike blocking, leaves no pending signal to fire after.
     """
-    try:
-        attached = _worktree_branches(parent, env=env).get(branch)
-        if attached is not None:
-            if attached.resolve() != destination.resolve():
-                return RuntimeError(f"branch is checked out at {attached}")
-            run_git(parent, ["worktree", "remove", "--force", str(attached)], env=env)
-        run_git(
-            parent,
-            ["update-ref", "-d", f"refs/heads/{branch}", anchor_commit],
-            env=env,
-        )
-    except Exception as error:
-        return error
+    with _terminal_signals_ignored():
+        try:
+            attached = _worktree_branches(parent, env=env).get(branch)
+            if attached is not None:
+                if attached.resolve() != destination.resolve():
+                    return RuntimeError(f"branch is checked out at {attached}")
+                # Double force: an interrupted checkout leaves Git's
+                # `initializing` lock, which one --force will not remove. Safe
+                # because this is our own worktree at our own destination.
+                run_git(
+                    parent,
+                    ["worktree", "remove", "-f", "-f", str(attached)],
+                    env=env,
+                )
+            run_git(
+                parent,
+                ["update-ref", "-d", f"refs/heads/{branch}", anchor_commit],
+                env=env,
+            )
+        except Exception as error:
+            return error
     return None
+
+
+@contextmanager
+def _terminal_signals_ignored() -> Iterator[None]:
+    # Signal dispositions can only be changed from the main thread.
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = {
+        signum: signal.signal(signum, signal.SIG_IGN)
+        for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 def _removal_outcome(branch: str, failure: Exception | None) -> str:
