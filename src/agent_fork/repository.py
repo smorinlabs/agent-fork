@@ -376,14 +376,33 @@ def validate_fork_guards(
     # A deleted worktree directory leaves Git's record of it behind. `git
     # worktree add -b` then creates the branch before refusing the path, so
     # this must refuse first, while nothing has been created.
-    wanted = destination.resolve()
+    # `resolve()` cannot canonicalise the case of a path that does not exist,
+    # while Git matches it case-insensitively when core.ignorecase is set.
+    ignorecase = (
+        run_git(
+            info.parent_path,
+            ["config", "--bool", "core.ignorecase"],
+            env=env,
+            check=False,
+        )
+        .stdout.decode()
+        .strip()
+        == "true"
+    )
+
+    def comparable(path: Path) -> str:
+        text = str(path.resolve())
+        return text.casefold() if ignorecase else text
+
+    wanted = comparable(destination)
     for record in list_worktrees(info.parent_path, env=env):
-        if record.path.resolve() == wanted:
+        if comparable(record.path) == wanted:
             raise PreconditionError(
                 "conflict_worktree_path",
                 f"worktree path is still registered with Git although its "
                 f"directory is missing: {escape_terminal_text(str(destination))}; "
-                "run 'git worktree prune' to clear the stale record",
+                "run 'git worktree prune' to clear the stale record (after "
+                "'git worktree unlock <path>' if it is locked)",
             )
     operation = mid_operation(info)
     if operation is not None:
@@ -509,15 +528,32 @@ def create_worktree_at_anchor(
             env=env,
         )
     except GitCommandError as error:
-        branch_now_exists = (
+        probe = run_git(
+            parent,
+            ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}"],
+            env=env,
+            check=False,
+        )
+        branch_now_exists = probe.returncode == 0
+        # `git worktree add -b` creates the branch before it validates or
+        # creates the path, and keeps it when a later step fails. The guards
+        # proved the branch absent, so a branch at our anchor that no worktree
+        # has checked out is this attempt's own leftover, not a concurrent
+        # winner (whose branch is checked out in its worktree). Delete it with
+        # compare-and-delete, so a ref that moved meanwhile is left alone, and
+        # report Git's real failure rather than a race that did not happen.
+        if (
+            branch_now_exists
+            and probe.stdout.decode().strip() == resolved_anchor
+            and branch not in _worktree_branches(parent, env=env)
+        ):
             run_git(
                 parent,
-                ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+                ["update-ref", "-d", f"refs/heads/{branch}", resolved_anchor],
                 env=env,
                 check=False,
-            ).returncode
-            == 0
-        )
+            )
+            raise
         if branch_now_exists:
             raise PreconditionError(
                 "conflict_branch_exists",
