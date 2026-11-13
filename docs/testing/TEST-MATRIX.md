@@ -7,7 +7,7 @@ Stubs copy from this document, never the reverse. scripts/check-matrix.py enforc
 - Row IDs `T-<GRP>-NN`, never renumbered. Retired/tombstoned IDs keep their numbers forever.
 - `row_status`: live | n/a | tombstone (no stub may ever exist) | retired (exempt skip stub, returns at the named milestone) | blocked (named unblock gate).
 - Group `Status:` field: pending | tdd | done — the single source of truth for the stub lifecycle (spec §7.2).
-- Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex · agent-signal = absent | incomplete-marker | incomplete-id | detected-claude | detected-codex | ambiguous-partial-marker | ambiguous-partial-id | ambiguous-complete · agent-mode = auto | strict | git-only · backend = git (jj reserved, no v1 values).
+- Axes: mode = exact | exact+ignored | no-state · topology = plain@branch | plain@main | detached | linked-worktree | bare@bare | bare@wt | dot-bare@wt | nested-bare | unborn(plain) | unborn(bare) · agent = claude | codex | opencode · agent-signal = absent | incomplete-marker | incomplete-id | detected-claude | detected-codex | ambiguous-partial-marker | ambiguous-partial-id | ambiguous-complete | detected-opencode | ambiguous-opencode · agent-mode = auto | strict | git-only · backend = git (jj reserved, no v1 values).
 - Baseline (pinned unless a group varies it): plain@branch × exact × claude × git.
 - Harness git floor: TEST_HARNESS_GIT_MIN = 2.43 (F/C/R tiers hard-error below; unit runs anywhere).
 - Execution gates: `just all` excludes `requires_real_cli` and `requires_process_group_signals`; `just test-live` reports host executable identity/version and preflights auth/state/network before tier R; `just test-signals` runs T-RBK-03/04, T-RBK-08/09, T-RBK-10, T-RBK-11, T-RBK-12, T-RBK-13, T-INC-16, T-INC-17, T-CLI-63, T-CLI-64, and T-OUT-28 with unrestricted process-group control; `just test-git-matrix` runs T-FIX-22 and T-MAT-12 with system Git and Flox Git.
@@ -111,6 +111,11 @@ Varying axes: agent (claude/codex, must vary per §4); otherwise baseline pinned
 | T-DET-24 | complete single-agent signals retain automatic and strict resolution | agent-signal=detected-claude/detected-codex; agent-mode=auto/strict | U | live | P02 A9; REQ-45 |
 | T-DET-25 | explicit agent without a parent flag retains its matching environment-ID fallback | agent=claude/codex | U | live | P02 A9; REQ-03; REQ-26 |
 | T-DET-26 | both partial-Claude-plus-Codex shapes refuse as ambiguous in automatic and strict modes | agent-signal=ambiguous-partial-marker/ambiguous-partial-id; agent-mode=auto/strict | U | live | P02 A9; REQ-45 |
+| T-DET-27 | an OpenCode session ID assesses as `detected` with OpenCode context, with or without `OPENCODE=1` (the Codex rule) | agent-signal=detected-opencode | U | live | P09 |
+| T-DET-28 | `OPENCODE=1` without a session ID assesses as `absent`, never `incomplete` | agent-signal=absent | U | live | P09 |
+| T-DET-29 | complete Claude plus an OpenCode session ID assesses as `ambiguous` | agent-signal=ambiguous-opencode | U | live | P09 |
+| T-DET-30 | OpenCode plus any Claude or Codex signal refuses as ambiguous in automatic and strict modes and names every agent; the Claude-and-Codex wording is unchanged | agent-signal=ambiguous-opencode; agent-mode=auto/strict | U | live | P09 |
+| T-DET-31 | OpenCode resolves in automatic and strict modes, by explicit `--agent opencode` with or without `--parent-session`, and an unknown agent names all three choices | agent=opencode; agent-mode=auto/strict/git-only | U | live | P09 |
 
 ---
 

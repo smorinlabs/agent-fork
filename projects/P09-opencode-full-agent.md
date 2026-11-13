@@ -160,7 +160,7 @@ export <id>` (JSON).
 ### Tests & Tasks
 Test IDs are the next free rows in `docs/testing/TEST-MATRIX.md`; tests use a
 fake `opencode` executable, never the real service.
-- [ ] [P09-TS01] RED: detection. OpenCode signals assess as `detected` with
+- [x] [P09-TS01] RED: detection. OpenCode signals assess as `detected` with
       an OpenCode context; one of `OPENCODE=1` / `OPENCODE_SESSION_ID` alone is
       `incomplete` (as for Claude); OpenCode plus Claude or Codex signals are
       `ambiguous`; an ID failing `OPENCODE_SESSION_ID` is refused; explicit
@@ -181,7 +181,7 @@ fake `opencode` executable, never the real service.
 - [ ] [P09-TS05] RED: CLI and doctor. `fork --agent opencode` and
       `session validate --agent opencode` accepted, help text names OpenCode;
       doctor reports the OpenCode version and its `--session` flag (T-CLI-71…)
-- [ ] [P09-T01] GREEN: `AgentName` gains `opencode`; `assess_agent_signals`
+- [x] [P09-T01] GREEN: `AgentName` gains `opencode`; `assess_agent_signals`
       and `detect_agent`
 - [ ] [P09-T02] GREEN: OpenCode branch in `preflight_agent`
 - [ ] [P09-T03] GREEN: last-step fork in `pipeline.fork` with child deletion

@@ -23,13 +23,20 @@ from agent_fork.errors import (
 from agent_fork.git import PRODUCT_GIT_MIN
 from agent_fork.text import BIDI_CONTROLS
 
-AgentName = Literal["claude", "codex"]
+AgentName = Literal["claude", "codex", "opencode"]
 AgentSignalStatus = Literal["absent", "incomplete", "detected", "ambiguous"]
 AgentSignalName = Literal[
     "CLAUDECODE=1",
     "CLAUDE_CODE_SESSION_ID",
     "CODEX_THREAD_ID",
+    "OPENCODE_SESSION_ID",
 ]
+_SIGNAL_AGENT: dict[str, str] = {
+    "CLAUDECODE=1": "Claude",
+    "CLAUDE_CODE_SESSION_ID": "Claude",
+    "CODEX_THREAD_ID": "Codex",
+    "OPENCODE_SESSION_ID": "OpenCode",
+}
 
 
 @dataclass(frozen=True)
@@ -58,10 +65,16 @@ class AgentSignalAssessment:
         if self.status == "incomplete":
             return f"incomplete Claude signal; missing {', '.join(self.missing)}"
         if self.status == "ambiguous":
+            agents = list(dict.fromkeys(_SIGNAL_AGENT[name] for name in self.present))
+            if len(agents) == 2:
+                joined = f"{agents[0]} and {agents[1]}"
+            else:
+                joined = f"{', '.join(agents[:-1])}, and {agents[-1]}"
             if not self.missing:
-                return "both Claude and Codex signals are present"
+                prefix = "both " if len(agents) == 2 else ""
+                return f"{prefix}{joined} signals are present"
             return (
-                "Claude and Codex signals are present; incomplete Claude signal is "
+                f"{joined} signals are present; incomplete Claude signal is "
                 f"missing {', '.join(self.missing)}"
             )
         assert self.context is not None
@@ -75,6 +88,8 @@ def assess_agent_signals(env: Mapping[str, str]) -> AgentSignalAssessment:
     claude_session = bool(claude_id)
     codex_id = env.get("CODEX_THREAD_ID")
     codex_thread = bool(codex_id)
+    opencode_id = env.get("OPENCODE_SESSION_ID")
+    opencode_session = bool(opencode_id)
 
     present_values: list[AgentSignalName] = []
     if claude_marker:
@@ -83,6 +98,8 @@ def assess_agent_signals(env: Mapping[str, str]) -> AgentSignalAssessment:
         present_values.append("CLAUDE_CODE_SESSION_ID")
     if codex_thread:
         present_values.append("CODEX_THREAD_ID")
+    if opencode_session:
+        present_values.append("OPENCODE_SESSION_ID")
 
     missing_values: list[AgentSignalName] = []
     if claude_marker != claude_session:
@@ -90,7 +107,8 @@ def assess_agent_signals(env: Mapping[str, str]) -> AgentSignalAssessment:
             "CLAUDE_CODE_SESSION_ID" if claude_marker else "CLAUDECODE=1"
         )
 
-    if codex_thread and (claude_marker or claude_session):
+    claude_present = claude_marker or claude_session
+    if sum((claude_present, codex_thread, opencode_session)) > 1:
         status: AgentSignalStatus = "ambiguous"
         context = None
     elif claude_marker != claude_session:
@@ -102,6 +120,9 @@ def assess_agent_signals(env: Mapping[str, str]) -> AgentSignalAssessment:
     elif codex_thread:
         status = "detected"
         context = AgentContext("codex", codex_id or "")
+    elif opencode_session:
+        status = "detected"
+        context = AgentContext("opencode", opencode_id or "")
     else:
         status = "absent"
         context = None
@@ -588,23 +609,31 @@ def detect_agent(
 ) -> AgentContext:
     """Resolve explicit identity first, otherwise use only the locked env signals."""
     if explicit_agent is not None:
-        if explicit_agent not in {"claude", "codex"}:
+        signal_for: dict[str, str] = {
+            "claude": "CLAUDE_CODE_SESSION_ID",
+            "codex": "CODEX_THREAD_ID",
+            "opencode": "OPENCODE_SESSION_ID",
+        }
+        if explicit_agent not in signal_for:
             raise AgentDetectionError(
-                f"unknown agent {explicit_agent!r}; choose --agent claude or codex"
+                f"unknown agent {explicit_agent!r}; choose --agent claude, codex, "
+                "or opencode"
             )
         parent = explicit_parent_session
         if parent is None:
-            parent = (
-                env.get("CLAUDE_CODE_SESSION_ID")
-                if explicit_agent == "claude"
-                else env.get("CODEX_THREAD_ID")
-            )
+            parent = env.get(signal_for[explicit_agent])
         if not parent:
             raise AgentDetectionError(
                 f"--agent {explicit_agent} requires --parent-session "
                 "or its matching environment signal"
             )
-        agent: AgentName = "claude" if explicit_agent == "claude" else "codex"
+        agent: AgentName = (
+            "claude"
+            if explicit_agent == "claude"
+            else "codex"
+            if explicit_agent == "codex"
+            else "opencode"
+        )
         return AgentContext(agent=agent, parent_session_id=parent)
 
     if explicit_parent_session is not None:
