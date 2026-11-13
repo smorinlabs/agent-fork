@@ -75,6 +75,9 @@ ERROR_CATALOG: dict[str, ErrorSpec] = {
     "cleanup_registry_ambiguous": ErrorSpec(
         5, "several registry records claim the same target"
     ),
+    "cleanup_target_changed": ErrorSpec(
+        5, "an unregistered cleanup target changed while awaiting confirmation"
+    ),
     # One code per exit code, never one code with a per-instance exit code: the
     # catalog's one-code-one-exit-code invariant is what T-OUT-14/T-OUT-15 pin.
     "interrupted_sigint": ErrorSpec(130, "interrupted by SIGINT after rollback"),
