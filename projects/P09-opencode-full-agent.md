@@ -9,7 +9,7 @@
 - **Prior art:** [P05 — session transcript path](P05-session-transcript-path.md) (the `transcript` contract; OpenCode has no transcript file)
 - **Prior art:** [README `message_route` section](../README.md) (its OpenCode row and "no messaging command" text change)
 
-## [~] Project P09: OpenCode as a full agent-fork agent (v1.6.0)
+## [x] Project P09: OpenCode as a full agent-fork agent (v1.6.0)
 **Goal**: agent-fork treats OpenCode the way it treats Claude Code and Codex:
 it detects an OpenCode session, forks it, and resumes it. Owner decision
 2026-11-13: same capabilities as Claude Code and Codex, mapped the same way,
@@ -297,6 +297,11 @@ fake `opencode` executable, never the real service.
       against invalid UTF-8 is main's existing behavior and out of scope.
       Round-3 fixes are covered by tests (T-RBK-18, T-RBK-21), not a fourth
       review run.
-- [~] [P09-T09] One PR, merge commit, tag v1.6.0. PR #83 opened 2026-11-13
-      (https://github.com/smorinlabs/agent-fork/pull/83); merge and tag await
-      the owner
+- [x] [P09-T09] One PR, merge commit, tag v1.6.0. PR #83
+      (https://github.com/smorinlabs/agent-fork/pull/83) merged 2026-11-14 as
+      merge commit 46fcd2d, pinned to reviewed head 38d3df8; annotated tag
+      v1.6.0 on 46fcd2d. CodeRabbit's four PR threads: three fixed in
+      38d3df8, one refuted with a probe (an explicit `--server` to the
+      background service requires `OPENCODE_PASSWORD`). The fix commit had
+      no bot review (CodeRabbit rate-limited, Greptile trial ended); the full
+      suite covered it.
