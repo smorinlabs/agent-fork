@@ -509,6 +509,34 @@ def test_production_boundary_codes_equal_authoritative_catalog(repo_scenario):
     assert discovered == set(ERROR_CATALOG)
 
 
+@pytest.mark.matrix("T-OUT-36")
+def test_readme_exit_table_lists_every_catalog_code(repo_scenario):
+    """Each ERROR_CATALOG code is listed in the README row for its exit code."""
+    import re
+
+    from agent_fork.errors import ERROR_CATALOG
+
+    repo_scenario()
+    readme = (Path(__file__).parents[2] / "README.md").read_text()
+    rows: dict[int, set[str]] = {}
+    for line in readme.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if not line.startswith("| ") or len(cells) < 3:
+            continue
+        # Exit-code rows start with a code such as `3` or `130 / 143`.
+        if re.fullmatch(r"\d+( / \d+)*", cells[0]) is None:
+            continue
+        codes = set(re.findall(r"`([a-z_]+)`", cells[-1]))
+        for number in cells[0].split(" / "):
+            rows.setdefault(int(number), set()).update(codes)
+    missing = sorted(
+        code
+        for code, spec in ERROR_CATALOG.items()
+        if code not in rows.get(spec.exit_code, set())
+    )
+    assert missing == []
+
+
 @pytest.mark.matrix("T-OUT-15")
 def test_error_catalog_json_and_exit_families(repo_scenario):
     from agent_fork.errors import ERROR_CATALOG, AgentForkError
