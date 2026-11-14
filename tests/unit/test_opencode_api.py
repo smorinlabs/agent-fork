@@ -33,6 +33,15 @@ def test_fork_into_names_any_child_it_could_not_clean_up(
     assert "session.move" in message
     assert "opencode api session.remove --param sessionID=ses_child1" in message
 
+    # A reply naming the parent is malformed: the parent is never moved or deleted.
+    fake.update(fail={}, replies={"session.fork": '{"data":{"id":"ses_parent1"}}'})
+    with pytest.raises(opencode_api.OpencodeApiError, match="parent's own ID"):
+        opencode_api.fork_into(binary, "ses_parent1", target, env)
+    assert "ses_parent1" in fake.state()["sessions"]
+    assert ["api", "session.remove", "--param", "sessionID=ses_parent1"] not in (
+        fake.calls()
+    )
+
     fake.update(fail={}, replies={"session.fork": '{"data":{"id":"bogus"}}'})
     with pytest.raises(opencode_api.OpencodeApiError, match="no valid child ID"):
         opencode_api.fork_into(binary, "ses_parent1", target, env)
@@ -43,6 +52,7 @@ def test_fork_into_names_any_child_it_could_not_clean_up(
     with pytest.raises(opencode_api.OpencodeApiError) as slow:
         opencode_api.fork_into(binary, "ses_parent1", target, env)
     assert "may have created a fork of ses_parent1" in str(slow.value)
+    assert slow.value.uncertain is True
 
     # A definite refusal (the server answered with an HTTP status) gets no hint.
     fake.update(sleep={}, fail={"session.fork": {"code": 1, "stderr": "HTTP 400\n"}})

@@ -91,6 +91,23 @@ def test_opencode_move_failure_deletes_the_child_and_rolls_back(
     assert not request.destination.exists()
     assert _registered(env) == []
 
+    # When the child cannot be deleted, it is deleted once, and the error names
+    # it with its recovery command; the pipeline does not retry and contradict it.
+    _, fake, env, request = _fork_world(repo_scenario, fake_opencode, "oc-mf2")
+    fake.update(
+        fail={
+            "session.move": {"code": 1, "stderr": "HTTP 400\n"},
+            "session.remove": {"code": 1, "stderr": "HTTP 500\n"},
+        }
+    )
+    before = len(fake.api_ops())
+    with pytest.raises(Exception, match="opencode api session.remove") as caught:
+        fork(request, env=env)
+    assert fake.api_ops()[before:].count("session.remove") == 1
+    assert "ses_child" in str(caught.value)
+    assert not request.destination.exists()
+    assert _registered(env) == []
+
 
 @pytest.mark.matrix("T-RBK-19")
 def test_opencode_interrupt_during_move_deletes_child_and_rolls_back(

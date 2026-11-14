@@ -220,7 +220,7 @@ fake `opencode` executable, never the real service.
 - [ ] [P09-TS06] Live verification: from inside a real OpenCode session, run
       `agent-fork fork` and open the printed command; run the session
       report's `fork_command` line
-- [~] [P09-T08] Adversarial review gate including Codex; fix findings.
+- [x] [P09-T08] Adversarial review gate including Codex; fix findings.
       Round 1 (2026-11-13): Codex (7 findings) and a Fable whole-branch
       review (6 medium, 4 low). Fixed: dry run never starts a stopped
       service; fork compensation names an undeletable child with its
@@ -246,6 +246,16 @@ fake `opencode` executable, never the real service.
       point at `opencode service status`. Accepted as best effort and
       documented: an interrupt during `session.fork` itself, or in the few
       bytecodes before the ID is recorded, can leave a child that is not
-      named. Remaining: Fable and Codex concurrence on this round's fixes is
-      by inspection of the listed changes, not a third review run.
+      named.
+      Round 3 (2026-11-13), Codex on ba50635 and the P08 merge 7245033:
+      Muse behavior, OpenCode reachability, doctor requirement logic, and
+      the stderr status detection found clean. Fixed: a fork reply naming
+      the parent's own ID is refused before any move or delete (the parent
+      could otherwise be deleted); cleanup has one owner, so a child
+      `fork_into` could not delete is not retried by the pipeline and the
+      recovery message stays true; `uncertain` survives re-raising.
+      Declined: hardening the unbounded Git/Claude/Codex doctor probes
+      against invalid UTF-8 is main's existing behavior and out of scope.
+      Round-3 fixes are covered by tests (T-RBK-18, T-RBK-21), not a fourth
+      review run.
 - [ ] [P09-T09] One PR, merge commit, tag v1.6.0

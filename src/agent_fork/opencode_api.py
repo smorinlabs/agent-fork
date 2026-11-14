@@ -146,9 +146,15 @@ def fork_into(
             raise
         raise OpencodeApiError(
             f"{error}; OpenCode may have created a fork of {parent_id} anyway: "
-            "check its session list"
+            "check its session list",
+            uncertain=True,
         ) from error
     child = data.get("id")
+    if child == parent_id:
+        # Never move or delete the parent: a reply naming it is malformed.
+        raise OpencodeApiError(
+            f"`opencode api session.fork` returned the parent's own ID {parent_id}"
+        )
     if not isinstance(child, str) or OPENCODE_SESSION_ID.fullmatch(child) is None:
         leftover = (
             _remove_child(binary, child, env)
