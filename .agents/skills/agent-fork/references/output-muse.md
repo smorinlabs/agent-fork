@@ -14,7 +14,7 @@ reconstruct a command from.
 |---|---|
 | Session | `01a1d722-3e08-78b3-8ef6-9624efa87d7e` (from `MUSE_SESSION_ID`) |
 | Session name | `gold-asteroid` (via `muse sessions --json`) |
-| Message route | none: Muse accepts messages only through its own in-session tool (address only) |
+| Message route | `01a1d722-3e08-78b3-8ef6-9624efa87d7e` "gold-asteroid" via Muse's in-session messaging (`muse-session-message`, address only) |
 | Parent | `01a1d6db-8e09-7641-99ed-a374a24167d7` (forked from, resolved from the session log) |
 | Repository | `/Users/dev/project` |
 | Branch | `feature/auth-refresh` |
@@ -106,7 +106,9 @@ cd /Users/dev/project-fork-review-auth && muse resume "$(/Users/dev/.local/bin/a
 If a fork run fails with `runtime_error` and `Operation not permitted` on a
 path under `~/.local/state/agent-fork`, Muse's sandbox blocked agent-fork's
 state write; say so and ask the user to approve running the command outside
-the sandbox. Nothing was created.
+the sandbox. Do not claim that nothing was created: relay any rollback or
+recovery instruction in the error verbatim, and before a retry check
+`git worktree list` and the fork branch for leftovers.
 
 The fork name names the branch and worktree only — it is not passed to
 `muse`, which gives the forked session its own ID when the command runs. The

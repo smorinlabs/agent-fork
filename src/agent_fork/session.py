@@ -305,10 +305,16 @@ def _muse_session_name(env: Mapping[str, str], session_id: str) -> str | None:
     return None
 
 
+# Distinguishes "the caller did not look the Muse name up" from "it looked and
+# found none", so an inspection runs `muse sessions --json` only once.
+_NOT_LOOKED_UP = object()
+
+
 def _message_route(
     env: Mapping[str, str],
     messaging: SessionMessaging,
     codex_name: str | None = None,
+    muse_name: str | None | object = _NOT_LOOKED_UP,
 ) -> SessionMessageRoute:
     tools = _route_tools(env)
     if not tools:
@@ -355,7 +361,11 @@ def _message_route(
         "muse",
         "address_only",
         session_id,
-        _muse_session_name(env, session_id),
+        _muse_session_name(env, session_id)
+        if muse_name is _NOT_LOOKED_UP
+        else muse_name
+        if isinstance(muse_name, str)
+        else None,
         "muse-session-message",
     )
 
@@ -734,6 +744,7 @@ def inspect_session(
                 env,
                 messaging,
                 current_session.name if agent == "codex" else None,
+                current_session.name if agent == "muse" else _NOT_LOOKED_UP,
             ),
             agent_signal=assessment,
             parent_inference=parent_inference,

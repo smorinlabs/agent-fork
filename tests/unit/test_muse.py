@@ -222,6 +222,19 @@ def test_msp_fork_returns_the_fork_id_and_leaves_it(
     assert (leave_params["sessionId"], leave_params["stop"]) == (FORK, True)
     assert uuid.UUID(leave_params["commandId"]).version == 7
 
+    # `session/leave` is admission-only; a failed `session/leaveCompleted`
+    # still returns the fork (owner decision Q6.A) but warns.
+    warnings: list[str] = []
+    failed_leave = {**env, "FAKE_MUSE_MODE": "leavefail"}
+    assert (
+        muse_server.fork_session(binary, PARENT, failed_leave, warn=warnings.append)
+        == FORK
+    )
+    assert any("persistenceFailed" in warning for warning in warnings)
+    clean: list[str] = []
+    assert muse_server.fork_session(binary, PARENT, env, warn=clean.append) == FORK
+    assert clean == []
+
     # A server->client request that reuses the client's id is not the reply.
     colliding = {**env, "FAKE_MUSE_MODE": "serverreq"}
     assert muse_server.fork_session(binary, PARENT, colliding) == FORK
@@ -375,7 +388,20 @@ def test_muse_session_inspection(repo_scenario, tmp_path, monkeypatch):
             "payload": {"fork_session_id": FORK, "source_session_id": PARENT},
         },
     )
+    import agent_fork.session as session_module
+
+    lookups: list[str] = []
+    real_lookup = session_module._muse_session_name
+
+    def counted(lookup_env, session_id):
+        lookups.append(session_id)
+        return real_lookup(lookup_env, session_id)
+
+    monkeypatch.setattr(session_module, "_muse_session_name", counted)
     report = inspect_session(env, cwd=world.parent_path)
+    # One `muse sessions --json` call serves both the name and the route.
+    assert lookups == [FORK]
+    assert report.message_route.name == "gold-asteroid"
     assert report.agent == "muse"
     assert report.current_session is not None
     assert (report.current_session.id, report.current_session.id_source) == (

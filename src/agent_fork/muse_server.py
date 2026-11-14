@@ -119,6 +119,9 @@ def _fork(
     # Requests are sequential, so only the reply to the one in flight is kept;
     # any other reply is dropped rather than retained.
     awaited: dict[str, object] = {}
+    # `session/leave` is admission-only; its outcome arrives later as the
+    # `session/leaveCompleted` notification carrying the leave's commandId.
+    leave: dict[str, object] = {}
     selector: selectors.BaseSelector | None = None
     # Cleanup owns the process from here on, including selector setup.
     try:
@@ -151,6 +154,18 @@ def _fork(
                         parsed = json.loads(raw)
                     except (UnicodeDecodeError, ValueError, RecursionError) as error:
                         raise _failure("muse serve returned malformed JSON") from error
+                    if (
+                        isinstance(parsed, dict)
+                        and parsed.get("method") == "session/leaveCompleted"
+                    ):
+                        params = parsed.get("params")
+                        if (
+                            isinstance(params, dict)
+                            and "command" in leave
+                            and params.get("commandId") == leave["command"]
+                        ):
+                            leave["completed"] = params
+                        continue
                     # A reply carries the awaited id and no method; a
                     # server->client request carries a method and may reuse an
                     # id this client sent.
@@ -224,14 +239,21 @@ def _fork(
         # to leave it cleanly is a warning, not a failure: opening the fork
         # beats losing it. Its only cost is an "ended abnormally" notice on the
         # fork's first resume.
+        leave["command"] = _uuid7()
+        admitted = False
         try:
             left = request(
                 3,
                 "session/leave",
-                {"commandId": _uuid7(), "sessionId": fork_id, "stop": True},
+                {"commandId": leave["command"], "sessionId": fork_id, "stop": True},
             )
-            if "error" in left and warn is not None:
-                warn(f"Muse fork {fork_id} was not left cleanly: {error_text(left)}")
+            if "error" in left:
+                if warn is not None:
+                    warn(
+                        f"Muse fork {fork_id} was not left cleanly: {error_text(left)}"
+                    )
+            else:
+                admitted = True
         except MuseForkError as error:
             if warn is not None:
                 warn(f"Muse fork {fork_id} was not left cleanly: {error}")
@@ -250,6 +272,19 @@ def _fork(
             drain()
         except MuseForkError:
             pass
+        completed = leave.get("completed")
+        if admitted and warn is not None:
+            outcome = completed.get("outcome") if isinstance(completed, dict) else None
+            if outcome != "released":
+                reason = (
+                    completed.get("reason") if isinstance(completed, dict) else None
+                )
+                detail = (
+                    f"leave {outcome}" + (f" ({reason})" if reason else "")
+                    if outcome is not None
+                    else "no session/leaveCompleted outcome arrived"
+                )
+                warn(f"Muse fork {fork_id} was not left cleanly: {detail}")
         return fork_id
     except OSError as error:
         raise _failure(str(error)) from error

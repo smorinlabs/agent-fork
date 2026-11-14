@@ -85,6 +85,13 @@ for line in sys.stdin:
     elif method == "session/leave":
         left = message["params"].get("stop") is True
         out({"jsonrpc": "2.0", "id": ident, "result": {"status": "accepted"}})
+        # Like Muse, the outcome arrives later as a notification.
+        outcome = {"outcome": "released", "viewCursor": "v"}
+        if mode == "leavefail":
+            outcome = {"outcome": "failed", "reason": "persistenceFailed"}
+        out({"jsonrpc": "2.0", "method": "session/leaveCompleted", "params": {
+            "commandId": message["params"]["commandId"],
+            "sessionId": message["params"]["sessionId"], **outcome}})
 # Like Muse 1.4.20, a host with a loaded session exits on stdin EOF only after
 # it was left with `stop: true`; `linger` never exits on its own.
 if mode == "linger" or not left:
