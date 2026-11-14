@@ -663,6 +663,10 @@ its `"$(…)"` substitution but has not been tested.
 
 What to expect:
 
+- Muse's default sandbox blocks agent-fork's own state writes
+  (`~/.local/state/agent-fork`), so `agent-fork fork` run by Muse fails with
+  `runtime_error` before creating anything. Approve running it outside the
+  sandbox when Muse asks, or run it yourself.
 - `muse resume` binds the fork to the directory it runs in, so the forked
   session works in the new worktree. Muse asks whether to trust that
   worktree the first time; agent-fork never passes `--trust-workspace`.
