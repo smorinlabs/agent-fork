@@ -22,6 +22,8 @@ from agent_fork.agents import (
     build_session_fork_command,
     build_session_resume_command,
     codex_rollout_path,
+    muse_forked_from,
+    muse_session_log,
 )
 from agent_fork.errors import PreconditionError, SessionValidationError
 from agent_fork.lineage import find_lineage
@@ -303,10 +305,16 @@ def _muse_session_name(env: Mapping[str, str], session_id: str) -> str | None:
     return None
 
 
+# Distinguishes "the caller did not look the Muse name up" from "it looked and
+# found none", so an inspection runs `muse sessions --json` only once.
+_NOT_LOOKED_UP = object()
+
+
 def _message_route(
     env: Mapping[str, str],
     messaging: SessionMessaging,
     codex_name: str | None = None,
+    muse_name: str | None | object = _NOT_LOOKED_UP,
 ) -> SessionMessageRoute:
     tools = _route_tools(env)
     if not tools:
@@ -353,7 +361,11 @@ def _message_route(
         "muse",
         "address_only",
         session_id,
-        _muse_session_name(env, session_id),
+        _muse_session_name(env, session_id)
+        if muse_name is _NOT_LOOKED_UP
+        else muse_name
+        if isinstance(muse_name, str)
+        else None,
         "muse-session-message",
     )
 
@@ -467,6 +479,11 @@ def _session_transcript(
     if agent == "claude":
         path = _claude_transcript(env, directory, session_id)
         return SessionTranscript(path, path.is_file())
+    if agent == "muse":
+        log = muse_session_log(session_id, env)
+        return SessionTranscript(log, log is not None)
+    if agent != "codex":
+        raise ValueError(f"unsupported agent: {agent}")
     rollout = codex_rollout_path(AgentContext("codex", session_id), env)
     return SessionTranscript(rollout, rollout is not None)
 
@@ -727,6 +744,7 @@ def inspect_session(
                 env,
                 messaging,
                 current_session.name if agent == "codex" else None,
+                current_session.name if agent == "muse" else _NOT_LOOKED_UP,
             ),
             agent_signal=assessment,
             parent_inference=parent_inference,
@@ -823,6 +841,27 @@ def inspect_session(
             parent_inference,
         )
 
+    if agent == "muse":
+        name = _muse_session_name(env, current_id)
+        current = SessionEvidence(
+            current_id,
+            "MUSE_SESSION_ID",
+            name,
+            "resolved" if name is not None else "not_found",
+            "muse-sessions" if name is not None else None,
+        )
+        if transcript.path is None:
+            return _inspection("muse", current, None, "unavailable")
+        source = muse_forked_from(transcript.path)
+        if source is None:
+            return _inspection("muse", current, None, "not_found")
+        parent = SessionEvidence(
+            source, "muse-session-log", name_status="not_found", id_status="resolved"
+        )
+        return _inspection("muse", current, parent, "resolved")
+
+    if agent != "codex":
+        raise ValueError(f"unsupported agent: {agent}")
     codex_id = current_id
     binary = shutil.which("codex", path=env.get("PATH"))
     if binary is None:

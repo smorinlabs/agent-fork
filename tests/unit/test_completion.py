@@ -44,7 +44,10 @@ def test_completion_offers_every_declared_option():
 
 @pytest.mark.matrix("T-CLI-34")
 def test_completion_offers_every_declared_command():
-    assert set(_subcommand_parsers()) <= set(_vocabulary()["commands"])
+    from agent_fork.cli import HIDDEN_COMMANDS
+
+    public = set(_subcommand_parsers()) - HIDDEN_COMMANDS
+    assert public <= set(_vocabulary()["commands"])
 
 
 @pytest.mark.matrix("T-CLI-35")

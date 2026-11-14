@@ -9,15 +9,19 @@ from typing import cast
 
 @lru_cache(maxsize=1)
 def _vocabulary() -> dict[str, tuple[str, ...]]:
-    from agent_fork.cli import _parser
+    from agent_fork.cli import HIDDEN_COMMANDS, _parser
 
     root = _parser()
-    commands = _subparser_choices(root)
+    commands = {
+        name: parser
+        for name, parser in _subparser_choices(root).items()
+        if name not in HIDDEN_COMMANDS
+    }
     config_actions = _subparser_choices(commands["config"])
     completion_parser = commands["completion"]
     shells = _choice_values(completion_parser, "shell")
     outputs = _collect_choice_values(root, "output") or ("text", "json")
-    agents = _collect_choice_values(root, "agent") or ("claude", "codex")
+    agents = _collect_choice_values(root, "agent") or ("claude", "codex", "muse")
     return {
         "commands": tuple(sorted(commands)),
         "global_options": _option_strings(root),

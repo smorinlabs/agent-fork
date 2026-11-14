@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import shlex
 import shutil
 import subprocess
+import sys
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,13 +25,24 @@ from agent_fork.errors import (
 )
 from agent_fork.git import PRODUCT_GIT_MIN
 from agent_fork.text import BIDI_CONTROLS
+from agent_fork.xdg import xdg_path
 
-AgentName = Literal["claude", "codex"]
+AgentName = Literal["claude", "codex", "muse"]
+# Every supported agent, in the fixed order diagnostics and choices use.
+AGENT_NAMES: tuple[AgentName, ...] = ("claude", "codex", "muse")
+_AGENT_LABELS: dict[str, str] = {"claude": "Claude", "codex": "Codex", "muse": "Muse"}
+# The environment variable that carries each agent's session ID.
+_SESSION_ID_VARIABLES: dict[str, str] = {
+    "claude": "CLAUDE_CODE_SESSION_ID",
+    "codex": "CODEX_THREAD_ID",
+    "muse": "MUSE_SESSION_ID",
+}
 AgentSignalStatus = Literal["absent", "incomplete", "detected", "ambiguous"]
 AgentSignalName = Literal[
     "CLAUDECODE=1",
     "CLAUDE_CODE_SESSION_ID",
     "CODEX_THREAD_ID",
+    "MUSE_SESSION_ID",
 ]
 
 
@@ -58,10 +72,21 @@ class AgentSignalAssessment:
         if self.status == "incomplete":
             return f"incomplete Claude signal; missing {', '.join(self.missing)}"
         if self.status == "ambiguous":
+            tools = [
+                _AGENT_LABELS[agent]
+                for agent, signals in (
+                    ("claude", ("CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID")),
+                    ("codex", ("CODEX_THREAD_ID",)),
+                    ("muse", ("MUSE_SESSION_ID",)),
+                )
+                if any(signal in self.present for signal in signals)
+            ]
+            listed = " and ".join(tools)
             if not self.missing:
-                return "both Claude and Codex signals are present"
+                prefix = "both " if len(tools) == 2 else ""
+                return f"{prefix}{listed} signals are present"
             return (
-                "Claude and Codex signals are present; incomplete Claude signal is "
+                f"{listed} signals are present; incomplete Claude signal is "
                 f"missing {', '.join(self.missing)}"
             )
         assert self.context is not None
@@ -69,20 +94,26 @@ class AgentSignalAssessment:
 
 
 def assess_agent_signals(env: Mapping[str, str]) -> AgentSignalAssessment:
-    """Classify supported ambient agent signals without performing I/O."""
+    """Classify supported ambient agent signals without performing I/O.
+
+    Signals from more than one agent are ambiguous: presence alone cannot show
+    which session is nested in which (P07, owner decision P08 Q4.A).
+    """
     claude_marker = env.get("CLAUDECODE") == "1"
     claude_id = env.get("CLAUDE_CODE_SESSION_ID")
     claude_session = bool(claude_id)
     codex_id = env.get("CODEX_THREAD_ID")
-    codex_thread = bool(codex_id)
+    muse_id = env.get("MUSE_SESSION_ID")
 
     present_values: list[AgentSignalName] = []
     if claude_marker:
         present_values.append("CLAUDECODE=1")
     if claude_session:
         present_values.append("CLAUDE_CODE_SESSION_ID")
-    if codex_thread:
+    if codex_id:
         present_values.append("CODEX_THREAD_ID")
+    if muse_id:
+        present_values.append("MUSE_SESSION_ID")
 
     missing_values: list[AgentSignalName] = []
     if claude_marker != claude_session:
@@ -90,21 +121,31 @@ def assess_agent_signals(env: Mapping[str, str]) -> AgentSignalAssessment:
             "CLAUDE_CODE_SESSION_ID" if claude_marker else "CLAUDECODE=1"
         )
 
-    if codex_thread and (claude_marker or claude_session):
-        status: AgentSignalStatus = "ambiguous"
-        context = None
+    # One entry per agent with any signal present; Claude counts when either
+    # half of its pair is present, so a partial Claude signal still collides.
+    candidates: list[AgentContext | None] = []
+    if claude_marker or claude_session:
+        candidates.append(
+            AgentContext("claude", claude_id or "")
+            if claude_marker and claude_session
+            else None
+        )
+    if codex_id:
+        candidates.append(AgentContext("codex", codex_id))
+    if muse_id:
+        candidates.append(AgentContext("muse", muse_id))
+
+    status: AgentSignalStatus
+    context: AgentContext | None = None
+    if len(candidates) > 1:
+        status = "ambiguous"
     elif claude_marker != claude_session:
         status = "incomplete"
-        context = None
-    elif claude_marker and claude_session:
+    elif candidates:
         status = "detected"
-        context = AgentContext("claude", claude_id or "")
-    elif codex_thread:
-        status = "detected"
-        context = AgentContext("codex", codex_id or "")
+        context = candidates[0]
     else:
         status = "absent"
-        context = None
 
     return AgentSignalAssessment(
         status=status,
@@ -156,6 +197,9 @@ CODEX_ENV_MIN = (0, 95, 0)
 # for these instead. T-PRE-26 keeps the lists in step with the renderer.
 CLAUDE_RECIPE_FLAGS = ("--session-id", "--resume", "--fork-session", "-n")
 CODEX_RECIPE_FLAGS = ("-C",)
+# Muse's recipe uses subcommands, not flags: `muse resume` in the paste
+# command and `muse serve` (MSP) for the fork itself.
+MUSE_RECIPE_COMMANDS = ("resume", "serve")
 # Codex declares the recipe's flags on the `fork` subcommand, not the root, so
 # the two agents are probed with different argument tails. Diagnostics name the
 # tail that actually ran: for Codex, `codex --help` succeeds even when `fork`
@@ -163,6 +207,7 @@ CODEX_RECIPE_FLAGS = ("-C",)
 _HELP_ARGS: dict[str, tuple[str, ...]] = {
     "claude": ("--help",),
     "codex": ("fork", "--help"),
+    "muse": ("--help",),
 }
 _VERSION = re.compile(r"(?<![\d.])(\d+)\.(\d+)(?:\.(\d+))?")
 
@@ -187,7 +232,30 @@ def version_tokens(output: str) -> tuple[tuple[int, int, int], ...]:
 
 
 def recipe_flags(agent: AgentName) -> tuple[str, ...]:
-    return CLAUDE_RECIPE_FLAGS if agent == "claude" else CODEX_RECIPE_FLAGS
+    if agent == "claude":
+        return CLAUDE_RECIPE_FLAGS
+    if agent == "codex":
+        return CODEX_RECIPE_FLAGS
+    if agent == "muse":
+        return MUSE_RECIPE_COMMANDS
+    raise ValueError(f"unsupported agent: {agent}")
+
+
+def _declared_commands(help_output: str) -> set[str]:
+    """Subcommand names listed in a help text's `Commands:` section."""
+    names: set[str] = set()
+    inside = False
+    for line in help_output.splitlines():
+        if line.strip() == "Commands:":
+            inside = True
+            continue
+        if inside:
+            if not line.strip():
+                break
+            match = re.match(r"\s+([a-z][a-z0-9-]*)(?:\s|$)", line)
+            if match:
+                names.add(match.group(1))
+    return names
 
 
 def option_declarations(help_output: str) -> str:
@@ -208,6 +276,9 @@ def option_declarations(help_output: str) -> str:
 
 def missing_recipe_flags(agent: AgentName, help_output: str) -> tuple[str, ...]:
     """Recipe flags absent from `help_output`, in declared order."""
+    if agent == "muse":
+        commands = _declared_commands(help_output)
+        return tuple(name for name in MUSE_RECIPE_COMMANDS if name not in commands)
     declared = option_declarations(help_output)
     return tuple(
         flag
@@ -274,6 +345,68 @@ def codex_rollout_exists(context: AgentContext, env: Mapping[str, str]) -> bool:
     return codex_rollout_path(context, env) is not None
 
 
+# The first record of a session log is small; a fork's is
+# `session.fork.created`. Read no more than this to find it.
+MUSE_FIRST_RECORD_LIMIT = 1_048_576
+
+
+def _muse_home(env: Mapping[str, str]) -> Path:
+    """Muse's data directory: `$XDG_DATA_HOME/muse`, else `~/.local/share/muse`."""
+    return xdg_path(env, "XDG_DATA_HOME", ".local/share", "muse")
+
+
+def muse_session_log(session_id: str, env: Mapping[str, str]) -> Path | None:
+    """Locate one session's `session.jsonl`; the newest match wins."""
+    if not _is_canonical_uuid(session_id):
+        return None
+    root = _muse_home(env).resolve()
+    pattern = f"sessions/*/*/*/{session_id}/session.jsonl"
+    matches = sorted(match for match in root.glob(pattern) if match.is_file())
+    return matches[-1] if matches else None
+
+
+def muse_forked_from(log: Path) -> str | None:
+    """The source session ID a fork's log records first, or None."""
+    try:
+        with log.open("rb") as handle:
+            first = handle.readline(MUSE_FIRST_RECORD_LIMIT)
+    except OSError:
+        return None
+    try:
+        record = json.loads(first)
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return None
+    if not isinstance(record, dict) or record.get("payload_type") != (
+        "session.fork.created"
+    ):
+        return None
+    payload = record.get("payload")
+    source = payload.get("source_session_id") if isinstance(payload, dict) else None
+    return source if isinstance(source, str) and _is_canonical_uuid(source) else None
+
+
+def agent_fork_executable() -> tuple[str, ...]:
+    """The argv that runs this `agent-fork`, for Muse's paste command.
+
+    The paste command runs `agent-fork muse-fork` later, possibly where
+    `agent-fork` is not on PATH (the skill can run it through `uvx`), so it
+    names this installation: the absolute console script, or this interpreter
+    with `-m agent_fork.cli` when started that way. Never a bare name, which
+    could resolve to a different installation.
+    """
+    argv0 = sys.argv[0] if sys.argv else ""
+    if argv0 and Path(argv0).name == "agent-fork" and Path(argv0).exists():
+        return (os.path.abspath(argv0),)
+    return (os.path.abspath(sys.executable), "-m", "agent_fork.cli")
+
+
+def _is_canonical_uuid(value: str) -> bool:
+    try:
+        return str(uuid.UUID(value)) == value.lower()
+    except ValueError:
+        return False
+
+
 def preflight_agent(
     context: AgentContext,
     env: Mapping[str, str],
@@ -309,6 +442,12 @@ def preflight_agent(
         token_source = f"{completed.stdout}\n{completed.stderr}"
     else:
         token_source = version_output
+    if context.agent == "muse":
+        # Muse prints its version twice plus a build number, as in
+        # "Muse Code 1.4.20 (1.4.20-R8619.1)"; the parenthesized build is not
+        # a second version.
+        version_output = version_output.split(" (", 1)[0]
+        token_source = token_source.split(" (", 1)[0]
     try:
         version = parse_version(version_output)
     except ValueError as error:
@@ -331,7 +470,9 @@ def preflight_agent(
         )
     resolved_context = context
     resolved_name: str | None = None
-    if context.agent == "claude":
+    if context.agent == "muse":
+        _preflight_muse(context, env, version)
+    elif context.agent == "claude":
         if version < CLAUDE_FORK_MIN:
             raise _diagnosis(
                 f"detected Claude {_render(version)}; pinned-session fork requires "
@@ -342,7 +483,7 @@ def preflight_agent(
                 f"Claude {_render(version)} is below the reliable worktree-resume "
                 f"band {_render(CLAUDE_RELIABLE_MIN)}"
             )
-    else:
+    elif context.agent == "codex":
         if version < CODEX_FORK_MIN:
             raise _diagnosis(
                 f"detected Codex {_render(version)}; fork requires "
@@ -401,6 +542,8 @@ def preflight_agent(
                 f"{resolved_context.parent_session_id} is not flushed under "
                 f"{_codex_home(env)}"
             )
+    else:
+        raise ValueError(f"unsupported agent: {context.agent}")
     help_text = (
         help_output
         if help_output is not None
@@ -429,6 +572,24 @@ def preflight_agent(
         context=resolved_context,
         parent_session_name=resolved_name,
     )
+
+
+def _preflight_muse(
+    context: AgentContext, env: Mapping[str, str], version: tuple[int, int, int]
+) -> None:
+    """Muse has no version floor (1.4.20 is observed, not required): check the
+    parent session instead. `session/fork` takes only a session UUID."""
+    if not _is_canonical_uuid(context.parent_session_id):
+        raise _diagnosis(
+            f"Muse parent {context.parent_session_id!r} is not a session UUID; "
+            "pass the UUID from MUSE_SESSION_ID"
+        )
+    if muse_session_log(context.parent_session_id, env) is None:
+        raise _diagnosis(
+            f"detected Muse {_render(version)}, but parent session "
+            f"{context.parent_session_id} was not found under "
+            f"{_muse_home(env)}/sessions"
+        )
 
 
 def preflight_git(
@@ -480,7 +641,8 @@ def _render_native_command(
     mode: Literal["fork", "resume"] = "fork",
 ) -> str:
     """Render the shared native-command grammar with one quoting boundary."""
-    values = [str(directory), context.parent_session_id, *extra_args]
+    executable = agent_fork_executable() if context.agent == "muse" else ()
+    values = [str(directory), context.parent_session_id, *extra_args, *executable]
     if child_session_id is not None:
         values.append(child_session_id)
     if name is not None:
@@ -492,6 +654,26 @@ def _render_native_command(
 
     quote = shlex.quote
     suffix = "".join(f" {quote(value)}" for value in extra_args)
+    if context.agent == "muse":
+        # Muse forks only over MSP, so the paste command forks when it runs:
+        # `agent-fork muse-fork` prints the new session ID, and an empty ID
+        # (a failed fork) makes `muse resume ""` refuse. The resume runs in
+        # the worktree, which binds the fork's workspace to it.
+        if child_session_id is not None:
+            raise ValueError("Muse native command must not carry a child session ID")
+        if mode == "resume":
+            return (
+                f"cd {quote(str(directory))} && muse resume "
+                f"{quote(context.parent_session_id)}{suffix}"
+            )
+        launcher = " ".join(quote(part) for part in executable)
+        return (
+            f"cd {quote(str(directory))} && muse resume "
+            f'"$({launcher} muse-fork {quote(context.parent_session_id)})"'
+            f"{suffix}"
+        )
+    if context.agent not in ("claude", "codex"):
+        raise ValueError(f"unsupported agent: {context.agent}")
     if mode == "resume":
         if child_session_id is not None:
             raise ValueError("resume command must not carry a child session ID")
@@ -588,23 +770,20 @@ def detect_agent(
 ) -> AgentContext:
     """Resolve explicit identity first, otherwise use only the locked env signals."""
     if explicit_agent is not None:
-        if explicit_agent not in {"claude", "codex"}:
+        agent = next((name for name in AGENT_NAMES if name == explicit_agent), None)
+        if agent is None:
             raise AgentDetectionError(
-                f"unknown agent {explicit_agent!r}; choose --agent claude or codex"
+                f"unknown agent {explicit_agent!r}; choose --agent claude, codex, "
+                "or muse"
             )
         parent = explicit_parent_session
         if parent is None:
-            parent = (
-                env.get("CLAUDE_CODE_SESSION_ID")
-                if explicit_agent == "claude"
-                else env.get("CODEX_THREAD_ID")
-            )
+            parent = env.get(_SESSION_ID_VARIABLES[agent])
         if not parent:
             raise AgentDetectionError(
                 f"--agent {explicit_agent} requires --parent-session "
                 "or its matching environment signal"
             )
-        agent: AgentName = "claude" if explicit_agent == "claude" else "codex"
         return AgentContext(agent=agent, parent_session_id=parent)
 
     if explicit_parent_session is not None:
