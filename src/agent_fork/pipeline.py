@@ -373,10 +373,12 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                 or "opencode"
             )
             try:
-                forked_child.append(
-                    fork_into(
-                        binary, resolved_agent.parent_session_id, creation.path, env
-                    )
+                fork_into(
+                    binary,
+                    resolved_agent.parent_session_id,
+                    creation.path,
+                    env,
+                    created=forked_child,
                 )
                 # Returning inside the try keeps an interrupt that lands after
                 # the fork, but before `finish` returns, inside this scope.

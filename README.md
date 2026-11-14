@@ -632,9 +632,10 @@ step of the pipeline:
    (`session.move`). If anything fails after the fork, the registry record is
    removed and the worktree rolled back, and the child is deleted on a best
    effort basis: a child that cannot be deleted is named in the error with
-   the `opencode api session.remove` command that removes it, and a fork that
-   fails or is interrupted before OpenCode answers may leave a child whose ID
-   was never returned, which the error says.
+   the `opencode api session.remove` command that removes it. A fork that
+   times out or gets no readable answer may still have created a child whose
+   ID was never returned; the error says so. An interrupt during the fork
+   call can leave one too, and carries no such hint.
 4. The printed command opens the child there:
    `cd '<worktree>' && opencode --session <child-session-id>`.
 

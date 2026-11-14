@@ -23,8 +23,9 @@ from agent_fork.git import PRODUCT_GIT_MIN
 from agent_fork.include import SETUP_HOOK_RELATIVE_PATH, setup_hook_eligibility
 from agent_fork.text import escape_terminal_text
 
-# Every installed agent CLI is probed, selected or not, so one that hangs
-# must not hang doctor.
+# OpenCode is probed whenever it is installed, selected or not, so a hanging
+# OpenCode must not hang doctor. Git, Claude, and Codex keep their unbounded
+# probe unchanged.
 DOCTOR_PROBE_TIMEOUT = 10
 
 
@@ -73,6 +74,8 @@ def _version_check(
     executable: str | None,
     floor: tuple[int, int, int] | None,
     env: Mapping[str, str],
+    *,
+    timeout: float | None = None,
 ) -> DoctorCheck:
     """`floor=None` means no minimum version: any readable version passes."""
     minimum = ".".join(map(str, floor)) if floor is not None else None
@@ -86,12 +89,10 @@ def _version_check(
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
-            timeout=DOCTOR_PROBE_TIMEOUT,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return DoctorCheck(
-            name, False, f"--version timed out after {DOCTOR_PROBE_TIMEOUT}s"
-        )
+        return DoctorCheck(name, False, f"--version timed out after {timeout}s")
     except (OSError, UnicodeDecodeError) as error:
         return DoctorCheck(name, False, f"--version failed: {error}")
     output = escape_terminal_text((completed.stdout or completed.stderr).strip())
@@ -225,7 +226,11 @@ def run_doctor(
         env,
     )
     opencode = _version_check(
-        "OpenCode CLI", shutil.which("opencode", path=env.get("PATH")), None, env
+        "OpenCode CLI",
+        shutil.which("opencode", path=env.get("PATH")),
+        None,
+        env,
+        timeout=DOCTOR_PROBE_TIMEOUT,
     )
     hook_policy: str | None = None
     hook_timeout = 0

@@ -4,6 +4,8 @@ Matrix: docs/testing/TEST-MATRIX.md §G-CLI.
 """
 
 import json
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -122,12 +124,13 @@ def test_doctor_reports_opencode_version_and_recipe_flag(repo_scenario, fake_ope
     unselected = run_cli(["doctor"], unselected_env, world.parent_path).stdout
     assert b"OpenCode CLI: 2.2.7 (no minimum) (optional)" in unselected
 
-    missing_env = {
-        **env,
-        "PATH": world.env["PATH"].replace(
-            str(Path.home() / ".opencode/bin"), "/nonexistent"
-        ),
-    }
+    # An isolated PATH holding only Git: no OpenCode anywhere, whatever the host.
+    git_only = world.parent_path.parent / "git-only-bin"
+    git_only.mkdir()
+    real_git = shutil.which("git", path=world.env["PATH"])
+    assert real_git is not None
+    (git_only / "git").symlink_to(Path(real_git).resolve())
+    missing_env = {**env, "PATH": f"{git_only}{os.pathsep}/usr/bin{os.pathsep}/bin"}
     missing = run_cli(["doctor"], missing_env, world.parent_path)
     assert missing.returncode != 0
     assert b"FAIL OpenCode CLI: missing" in missing.stdout

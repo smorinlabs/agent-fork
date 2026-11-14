@@ -23,11 +23,19 @@ OPENCODE_LOOKUP_TIMEOUT = 5.0
 
 
 class OpencodeApiError(AgentForkError):
-    """An `opencode api` call failed; `not_found` marks an unknown session."""
+    """An `opencode api` call failed.
 
-    def __init__(self, message: str, *, not_found: bool = False) -> None:
+    `not_found` marks an unknown session. `uncertain` marks a failure where the
+    server may still have acted: no HTTP answer arrived (a timeout, a launch
+    error, unreachable service) or the answer could not be read.
+    """
+
+    def __init__(
+        self, message: str, *, not_found: bool = False, uncertain: bool = False
+    ) -> None:
         super().__init__(message)
         self.not_found = not_found
+        self.uncertain = uncertain
 
 
 def call(
@@ -60,16 +68,20 @@ def call(
         )
     except subprocess.TimeoutExpired as error:
         raise OpencodeApiError(
-            f"`opencode api {operation}` timed out after {limit:g}s"
+            f"`opencode api {operation}` timed out after {limit:g}s", uncertain=True
         ) from error
     except (OSError, UnicodeDecodeError) as error:
-        raise OpencodeApiError(f"`opencode api {operation}` failed: {error}") from error
+        raise OpencodeApiError(
+            f"`opencode api {operation}` failed: {error}", uncertain=True
+        ) from error
     if completed.returncode != 0:
         output = (completed.stdout or completed.stderr).strip()
         detail = output.splitlines()[0] if output else f"exit {completed.returncode}"
         raise OpencodeApiError(
             f"`opencode api {operation}` failed: {escape_terminal_text(detail)}",
             not_found='"SessionNotFoundError"' in completed.stdout,
+            # An HTTP status line means the server answered with a refusal.
+            uncertain="HTTP " not in completed.stdout,
         )
     if not require_data or not completed.stdout.strip():
         return {}
@@ -77,11 +89,13 @@ def call(
         document = json.loads(completed.stdout)
     except ValueError as error:
         raise OpencodeApiError(
-            f"`opencode api {operation}` returned unreadable output"
+            f"`opencode api {operation}` returned unreadable output", uncertain=True
         ) from error
     data = document.get("data") if isinstance(document, dict) else None
     if not isinstance(data, dict):
-        raise OpencodeApiError(f"`opencode api {operation}` returned no data object")
+        raise OpencodeApiError(
+            f"`opencode api {operation}` returned no data object", uncertain=True
+        )
     return data
 
 
@@ -102,7 +116,12 @@ def service_running(binary: str, env: Mapping[str, str]) -> bool:
 
 
 def fork_into(
-    binary: str, parent_id: str, directory: Path, env: Mapping[str, str]
+    binary: str,
+    parent_id: str,
+    directory: Path,
+    env: Mapping[str, str],
+    *,
+    created: list[str] | None = None,
 ) -> str:
     """Fork `parent_id` and move the child into `directory`; return the child ID.
 
@@ -111,11 +130,15 @@ def fork_into(
     deleted is named in the error with its recovery command. A fork that fails
     or times out without answering may still have created a child whose ID was
     never returned, and the error says so.
+
+    `created`, when given, holds the child from the moment its ID is known
+    until this function deletes it, so a caller interrupted after the return
+    can still find and delete it.
     """
     try:
         data = call(binary, "session.fork", parent_id, env, body={})
     except OpencodeApiError as error:
-        if error.not_found:
+        if not error.uncertain:
             raise
         raise OpencodeApiError(
             f"{error}; OpenCode may have created a fork of {parent_id} anyway: "
@@ -123,11 +146,17 @@ def fork_into(
         ) from error
     child = data.get("id")
     if not isinstance(child, str) or OPENCODE_SESSION_ID.fullmatch(child) is None:
-        if isinstance(child, str) and child:
+        leftover = (
             _remove_child(binary, child, env)
-        raise OpencodeApiError(
+            if isinstance(child, str) and child
+            else None
+        )
+        message = (
             f"`opencode api session.fork` returned no valid child ID for {parent_id}"
         )
+        raise OpencodeApiError(f"{message}; {leftover}" if leftover else message)
+    if created is not None:
+        created.append(child)
     try:
         call(
             binary,
@@ -140,12 +169,19 @@ def fork_into(
     except OpencodeApiError as error:
         leftover = _remove_child(binary, child, env)
         if leftover is None:
+            _forget(created, child)
             raise
         raise OpencodeApiError(f"{error}; {leftover}") from error
     except BaseException:
-        _remove_child(binary, child, env)
+        if _remove_child(binary, child, env) is None:
+            _forget(created, child)
         raise
     return child
+
+
+def _forget(created: list[str] | None, child: str) -> None:
+    if created is not None and child in created:
+        created.remove(child)
 
 
 def _remove_child(binary: str, child: str, env: Mapping[str, str]) -> str | None:

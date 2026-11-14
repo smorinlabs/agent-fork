@@ -220,4 +220,18 @@ fake `opencode` executable, never the real service.
       Documented, not fixed: an empty parent is refused only at the last
       step; `agent-fork cleanup` leaves the forked OpenCode session.
       (T-SES-62, T-RBK-21..22, T-CLI-75)
+      Round 2 (2026-11-13), on fix commit 669673a: Codex marked 4 fixed and
+      3 partial plus one new defect; Fable marked the rest fixed with three
+      low items. Fixed: `fork_into` records the child in the caller's list as
+      soon as its ID is known (T-RBK-23); an invalid-ID cleanup failure is
+      reported; the "may have created a fork" hint appears only when the
+      outcome is uncertain, not on an HTTP refusal; the doctor time limit
+      applies only to OpenCode, so Git, Claude, and Codex probes are
+      unchanged; tests shadow `opencode` with a failing stand-in instead of
+      dropping PATH directories (which could drop Git); preflight failures
+      point at `opencode service status`. Accepted as best effort and
+      documented: an interrupt during `session.fork` itself, or in the few
+      bytecodes before the ID is recorded, can leave a child that is not
+      named. Remaining: Fable and Codex concurrence on this round's fixes is
+      by inspection of the listed changes, not a third review run.
 - [ ] [P09-T09] One PR, merge commit, tag v1.5.0

@@ -1067,7 +1067,7 @@ def sealed_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 
     env = {
         "PATH": overrides.pop(
-            "PATH", _without_opencode(os.environ.get("PATH", os.defpath))
+            "PATH", _block_opencode(home, os.environ.get("PATH", os.defpath))
         ),
         "HOME": str(home),
         "LC_ALL": overrides.pop("LC_ALL", "C"),
@@ -1087,15 +1087,20 @@ def sealed_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-def _without_opencode(path: str) -> str:
-    """Drop every PATH directory holding an `opencode`, so tests never run the
-    host's real OpenCode (it talks to a live background service). Tests that
-    need OpenCode put the `fake_opencode` fixture's executable first."""
-    return os.pathsep.join(
-        directory
-        for directory in path.split(os.pathsep)
-        if not (directory and os.access(os.path.join(directory, "opencode"), os.X_OK))
-    )
+def _block_opencode(home: Path, path: str) -> str:
+    """Put a stand-in `opencode` that always fails (exit 127) first on PATH, so
+    tests never run the host's real OpenCode (it talks to a live service). The
+    rest of PATH is untouched, so tools that share its directory still resolve.
+    Tests that need OpenCode put the `fake_opencode` executable ahead of it."""
+    blocked = home / ".blocked-bin"
+    blocked.mkdir(parents=True, exist_ok=True)
+    stub = blocked / "opencode"
+    if not stub.exists():
+        stub.write_text(
+            "#!/bin/sh\necho 'the real opencode is blocked in tests' >&2\nexit 127\n"
+        )
+        stub.chmod(0o755)
+    return f"{blocked}{os.pathsep}{path}"
 
 
 def run_cli(args: list[str], env: dict[str, str], cwd: Path):

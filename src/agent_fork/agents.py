@@ -396,9 +396,9 @@ def preflight_agent(
                 raise _diagnosis(
                     f"OpenCode session {context.parent_session_id} was not found"
                 ) from error
-            raise _diagnosis(
+            raise AgentPreflightError(
                 f"could not confirm OpenCode session {context.parent_session_id}: "
-                f"{error}"
+                f"{error}; check `opencode service status`"
             ) from error
     elif context.agent == "claude":
         if version < CLAUDE_FORK_MIN:
