@@ -62,7 +62,7 @@ def test_opencode_fork_failure_rolls_back_worktree_and_registry(
     from agent_fork.pipeline import fork
 
     _, fake, env, request = _fork_world(repo_scenario, fake_opencode, "oc-ff")
-    fake.update(fail={"session.fork": {"code": 1, "stdout": "HTTP 500\n"}})
+    fake.update(fail={"session.fork": {"code": 1, "stderr": "HTTP 500\n"}})
     with pytest.raises(Exception, match="session.fork"):
         fork(request, env=env)
     assert not request.destination.exists()
@@ -78,7 +78,7 @@ def test_opencode_move_failure_deletes_the_child_and_rolls_back(
     from agent_fork.pipeline import fork
 
     _, fake, env, request = _fork_world(repo_scenario, fake_opencode, "oc-mf")
-    fake.update(fail={"session.move": {"code": 1, "stdout": "HTTP 400\n"}})
+    fake.update(fail={"session.move": {"code": 1, "stderr": "HTTP 400\n"}})
     with pytest.raises(Exception, match="session.move"):
         fork(request, env=env)
     assert fake.api_ops() == [

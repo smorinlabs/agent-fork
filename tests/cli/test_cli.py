@@ -40,7 +40,7 @@ def test_standard_global_flags_present(repo_scenario):
     for flag in ("-V", "--version"):
         completed = run_cli([flag], world.env, world.parent_path)
         assert completed.returncode == 0
-        assert completed.stdout == b"agent-fork 1.5.0\n"  # x-release-please-version
+        assert completed.stdout == b"agent-fork 1.6.0\n"  # x-release-please-version
     combined = run_cli(["-vv", "-q", "--debug"], world.env, world.parent_path)
     assert combined.returncode == 0 and b"usage: agent-fork" in combined.stdout
     path = world.parent_path.parent / "explicit.toml"
@@ -434,7 +434,7 @@ def test_help_documents_commands_options_and_exit_codes(repo_scenario):
     fork = run_cli(["help", "fork"], world.env, world.parent_path)
     for text in (
         b"Fork identity; derived from the current branch",
-        b"Host agent (claude, codex, or opencode); detected",
+        b"Host agent (claude, codex, muse, or opencode);",
         b"Preview every planned local mutation",
         b"Replace only the derived worktree parent directory",
     ):
@@ -872,7 +872,7 @@ def test_semantic_metavars_and_config_help_order(repo_scenario):
     fork = run_cli(["help", "fork"], world.env, world.parent_path).stdout
     for token in (
         b"[NAME]",
-        b"--agent {claude,codex,opencode}",
+        b"--agent {claude,codex,muse,opencode}",
         b"--parent-session ID_OR_NAME",
         b"--worktree-base-dir DIRECTORY",
         b"--worktree-name COMPONENT",

@@ -23,8 +23,8 @@ def test_fork_into_names_any_child_it_could_not_clean_up(
     fake, binary, target, env = _client(tmp_path, fake_opencode)
     fake.update(
         fail={
-            "session.move": {"code": 1, "stdout": "HTTP 400\n"},
-            "session.remove": {"code": 1, "stdout": "HTTP 500\n"},
+            "session.move": {"code": 1, "stderr": "HTTP 400\n"},
+            "session.remove": {"code": 1, "stderr": "HTTP 500\n"},
         }
     )
     with pytest.raises(opencode_api.OpencodeApiError) as caught:
@@ -45,7 +45,7 @@ def test_fork_into_names_any_child_it_could_not_clean_up(
     assert "may have created a fork of ses_parent1" in str(slow.value)
 
     # A definite refusal (the server answered with an HTTP status) gets no hint.
-    fake.update(sleep={}, fail={"session.fork": {"code": 1, "stdout": "HTTP 400\n"}})
+    fake.update(sleep={}, fail={"session.fork": {"code": 1, "stderr": "HTTP 400\n"}})
     with pytest.raises(opencode_api.OpencodeApiError) as refused:
         opencode_api.fork_into(binary, "ses_parent1", target, env)
     assert "may have created" not in str(refused.value)
@@ -75,7 +75,7 @@ def test_fork_into_records_the_child_for_the_caller(tmp_path, fake_opencode):
     child = opencode_api.fork_into(binary, "ses_parent1", target, env, created=created)
     assert created == [child]
 
-    fake.update(fail={"session.move": {"code": 1, "stdout": "HTTP 400\n"}})
+    fake.update(fail={"session.move": {"code": 1, "stderr": "HTTP 400\n"}})
     moved_badly: list[str] = []
     with pytest.raises(opencode_api.OpencodeApiError):
         opencode_api.fork_into(binary, "ses_parent1", target, env, created=moved_badly)
@@ -83,8 +83,8 @@ def test_fork_into_records_the_child_for_the_caller(tmp_path, fake_opencode):
 
     fake.update(
         fail={
-            "session.move": {"code": 1, "stdout": "HTTP 400\n"},
-            "session.remove": {"code": 1, "stdout": "HTTP 500\n"},
+            "session.move": {"code": 1, "stderr": "HTTP 400\n"},
+            "session.remove": {"code": 1, "stderr": "HTTP 500\n"},
         }
     )
     stuck: list[str] = []

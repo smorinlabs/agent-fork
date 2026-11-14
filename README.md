@@ -157,10 +157,10 @@ uvx --isolated --refresh --from git+https://github.com/smorinlabs/agent-fork age
 > `uvx agent-fork`.
 
 **Requirements:** Python 3.11+ and Git 2.19+. Forking an agent session
-additionally needs Claude Code 2.0.73+ or Codex 0.95+ (Codex's native `fork`
-itself requires 0.81+), or OpenCode with its background service (verified with
-2.2.7; no minimum is enforced). Run `agent-fork doctor` to check the CLIs at
-once.
+additionally needs Claude Code 2.0.73+, Codex 0.95+ (Codex's native `fork`
+itself requires 0.81+), Muse Code (verified with 1.4.20; no minimum is
+enforced), or OpenCode with its background service (verified with 2.2.7; no
+minimum is enforced). Run `agent-fork doctor` to check the CLIs at once.
 
 ### Alternative: local skill install
 
@@ -198,7 +198,7 @@ agent-fork --version
 readlink ~/.claude/skills/agent-fork ~/.agents/skills/agent-fork
 ```
 
-The version command must print `agent-fork 1.5.0`. <!-- x-release-please-version -->
+The version command must print `agent-fork 1.6.0`. <!-- x-release-please-version -->
 Both symlinks must resolve
 to this repository's `.agents/skills/agent-fork` directory.
 
@@ -400,9 +400,10 @@ as an address for now, not as the session's identity.
 
 Inspection also reports `message_route`: how another session can send this
 one a message, for Claude Code, Codex, Muse, and OpenCode. It is printed as
-`message route:`. Muse sessions get a route even though agent-fork does not
-fork or resume them (`agent` stays null). OpenCode is a full agent since 1.5.0
-(`agent` is `opencode`); its route is unchanged.
+`message route:`. Muse and OpenCode are full agents (see
+[Muse sessions](#muse-sessions) and
+[Forking an OpenCode session](#forking-an-opencode-session)); both routes stay
+`address_only`.
 
 | Tool | Detected by | `status` | `address` | `command` (message goes…) |
 |---|---|---|---|---|
@@ -533,8 +534,8 @@ record; cleanup adds no flag that prunes this metadata automatically.
 | Flag | Effect |
 |---|---|
 | `NAME` | Fork identity; derived from the current branch when omitted |
-| `--agent {claude,codex,opencode}` | Host agent; detected when omitted |
-| `--parent-session ID_OR_NAME` | Parent session/thread ID (Claude or Codex UUID, OpenCode `ses_` ID), or a renamed Codex session name |
+| `--agent {claude,codex,muse,opencode}` | Host agent; detected when omitted |
+| `--parent-session ID_OR_NAME` | Parent session/thread ID (Claude, Codex, or Muse UUID, OpenCode `ses_` ID), or a renamed Codex session name |
 | `--require-agent` | Refuse unless a single usable agent session is available |
 | `--no-agent` | Ignore agent signals; create only the branch and worktree |
 | `--branch BRANCH` | Explicit fork branch name |
@@ -595,8 +596,11 @@ Parent changes during the fork still fail verification and roll the fork back.
 flag: there is no configuration key or environment variable for it.
 
 The default `auto` mode detects the agent and parent session from
-`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, or `OPENCODE_SESSION_ID`. They can
-be supplied explicitly:
+`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, `MUSE_SESSION_ID`, or
+`OPENCODE_SESSION_ID`. Signals from more than one agent are ambiguous, because
+presence alone cannot show which session is nested in which, so automatic
+detection refuses with `agent_not_detected` and `--agent` chooses. They can be
+supplied explicitly:
 
 ```bash
 agent-fork fork review-auth \
@@ -687,6 +691,51 @@ list the candidate UUIDs. This option is intentionally Codex-specific. If
 another agent later needs the same facility, a future design may add a generic
 option while retaining this name as a compatible alias.
 
+### Muse sessions
+
+Muse (Muse Code) has no fork command. It forks sessions only through its
+session-host protocol, MSP, served by `muse serve`. So the Muse paste command
+forks when you run it, the way Claude Code's and Codex's do:
+
+```bash
+cd '<worktree>' && muse resume "$('<agent-fork>' muse-fork '<parent-uuid>')"
+```
+
+`agent-fork muse-fork <parent-uuid>` is an internal command (absent from
+`--help`). It starts `muse serve`, calls `session/fork`, leaves the new session
+cleanly, and prints only the new session's UUID. `<agent-fork>` is the absolute
+path of the `agent-fork` that printed the command (or its Python with
+`-m agent_fork.cli` when it was started that way), so the paste works even
+when `agent-fork` is not on `PATH`. Under `uvx` that path is inside the uv
+cache, so `uv cache clean` or `uv cache prune` before pasting breaks the
+command; the paste then fails without opening a session. If the fork fails,
+`muse-fork` exits 3 with `muse_fork_failed`, and `muse resume ""` refuses, so
+no session opens. Once Muse has created the fork, `muse-fork` prints its UUID
+even if leaving it cleanly fails: the fork already exists and cannot be
+deleted, so opening it beats losing it. It warns on stderr, and Muse may
+report on the first resume that the session "ended abnormally". The command is tested in bash and zsh; fish 3.4+ supports
+its `"$(…)"` substitution but has not been tested.
+
+What to expect:
+
+- Muse's default sandbox blocks agent-fork's own state writes
+  (`~/.local/state/agent-fork`), so `agent-fork fork` run by Muse fails with
+  `runtime_error`. In the observed run it failed before creating anything; if
+  the error names a rollback or recovery step, follow it before retrying.
+  Approve running it outside the sandbox when Muse asks, or run it yourself.
+- `muse resume` binds the fork to the directory it runs in, so the forked
+  session works in the new worktree. Muse asks whether to trust that
+  worktree the first time; agent-fork never passes `--trust-workspace`.
+- A fork copies the parent's completed turns. Muse has no command to delete a
+  session, and running the paste command twice makes two forks.
+- The parent must be a session UUID (`MUSE_SESSION_ID`); session names are not
+  resolved. Preflight refuses with `session_not_found` when the parent's
+  `session.jsonl` is not under `$XDG_DATA_HOME/muse/sessions` (default
+  `~/.local/share/muse`).
+- `agent-fork session` reports the transcript (`session.jsonl`), the session
+  name from `muse sessions --json`, and, for a fork, its parent from the log's
+  first `session.fork.created` record.
+
 ## Configuration
 
 Configuration is TOML, discovered per the XDG/project precedence documented in
@@ -755,6 +804,9 @@ extra_args = []
 extra_args = []
 session_name_resolution = true
 
+[agents.muse]
+extra_args = []
+
 [agents.opencode]
 extra_args = []
 ```
@@ -767,7 +819,7 @@ above and can also be set via `config set output <text|json>`.
 Every effective key is addressable with `config get`/`config set`, using
 either the bare `[fork]` name (e.g. `branch_prefix`) or a fully dotted form
 (e.g. `fork.branch_prefix`, `agents.claude.extra_args`,
-`agents.codex.session_name_resolution`). The three `extra_args` arrays are
+`agents.codex.session_name_resolution`). The `extra_args` arrays are
 readable but not settable from the CLI — `config set` on any of them refuses with
 the exact TOML file and table to hand-edit instead; general array-editing
 syntax is out of scope.
@@ -952,7 +1004,7 @@ same paths.
 | 0 | Success | — |
 | 1 | Runtime or verification failure | `runtime_error`, `verify_failed`, `registry_busy`, `entry_unreadable`, `strict_skip_refused` |
 | 2 | Usage error or required prompt disabled | `config_error` |
-| 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `cleanup_target_unknown`, `claude_parent_incomplete_analysis` |
+| 3 | Agent, session, assertion, or target not found | `agent_not_detected`, `agent_signal_incomplete`, `session_not_found`, `session_name_ambiguous`, `session_resolution_unavailable`, `session_validation_failed`, `muse_fork_failed`, `cleanup_target_unknown`, `claude_parent_incomplete_analysis` |
 | 5 | Conflict or precondition refusal | `conflict_branch_exists`, `conflict_branch_worktree`, `conflict_worktree_path`, `parent_mid_operation`, `repo_no_commits`, `unmerged_index`, `not_git_repository`, `git_version_unsupported`, `invalid_branch`, `invalid_worktree_base`, `invalid_worktree_name`, `cleanup_target_is_cwd`, `cleanup_dirty_worktree`, `cleanup_unpushed_commits`, `submodule_unrepresentable`, `submodule_cold_content`, `submodule_transport_unsafe`, `conflict_fork_registered`, `cleanup_registry_stale`, `cleanup_registry_ambiguous`, `cleanup_target_changed` |
 | 130 / 143 | Interrupted by SIGINT / SIGTERM | `interrupted_sigint`, `interrupted_sigterm` |
 

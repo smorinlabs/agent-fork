@@ -1519,7 +1519,7 @@ def test_opencode_fork_command_line_runs_and_opens_the_child(
         completed = subprocess.run(["sh", "-c", line], env=env, capture_output=True)
         assert completed.returncode == 0, completed.stderr
         assert ["--session", child] in fake.calls()
-    fake.update(fail={"session.fork": {"code": 1, "stdout": "HTTP 500\n"}})
+    fake.update(fail={"session.fork": {"code": 1, "stderr": "HTTP 500\n"}})
     failed = subprocess.run(["sh", "-c", line], env=env, capture_output=True)
     assert failed.returncode != 0
     assert ["--session", "ses_child3"] not in fake.calls()

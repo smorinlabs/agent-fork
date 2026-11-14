@@ -1302,7 +1302,7 @@ if args[:1] == ["api"]:
     if sid not in sessions:
         print(json.dumps({"_tag": "SessionNotFoundError", "sessionID": sid,
                           "message": f"Session not found: {sid}"}))
-        print("HTTP 404 Not Found"); sys.exit(1)
+        print("HTTP 404 Not Found", file=sys.stderr); sys.exit(1)
     session = sessions[sid]
     if op == "session.get":
         data = {"id": sid, "title": session.get("title"),
@@ -1326,7 +1326,7 @@ if args[:1] == ["api"]:
         if not os.path.isdir(target):
             print(json.dumps({"_tag": "InvalidRequestError",
                               "message": f"Directory does not exist: {target}"}))
-            print("HTTP 400 Bad Request"); sys.exit(1)
+            print("HTTP 400 Bad Request", file=sys.stderr); sys.exit(1)
         session["directory"] = target
         save()
         if reply is not None:

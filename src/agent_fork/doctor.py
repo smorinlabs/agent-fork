@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_fork.agents import (
+    AGENT_NAMES,
     CLAUDE_FORK_MIN,
     CODEX_ENV_MIN,
     assess_agent_signals,
@@ -23,9 +24,9 @@ from agent_fork.git import PRODUCT_GIT_MIN
 from agent_fork.include import SETUP_HOOK_RELATIVE_PATH, setup_hook_eligibility
 from agent_fork.text import escape_terminal_text
 
-# OpenCode is probed whenever it is installed, selected or not, so a hanging
-# OpenCode must not hang doctor. Git, Claude, and Codex keep their unbounded
-# probe unchanged.
+# Muse and OpenCode are probed whenever installed, selected or not, so a
+# hanging install must not hang doctor. Git, Claude, and Codex keep their
+# unbounded probe unchanged.
 DOCTOR_PROBE_TIMEOUT = 10
 
 
@@ -50,7 +51,7 @@ def _recipe_flag_check(env: Mapping[str, str], selected: str) -> DoctorCheck:
     name = "agent recipe flags"
     details: list[str] = []
     drifted = False
-    for agent in ("claude", "codex", "opencode"):
+    for agent in AGENT_NAMES:
         binary = shutil.which(agent, path=env.get("PATH"))
         if binary is None:
             details.append(f"{agent}: not installed (skipped)")
@@ -75,27 +76,38 @@ def _version_check(
     floor: tuple[int, int, int] | None,
     env: Mapping[str, str],
     *,
-    timeout: float | None = None,
+    bounded: bool = False,
 ) -> DoctorCheck:
-    """`floor=None` means no minimum version: any readable version passes."""
+    """`floor=None` means no version is required (Muse: 1.4.20 and OpenCode:
+    2.2.7 are observed, not minimums)."""
     minimum = ".".join(map(str, floor)) if floor is not None else None
     if executable is None:
-        requirement = f"requires >= {minimum}" if minimum else "no minimum"
-        return DoctorCheck(name, False, f"missing; {requirement}")
-    try:
-        completed = subprocess.run(
-            [executable, "--version"],
-            env=dict(env),
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+        return DoctorCheck(
+            name, False, f"missing; requires >= {minimum}" if minimum else "missing"
         )
-    except subprocess.TimeoutExpired:
-        return DoctorCheck(name, False, f"--version timed out after {timeout}s")
-    except (OSError, UnicodeDecodeError) as error:
-        return DoctorCheck(name, False, f"--version failed: {error}")
-    output = escape_terminal_text((completed.stdout or completed.stderr).strip())
+    if bounded:
+        # Muse's and OpenCode's rows are probed on every run, even for Claude or
+        # Codex users, so a broken install must not hang or crash their
+        # diagnosis, nor print control sequences.
+        try:
+            completed = subprocess.run(
+                [executable, "--version"],
+                env=dict(env),
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=DOCTOR_PROBE_TIMEOUT,
+            )
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as error:
+            return DoctorCheck(
+                name, False, f"unreadable version: {escape_terminal_text(str(error))}"
+            )
+        output = escape_terminal_text((completed.stdout or completed.stderr).strip())
+    else:
+        completed = subprocess.run(
+            [executable, "--version"], env=dict(env), capture_output=True, text=True
+        )
+        output = (completed.stdout or completed.stderr).strip()
     try:
         version = parse_version(output)
     except ValueError:
@@ -225,12 +237,15 @@ def run_doctor(
         CODEX_ENV_MIN,
         env,
     )
+    muse = _version_check(
+        "Muse CLI", shutil.which("muse", path=env.get("PATH")), None, env, bounded=True
+    )
     opencode = _version_check(
         "OpenCode CLI",
         shutil.which("opencode", path=env.get("PATH")),
         None,
         env,
-        timeout=DOCTOR_PROBE_TIMEOUT,
+        bounded=True,
     )
     hook_policy: str | None = None
     hook_timeout = 0
@@ -286,19 +301,23 @@ def run_doctor(
     def optional(check: DoctorCheck) -> DoctorCheck:
         return DoctorCheck(check.name, True, f"{check.detail} (optional)")
 
+    # Only the selected agent's CLI is required; under ambiguity none is
+    # selected, so every agent's row keeps its real result.
     if selected_mode == "git-only" or assessment.status == "absent":
         claude, codex = optional(claude), optional(codex)
+        muse, opencode = optional(muse), optional(opencode)
     elif assessment.status != "ambiguous":
-        if selected == "claude":
-            codex = optional(codex)
-        elif selected == "codex":
-            claude = optional(claude)
-        else:
-            claude, codex = optional(claude), optional(codex)
-    # OpenCode is required only when an OpenCode signal is in play, so a
-    # Claude or Codex user without OpenCode installed still passes.
-    if "OPENCODE_SESSION_ID" not in assessment.present or selected_mode == "git-only":
-        opencode = optional(opencode)
+        claude = claude if selected == "claude" else optional(claude)
+        codex = codex if selected == "codex" else optional(codex)
+        muse = muse if selected == "muse" else optional(muse)
+        opencode = opencode if selected == "opencode" else optional(opencode)
+    else:
+        # Under ambiguity no agent is selected; an agent with no signal at all
+        # is not one of the candidates, so its CLI is not required.
+        if "MUSE_SESSION_ID" not in assessment.present:
+            muse = optional(muse)
+        if "OPENCODE_SESSION_ID" not in assessment.present:
+            opencode = optional(opencode)
     state = Path(
         env.get(
             "XDG_STATE_HOME",
@@ -326,6 +345,7 @@ def run_doctor(
         git,
         claude,
         codex,
+        muse,
         opencode,
         recipes,
         signals,

@@ -9,6 +9,7 @@ starts it, so read-only callers check `service_running` first.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
@@ -18,6 +19,7 @@ from agent_fork.errors import AgentForkError
 from agent_fork.text import escape_terminal_text
 
 OPENCODE_API_TIMEOUT = 30.0
+_HTTP_STATUS = re.compile(r"^HTTP [1-5][0-9][0-9]\b", re.MULTILINE)
 # Read-only lookups (the session report) wait less than the fork path does.
 OPENCODE_LOOKUP_TIMEOUT = 5.0
 
@@ -81,7 +83,9 @@ def call(
             f"`opencode api {operation}` failed: {escape_terminal_text(detail)}",
             not_found='"SessionNotFoundError"' in completed.stdout,
             # An HTTP status line means the server answered with a refusal.
-            uncertain="HTTP " not in completed.stdout,
+            # OpenCode 2.2.7 prints it on stderr and the JSON body on stdout.
+            uncertain=_HTTP_STATUS.search(f"{completed.stdout}\n{completed.stderr}")
+            is None,
         )
     if not require_data or not completed.stdout.strip():
         return {}

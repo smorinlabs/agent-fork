@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -42,6 +43,10 @@ def _machine_error_output(args, environment: dict[str, str]) -> bool:
     if explicit_json or explicit_output is not None:
         return explicit_json or explicit_output == "json"
     return environment.get("AGENT_FORK_OUTPUT") == "json"
+
+
+# Subcommands for agent-fork's own use, kept out of help and completion.
+HIDDEN_COMMANDS = frozenset({"muse-fork"})
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -120,8 +125,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     fork.add_argument(
         "--agent",
-        metavar="{claude,codex,opencode}",
-        help="Host agent (claude, codex, or opencode); detected when omitted",
+        metavar="{claude,codex,muse,opencode}",
+        help="Host agent (claude, codex, muse, or opencode); detected when omitted",
     )
     fork.add_argument(
         "--parent-session",
@@ -265,7 +270,9 @@ def _parser() -> argparse.ArgumentParser:
     session_validate = session_actions.add_parser(
         "validate", allow_abbrev=False, help="Assert detected session facts"
     )
-    session_validate.add_argument("--agent", choices=("claude", "codex", "opencode"))
+    session_validate.add_argument(
+        "--agent", choices=("claude", "codex", "muse", "opencode")
+    )
     session_validate.add_argument("--session-id", metavar="ID")
     session_validate.add_argument("--parent-session-id", metavar="ID")
     parent_assertion = session_validate.add_mutually_exclusive_group()
@@ -405,6 +412,16 @@ def _parser() -> argparse.ArgumentParser:
     setter.add_argument("value", help="New value")
     actions.add_parser(
         "validate", allow_abbrev=False, help="Validate effective configuration"
+    )
+    # Run by Muse's paste command, not by people: forks the parent over MSP and
+    # prints only the new session ID. Added without `help=`, so it gets no line
+    # in the command list, and left out of the usage metavar below.
+    muse_fork = commands.add_parser("muse-fork", allow_abbrev=False)
+    muse_fork.add_argument("parent_session_id", metavar="PARENT_SESSION_UUID")
+    commands.metavar = (
+        "{"
+        + ",".join(name for name in commands.choices if name not in HIDDEN_COMMANDS)
+        + "}"
     )
     return parser
 
@@ -646,11 +663,12 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         else _path_for_name(info, config, name, branch, environment, args=args, cwd=cwd)
     )
     extra_args = (
-        config.claude_extra_args
-        if context is not None and context.agent == "claude"
-        else config.codex_extra_args
-        if context is not None and context.agent == "codex"
-        else config.opencode_extra_args
+        {
+            "claude": config.claude_extra_args,
+            "codex": config.codex_extra_args,
+            "muse": config.muse_extra_args,
+            "opencode": config.opencode_extra_args,
+        }[context.agent]
         if context is not None
         else ()
     )
@@ -870,6 +888,37 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error(f"unknown help topic: {args.topic}")
             selected = cast(argparse.ArgumentParser, selected)
             selected.print_help()
+            return 0
+        if args.command == "muse-fork":
+            from agent_fork.errors import MuseForkError
+            from agent_fork.muse_server import fork_session
+
+            executable = shutil.which("muse", path=environment.get("PATH"))
+            if executable is None:
+                raise MuseForkError("Muse fork failed: muse CLI is missing from PATH")
+
+            def warn(line: str) -> None:
+                # A closed stderr must not kill the helper (SIGPIPE is default
+                # here) while it still owns a running `muse serve`.
+                from agent_fork.codex_app_server import _sigpipe_ignored
+
+                with _sigpipe_ignored():
+                    try:
+                        print(f"agent-fork: {line}", file=sys.stderr, flush=True)
+                    except OSError:
+                        pass
+
+            try:
+                fork_id = fork_session(
+                    executable, args.parent_session_id, environment, warn=warn
+                )
+            except MuseForkError:
+                raise
+            except Exception as error:
+                # The paste command depends on exit 3 and an empty stdout for
+                # every failure, not only the ones the client anticipates.
+                raise MuseForkError(f"Muse fork failed: {error}") from error
+            print(fork_id)
             return 0
         if args.command == "completion":
             from agent_fork.completion import render_completion
@@ -1701,6 +1750,7 @@ def main(argv: list[str] | None = None) -> int:
                                 resolved.codex_session_name_resolution
                             ),
                         },
+                        "muse": {"extra_args": list(resolved.muse_extra_args)},
                         "opencode": {"extra_args": list(resolved.opencode_extra_args)},
                     },
                 }

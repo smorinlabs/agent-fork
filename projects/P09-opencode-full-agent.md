@@ -8,7 +8,7 @@
 - **Prior art:** [P05 — session transcript path](P05-session-transcript-path.md) (the `transcript` contract; OpenCode has no transcript file)
 - **Prior art:** [README `message_route` section](../README.md) (its OpenCode row and "no messaging command" text change)
 
-## [~] Project P09: OpenCode as a full agent-fork agent (v1.5.0)
+## [~] Project P09: OpenCode as a full agent-fork agent (v1.6.0)
 **Goal**: agent-fork treats OpenCode the way it treats Claude Code and Codex:
 it detects an OpenCode session, forks it, and resumes it. Owner decision
 2026-11-13: same capabilities as Claude Code and Codex, mapped the same way,
@@ -138,6 +138,20 @@ created through the API and deleted afterwards; no model turn ran.
   read `~/tmp/p09-poc-wt:poc-fork`. Child, repo, and worktree were deleted
   afterwards.
 
+- Output streams (2026-11-13, read-only, real CLI): `opencode api
+  session.get` for an unknown ID exits 1 with the JSON body
+  (`SessionNotFoundError`) on stdout and `HTTP 404 Not Found` on stderr;
+  `opencode service status` prints the URL on stdout. The first test fake
+  printed the status line on stdout, which hid a bug where every refusal
+  was treated as uncertain; the fake now matches the real streams.
+- Integration with P08 (2026-11-13): P08 (Muse as a full agent, PR #80)
+  merged first as 1.5.0, so P09 targets 1.6.0. OpenCode joins P08's
+  agent tables (`AGENT_NAMES`, labels, session-ID variables); Muse plus
+  OpenCode signals are `ambiguous`. P08 forks Muse inside the paste command
+  (`muse resume "$(agent-fork muse-fork <id>)"`), so nothing changes until
+  the owner pastes; P09 forks OpenCode as the pipeline's last step, as the
+  owner chose before P08 landed.
+
 ### Open questions
 - [answered 2026-11-13] Is there a supported way to deliver a message into a
   running OpenCode session? Yes: `opencode api session.prompt` with
@@ -196,13 +210,13 @@ fake `opencode` executable, never the real service.
       on a failed move
 - [x] [P09-T04] GREEN: session report commands, transcript, name and lineage
 - [x] [P09-T05] GREEN: CLI choices, help, and doctor checks
-- [x] [P09-T06] Version bump to 1.5.0; TEST-MATRIX rows and the `agent` axis;
+- [x] [P09-T06] Version bump to 1.6.0 (P08 took 1.5.0); TEST-MATRIX rows and the `agent` axis;
       `just check-matrix`
 - [x] [P09-T07] README (OpenCode as an agent, fork and resume rows) and the
       `agent-fork` skill
 - [x] Regression Test Status (2026-11-13): `make check`, `just all` (801
       passed, 1 skipped), `just check-matrix`, `just strict-collect`,
-      `just clean-install` (1.5.0 wheel), and `just test-signals` (16 passed)
+      `just clean-install` (wheel), and `just test-signals` (16 passed)
 - [ ] [P09-TS06] Live verification: from inside a real OpenCode session, run
       `agent-fork fork` and open the printed command; run the session
       report's `fork_command` line
@@ -234,4 +248,4 @@ fake `opencode` executable, never the real service.
       bytecodes before the ID is recorded, can leave a child that is not
       named. Remaining: Fable and Codex concurrence on this round's fixes is
       by inspection of the listed changes, not a third review run.
-- [ ] [P09-T09] One PR, merge commit, tag v1.5.0
+- [ ] [P09-T09] One PR, merge commit, tag v1.6.0

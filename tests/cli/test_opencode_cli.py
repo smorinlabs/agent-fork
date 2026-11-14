@@ -32,8 +32,8 @@ def test_agent_choices_and_help_name_opencode(repo_scenario, fake_opencode):
 
     world, fake, env = _opencode_cli(repo_scenario, fake_opencode, service="stopped")
     fork_help = run_cli(["help", "fork"], env, world.parent_path).stdout
-    assert b"{claude,codex,opencode}" in fork_help
-    assert b"Host agent (claude, codex, or opencode); detected" in fork_help
+    assert b"{claude,codex,muse,opencode}" in fork_help
+    assert b"Host agent (claude, codex, muse, or opencode);" in fork_help
     validated = run_cli(
         ["session", "validate", "--agent", "opencode", "--json"],
         env,

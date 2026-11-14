@@ -1,6 +1,6 @@
 ---
 name: agent-fork
-description: "Fork a Claude Code, Codex, or OpenCode session together with its project files: create a new branch and separate Git worktree, copy tracked files and, by default, their staged and unstaged changes plus untracked files, then print the command to continue the conversation there. Use for \"fork this session\", /agent-fork, $agent-fork, or requests for the current session ID or repository context. Supports a name hint, --now to skip confirmation, --session for session details, transcript path, and fork and resume commands, and --session-only to print only the command to fork the conversation. Not for ordinary Git branch, worktree, directory, or status requests."
+description: "Fork a Claude Code, Codex, Muse, or OpenCode session together with its project files: create a new branch and separate Git worktree, copy tracked files and, by default, their staged and unstaged changes plus untracked files, then print the command to continue the conversation there. Use for \"fork this session\", /agent-fork, $agent-fork, or requests for the current session ID or repository context. Supports a name hint, --now to skip confirmation, --session for session details, transcript path, and fork and resume commands, and --session-only to print only the command to fork the conversation. Not for ordinary Git branch, worktree, directory, or status requests."
 argument-hint: "[name-hint] [--now] | --session | --session-only"
 allowed-tools: Bash(agent-fork:*), Bash(command -v:*), Bash(pwd -P), Bash(readlink:*), Bash(git ls-remote https://github.com/smorinlabs/agent-fork.git refs/heads/main), Bash(uv run --project:*), Bash(uvx --isolated --from git+https://github.com/smorinlabs/agent-fork@*), Bash(uv tool run --isolated --from git+https://github.com/smorinlabs/agent-fork@*), Bash(uv tool dir --bin), Bash(uv tool install git+https://github.com/smorinlabs/agent-fork@*), Bash(uv tool install --force git+https://github.com/smorinlabs/agent-fork@*), Read, AskUserQuestion
 ---
@@ -73,7 +73,7 @@ Classify before normalizing. Choose exactly one route.
 ### Inspect the current agent session and include its transcript, fork, and resume commands
 
 For exact skill argument `--session`, or a natural-language request for the
-current Claude Code/Codex/OpenCode session ID or that agent session's repository context,
+current Claude Code/Codex/Muse/OpenCode session ID or that agent session's repository context,
 run exactly:
 
 ```bash
@@ -311,6 +311,7 @@ results:
 
 - `"claude"` -> `references/output-claude.md`
 - `"codex"` -> `references/output-codex.md`
+- `"muse"` -> `references/output-muse.md`
 - `"opencode"` -> `references/output-opencode.md`
 
 The file shows the presentation format for each route: the `--session`

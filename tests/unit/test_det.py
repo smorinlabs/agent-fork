@@ -425,6 +425,13 @@ def test_opencode_with_another_agent_refuses_as_ambiguous(repo_scenario):
             "both Codex and OpenCode signals are present",
         ),
         (
+            {
+                "MUSE_SESSION_ID": "01a1d375-470a-73b0-939a-6381da238f05",
+                "OPENCODE_SESSION_ID": "ses_p",
+            },
+            "both Muse and OpenCode signals are present",
+        ),
+        (
             {"CLAUDECODE": "1", "OPENCODE_SESSION_ID": "ses_p"},
             "Claude and OpenCode signals are present; incomplete Claude signal "
             "is missing CLAUDE_CODE_SESSION_ID",
@@ -481,5 +488,5 @@ def test_opencode_resolves_in_auto_strict_and_explicit_modes(repo_scenario):
     )
     with pytest.raises(AgentDetectionError, match="--agent opencode requires"):
         detect_agent({}, explicit_agent="opencode")
-    with pytest.raises(AgentDetectionError, match="claude, codex, or opencode"):
-        detect_agent({}, explicit_agent="muse", explicit_parent_session="x")
+    with pytest.raises(AgentDetectionError, match="claude, codex, muse, or opencode"):
+        detect_agent({}, explicit_agent="alien", explicit_parent_session="x")
