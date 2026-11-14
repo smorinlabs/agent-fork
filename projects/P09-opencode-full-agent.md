@@ -3,6 +3,7 @@
 **References**
 - **Trunk:** [PROJECTS.md](../PROJECTS.md)
 - **Depends on:** P07 — [cross-tool message route](P07-cross-tool-message-route.md); P09 changes its OpenCode row
+- **Discussion:** https://github.com/smorinlabs/agent-fork/pull/83 (this project's PR)
 - **Discussion:** https://github.com/smorinlabs/agent-fork/pull/76 (P07 merge, where the OpenCode `address_only` route shipped)
 - **Prior art:** [P04 — session resume command](P04-session-resume-command.md) (the `resume_command` contract OpenCode fills)
 - **Prior art:** [P05 — session transcript path](P05-session-transcript-path.md) (the `transcript` contract; OpenCode has no transcript file)
@@ -296,4 +297,6 @@ fake `opencode` executable, never the real service.
       against invalid UTF-8 is main's existing behavior and out of scope.
       Round-3 fixes are covered by tests (T-RBK-18, T-RBK-21), not a fourth
       review run.
-- [ ] [P09-T09] One PR, merge commit, tag v1.6.0
+- [~] [P09-T09] One PR, merge commit, tag v1.6.0. PR #83 opened 2026-11-13
+      (https://github.com/smorinlabs/agent-fork/pull/83); merge and tag await
+      the owner
