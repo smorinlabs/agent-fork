@@ -196,6 +196,9 @@ def fork_into(
             body={"directory": str(directory)},
             require_data=False,
         )
+        # Inside the cleanup scope: an interrupt during the stop step or its
+        # retry wait still deletes the child. API errors become notices.
+        _stop_child_turn(binary, child, env, notices)
     except OpencodeApiError as error:
         leftover = _remove_child(binary, child, env)
         if leftover is None:
@@ -206,14 +209,26 @@ def fork_into(
         if _remove_child(binary, child, env) is None:
             _forget(created, child)
         raise
-    _stop_child_turn(binary, child, env, notices)
     return child
 
 
 def _stop_child_turn(
     binary: str, child: str, env: Mapping[str, str], notices: list[str] | None
 ) -> None:
-    """Interrupt the turn a move starts; retry once if it had not started."""
+    """Interrupt the turn a move starts; retry once if it had not started.
+
+    The interrupt names only the session, not a turn, so this cannot be made
+    certain by waiting longer: an unconfirmed stop is reported instead.
+    """
+
+    def report(problem: str) -> None:
+        if notices is not None:
+            notices.append(
+                f"could not confirm that the forked OpenCode session {child} is "
+                f"idle: {problem}; if it starts working on its own, interrupt it "
+                "in OpenCode"
+            )
+
     for attempt in range(2):
         try:
             reply = call(
@@ -231,7 +246,14 @@ def _stop_child_turn(
                     f"carried-over turn: {error}"
                 )
             return
-        if reply.get("interrupted") is True or attempt == 1:
+        interrupted = reply.get("interrupted")
+        if interrupted is True:
+            return
+        if interrupted is not False:
+            report("`opencode api session.interrupt` returned an unreadable reply")
+            return
+        if attempt == 1:
+            report("no running turn was found to stop")
             return
         time.sleep(OPENCODE_INTERRUPT_RETRY_DELAY)
 

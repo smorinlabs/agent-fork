@@ -495,7 +495,7 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 | T-RBK-21 | OpenCode fork compensation names any child it could not delete with its `opencode api session.remove` recovery command, deletes a child whose reply ID is invalid, and says a timed-out fork may have created one | agent=opencode | U | live | P09; review gate |
 | T-RBK-22 | OpenCode `session.move` and `session.remove` replies are never read, so any successful reply shape is accepted | agent=opencode | U | live | P09; review gate |
 | T-RBK-23 | `fork_into` records a live child in the caller's list as soon as its ID is known and removes it once deleted, so an interrupt after the return can still be compensated and nothing is deleted twice | agent=opencode | U | live | P09; review gate round 2 |
-| T-RBK-24 | after moving the child, `fork_into` interrupts the turn OpenCode 2.3.0 starts in it (`resume=true` keeps the move), retries once when nothing was running yet, and keeps the fork with a notice when the interrupt fails | agent=opencode | U | live | P09; live check on 2.3.0 |
+| T-RBK-24 | after moving the child, `fork_into` interrupts the turn OpenCode 2.3.0 starts in it (`resume=true` keeps the move), retries once when nothing was running yet, reports an unconfirmed stop (unreadable reply, nothing found after the retry) and a failed interrupt with notices while keeping the fork, and deletes the child when interrupted during the stop step | agent=opencode | U | live | P09; live check on 2.3.0 |
 
 ---
 

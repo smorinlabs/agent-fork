@@ -138,3 +138,36 @@ def test_fork_into_stops_the_turn_the_move_starts(tmp_path, fake_opencode, monke
     kept = opencode_api.fork_into(binary, "ses_parent1", target, env, notices=notices)
     assert kept in fake.state()["sessions"]
     assert any("could not stop" in notice and kept in notice for notice in notices)
+
+    # A malformed reply, or nothing running after the retry, is reported.
+    fake.update(fail={}, interrupts=[True])
+    for reply_kind, setup in (
+        ("unconfirmed", {"replies": {"session.interrupt": "not json"}}),
+        ("none-running", {"replies": {}, "interrupts": [False]}),
+    ):
+        fake.update(**setup)
+        found: list[str] = []
+        child = opencode_api.fork_into(
+            binary, "ses_parent1", target, env, notices=found
+        )
+        assert any(child in notice for notice in found), reply_kind
+
+    # An interrupt arriving during the stop step still deletes the child.
+    import signal
+
+    from agent_fork.interrupts import OperationInterrupted
+
+    fake.update(replies={}, interrupts=[True])
+    real_call = opencode_api.call
+
+    def interrupting(binary, operation, session_id, env, **kwargs):
+        if operation == "session.interrupt":
+            raise OperationInterrupted(signal.SIGINT)
+        return real_call(binary, operation, session_id, env, **kwargs)
+
+    monkeypatch.setattr(opencode_api, "call", interrupting)
+    created: list[str] = []
+    with pytest.raises(OperationInterrupted):
+        opencode_api.fork_into(binary, "ses_parent1", target, env, created=created)
+    assert created == []
+    monkeypatch.setattr(opencode_api, "call", real_call)

@@ -252,6 +252,12 @@ fake `opencode` executable, never the real service.
       started, with no tokens, and the child ended idle in the worktree.
       Unprotected probe children had re-run the probe's fork script, which
       is the harm this prevents. All probe sessions and directories deleted.
+      A Codex check of that fix (6cbc92a) found: the stop step ran outside
+      the cleanup scope, and an unconfirmed stop was silent. Fixed: an
+      interrupt during the stop step deletes the child; an unreadable reply
+      or no running turn after the retry adds a notice telling the owner to
+      interrupt the session in OpenCode if it starts working on its own. The
+      interrupt API names a session, not a turn, so this stays best effort.
 - [x] [P09-T08] Adversarial review gate including Codex; fix findings.
       Round 1 (2026-11-13): Codex (7 findings) and a Fable whole-branch
       review (6 medium, 4 low). Fixed: dry run never starts a stopped

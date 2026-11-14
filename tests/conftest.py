@@ -1335,6 +1335,8 @@ if args[:1] == ["api"]:
     if op == "session.interrupt":
         # Real 2.3.0 shape: no `data` wrapper. `interrupts` lists the replies
         # to give in turn (default: one active turn was interrupted).
+        if reply is not None:
+            print(reply); sys.exit(0)
         queue = state.setdefault("interrupts", [True])
         answer = queue.pop(0) if len(queue) > 1 else queue[0]
         save()
