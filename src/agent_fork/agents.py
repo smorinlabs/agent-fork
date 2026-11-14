@@ -24,18 +24,24 @@ from agent_fork.errors import (
     SessionResolutionUnavailableError,
 )
 from agent_fork.git import PRODUCT_GIT_MIN
-from agent_fork.text import BIDI_CONTROLS
+from agent_fork.text import BIDI_CONTROLS, escape_terminal_text
 from agent_fork.xdg import xdg_path
 
-AgentName = Literal["claude", "codex", "muse"]
+AgentName = Literal["claude", "codex", "muse", "opencode"]
 # Every supported agent, in the fixed order diagnostics and choices use.
-AGENT_NAMES: tuple[AgentName, ...] = ("claude", "codex", "muse")
-_AGENT_LABELS: dict[str, str] = {"claude": "Claude", "codex": "Codex", "muse": "Muse"}
+AGENT_NAMES: tuple[AgentName, ...] = ("claude", "codex", "muse", "opencode")
+_AGENT_LABELS: dict[str, str] = {
+    "claude": "Claude",
+    "codex": "Codex",
+    "muse": "Muse",
+    "opencode": "OpenCode",
+}
 # The environment variable that carries each agent's session ID.
 _SESSION_ID_VARIABLES: dict[str, str] = {
     "claude": "CLAUDE_CODE_SESSION_ID",
     "codex": "CODEX_THREAD_ID",
     "muse": "MUSE_SESSION_ID",
+    "opencode": "OPENCODE_SESSION_ID",
 }
 AgentSignalStatus = Literal["absent", "incomplete", "detected", "ambiguous"]
 AgentSignalName = Literal[
@@ -43,7 +49,12 @@ AgentSignalName = Literal[
     "CLAUDE_CODE_SESSION_ID",
     "CODEX_THREAD_ID",
     "MUSE_SESSION_ID",
+    "OPENCODE_SESSION_ID",
 ]
+# OpenCode session IDs are `ses_` plus letters and digits; kept separate so
+# SAFE_SESSION_ID (session.py), which guards the Claude transcript path, stays
+# strict.
+OPENCODE_SESSION_ID = re.compile(r"ses_[A-Za-z0-9]+")
 
 
 @dataclass(frozen=True)
@@ -72,21 +83,25 @@ class AgentSignalAssessment:
         if self.status == "incomplete":
             return f"incomplete Claude signal; missing {', '.join(self.missing)}"
         if self.status == "ambiguous":
-            tools = [
+            agents = [
                 _AGENT_LABELS[agent]
                 for agent, signals in (
                     ("claude", ("CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID")),
                     ("codex", ("CODEX_THREAD_ID",)),
                     ("muse", ("MUSE_SESSION_ID",)),
+                    ("opencode", ("OPENCODE_SESSION_ID",)),
                 )
                 if any(signal in self.present for signal in signals)
             ]
-            listed = " and ".join(tools)
+            if len(agents) == 2:
+                joined = f"{agents[0]} and {agents[1]}"
+            else:
+                joined = f"{', '.join(agents[:-1])}, and {agents[-1]}"
             if not self.missing:
-                prefix = "both " if len(tools) == 2 else ""
-                return f"{prefix}{listed} signals are present"
+                prefix = "both " if len(agents) == 2 else ""
+                return f"{prefix}{joined} signals are present"
             return (
-                f"{listed} signals are present; incomplete Claude signal is "
+                f"{joined} signals are present; incomplete Claude signal is "
                 f"missing {', '.join(self.missing)}"
             )
         assert self.context is not None
@@ -104,6 +119,7 @@ def assess_agent_signals(env: Mapping[str, str]) -> AgentSignalAssessment:
     claude_session = bool(claude_id)
     codex_id = env.get("CODEX_THREAD_ID")
     muse_id = env.get("MUSE_SESSION_ID")
+    opencode_id = env.get("OPENCODE_SESSION_ID")
 
     present_values: list[AgentSignalName] = []
     if claude_marker:
@@ -114,6 +130,8 @@ def assess_agent_signals(env: Mapping[str, str]) -> AgentSignalAssessment:
         present_values.append("CODEX_THREAD_ID")
     if muse_id:
         present_values.append("MUSE_SESSION_ID")
+    if opencode_id:
+        present_values.append("OPENCODE_SESSION_ID")
 
     missing_values: list[AgentSignalName] = []
     if claude_marker != claude_session:
@@ -123,6 +141,7 @@ def assess_agent_signals(env: Mapping[str, str]) -> AgentSignalAssessment:
 
     # One entry per agent with any signal present; Claude counts when either
     # half of its pair is present, so a partial Claude signal still collides.
+    # OpenCode follows the Codex rule: its session ID alone detects it.
     candidates: list[AgentContext | None] = []
     if claude_marker or claude_session:
         candidates.append(
@@ -134,6 +153,8 @@ def assess_agent_signals(env: Mapping[str, str]) -> AgentSignalAssessment:
         candidates.append(AgentContext("codex", codex_id))
     if muse_id:
         candidates.append(AgentContext("muse", muse_id))
+    if opencode_id:
+        candidates.append(AgentContext("opencode", opencode_id))
 
     status: AgentSignalStatus
     context: AgentContext | None = None
@@ -200,6 +221,7 @@ CODEX_RECIPE_FLAGS = ("-C",)
 # Muse's recipe uses subcommands, not flags: `muse resume` in the paste
 # command and `muse serve` (MSP) for the fork itself.
 MUSE_RECIPE_COMMANDS = ("resume", "serve")
+OPENCODE_RECIPE_FLAGS = ("--session",)
 # Codex declares the recipe's flags on the `fork` subcommand, not the root, so
 # the two agents are probed with different argument tails. Diagnostics name the
 # tail that actually ran: for Codex, `codex --help` succeeds even when `fork`
@@ -208,6 +230,7 @@ _HELP_ARGS: dict[str, tuple[str, ...]] = {
     "claude": ("--help",),
     "codex": ("fork", "--help"),
     "muse": ("--help",),
+    "opencode": ("--help",),
 }
 _VERSION = re.compile(r"(?<![\d.])(\d+)\.(\d+)(?:\.(\d+))?")
 
@@ -238,6 +261,8 @@ def recipe_flags(agent: AgentName) -> tuple[str, ...]:
         return CODEX_RECIPE_FLAGS
     if agent == "muse":
         return MUSE_RECIPE_COMMANDS
+    if agent == "opencode":
+        return OPENCODE_RECIPE_FLAGS
     raise ValueError(f"unsupported agent: {agent}")
 
 
@@ -415,8 +440,22 @@ def preflight_agent(
     version_output: str | None = None,
     help_output: str | None = None,
     codex_session_name_resolution: bool = True,
+    start_service: bool = True,
 ) -> PreflightResult:
-    """Refuse unsupported native forks before any repository mutation."""
+    """Refuse unsupported native forks before any repository mutation.
+
+    `start_service=False` (dry runs) never starts OpenCode's background
+    service: `opencode api` would start a stopped one, so a stopped service
+    skips the parent lookup with a notice instead.
+    """
+    if (
+        context.agent == "opencode"
+        and OPENCODE_SESSION_ID.fullmatch(context.parent_session_id) is None
+    ):
+        raise _diagnosis(
+            f"{escape_terminal_text(repr(context.parent_session_id))} is not a "
+            "valid OpenCode session ID (`ses_` plus letters and digits)"
+        )
     binary = (
         executable
         if executable is not None
@@ -472,6 +511,36 @@ def preflight_agent(
     resolved_name: str | None = None
     if context.agent == "muse":
         _preflight_muse(context, env, version)
+    elif context.agent == "opencode":
+        # No version floor: 2.2.7 is the version observed, not a minimum.
+        # `opencode --session <unknown>` silently creates a session, so the
+        # parent must be confirmed before anything is created.
+        from agent_fork import opencode_api
+
+        try:
+            if not start_service and not opencode_api.service_running(binary, env):
+                notices.append(
+                    "OpenCode background service is not running, so parent session "
+                    f"{context.parent_session_id} was not confirmed; the real fork "
+                    "will start the service and confirm it"
+                )
+            else:
+                found = opencode_api.call(
+                    binary, "session.get", context.parent_session_id, env
+                )
+                if found.get("id") != context.parent_session_id:
+                    raise opencode_api.OpencodeApiError(
+                        "`opencode api session.get` did not describe that session"
+                    )
+        except opencode_api.OpencodeApiError as error:
+            if error.not_found:
+                raise _diagnosis(
+                    f"OpenCode session {context.parent_session_id} was not found"
+                ) from error
+            raise AgentPreflightError(
+                f"could not confirm OpenCode session {context.parent_session_id}: "
+                f"{error}; check `opencode service status`"
+            ) from error
     elif context.agent == "claude":
         if version < CLAUDE_FORK_MIN:
             raise _diagnosis(
@@ -651,6 +720,14 @@ def _render_native_command(
         raise UnsafeCommandInputError(
             "session identity or directory contains terminal-unsafe controls"
         )
+    if context.agent == "opencode" and any(
+        OPENCODE_SESSION_ID.fullmatch(value) is None
+        for value in (context.parent_session_id, child_session_id)
+        if value is not None
+    ):
+        raise UnsafeCommandInputError(
+            "OpenCode session ID is not `ses_` plus letters and digits"
+        )
 
     quote = shlex.quote
     suffix = "".join(f" {quote(value)}" for value in extra_args)
@@ -672,7 +749,7 @@ def _render_native_command(
             f'"$({launcher} muse-fork {quote(context.parent_session_id)})"'
             f"{suffix}"
         )
-    if context.agent not in ("claude", "codex"):
+    if context.agent not in ("claude", "codex", "opencode"):
         raise ValueError(f"unsupported agent: {context.agent}")
     if mode == "resume":
         if child_session_id is not None:
@@ -683,6 +760,11 @@ def _render_native_command(
                 f"--resume {quote(context.parent_session_id)}{suffix}"
             )
             return command.rstrip()
+        if context.agent == "opencode":
+            return (
+                f"cd {quote(str(directory))} && opencode "
+                f"--session {quote(context.parent_session_id)}{suffix}"
+            )
         return (
             f"codex resume {quote(context.parent_session_id)} "
             f"-C {quote(str(directory))}{suffix}"
@@ -699,6 +781,22 @@ def _render_native_command(
             command += f"-n {quote(name)}"
         command += suffix
         return command.rstrip()
+    if context.agent == "opencode":
+        if child_session_id is not None:
+            return (
+                f"cd {quote(str(directory))} && opencode "
+                f"--session {quote(child_session_id)}{suffix}"
+            )
+        # No single OpenCode command forks and opens a session without a model
+        # turn, so fork through the API, then open the child. The pipeline
+        # hides `opencode api`'s exit status; the empty-ID guard stops the line.
+        extract = quote(r's/^{ *"data" *: *{ *"id" *: *"\(ses_[A-Za-z0-9]*\)".*/\1/p')
+        return (
+            f"cd {quote(str(directory))} && child=$(opencode api session.fork "
+            f"--param {quote('sessionID=' + context.parent_session_id)} -d '{{}}' "
+            f'| sed -n {extract}) && [ -n "$child" ] && '
+            f'opencode --session "$child"{suffix}'
+        )
     return (
         f"codex fork {quote(context.parent_session_id)} "
         f"-C {quote(str(directory))}{suffix}"
@@ -717,6 +815,10 @@ def build_launch_command(
     child = None
     if context.agent == "claude":
         child = child_session_id or str(uuid.uuid4())
+    elif context.agent == "opencode":
+        if child_session_id is None:
+            raise ValueError("OpenCode launch command requires the forked child ID")
+        child = child_session_id
     command = _render_native_command(
         context,
         directory=worktree,
@@ -725,6 +827,24 @@ def build_launch_command(
         extra_args=extra_args,
     )
     return LaunchCommand(command, child, extra_args)
+
+
+def build_opencode_dry_run_command(
+    *, destination: Path, extra_args: tuple[str, ...] = ()
+) -> LaunchCommand:
+    """The OpenCode paste command a dry run previews: the child does not exist
+    until the real fork's last step creates it, so its ID is a placeholder."""
+    values = [str(destination), *extra_args]
+    if not all(_terminal_safe(value) for value in values):
+        raise UnsafeCommandInputError(
+            "session identity or directory contains terminal-unsafe controls"
+        )
+    suffix = "".join(f" {shlex.quote(value)}" for value in extra_args)
+    command = (
+        f"cd {shlex.quote(str(destination))} && opencode --session "
+        f"<forked session ID>{suffix}"
+    )
+    return LaunchCommand(command, None, extra_args)
 
 
 def build_session_fork_command(
@@ -774,7 +894,7 @@ def detect_agent(
         if agent is None:
             raise AgentDetectionError(
                 f"unknown agent {explicit_agent!r}; choose --agent claude, codex, "
-                "or muse"
+                "muse, or opencode"
             )
         parent = explicit_parent_session
         if parent is None:

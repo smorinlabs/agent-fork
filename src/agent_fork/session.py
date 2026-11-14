@@ -8,12 +8,13 @@ import re
 import shlex
 import shutil
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 from agent_fork.agents import (
+    OPENCODE_SESSION_ID,
     AgentContext,
     AgentSignalAssessment,
     UnsafeCommandInputError,
@@ -41,9 +42,6 @@ CLAUDE_RECORD_LIMIT = 10_000
 SESSION_REGISTRY_ENTRY_LIMIT = 4_096
 SESSION_REGISTRY_FILE_LIMIT = 65_536
 SAFE_SESSION_ID = re.compile(r"[A-Za-z0-9-]+")
-# OpenCode session IDs are `ses_` plus letters and digits; kept separate so
-# SAFE_SESSION_ID, which guards the Claude transcript path, stays strict.
-OPENCODE_SESSION_ID = re.compile(r"ses_[A-Za-z0-9]+")
 MUSE_SESSIONS_TIMEOUT = 3.0
 MUSE_SESSIONS_OUTPUT_LIMIT = 1_048_576
 SessionForkStatus = Literal["available", "not_detected", "ambiguous", "unsafe_input"]
@@ -474,6 +472,9 @@ def _session_transcript(
     agent: str, session_id: str, env: Mapping[str, str], directory: Path
 ) -> SessionTranscript:
     """Locate the session's on-disk transcript without reading its contents."""
+    if agent == "opencode":
+        # OpenCode keeps history in one shared database, not a per-session file.
+        return SessionTranscript(None, False)
     if SAFE_SESSION_ID.fullmatch(session_id) is None:
         return SessionTranscript(None, False)
     if agent == "claude":
@@ -841,6 +842,9 @@ def inspect_session(
             parent_inference,
         )
 
+    if agent == "opencode":
+        return _opencode_inspection(current_id, env, notices, _inspection)
+
     if agent == "muse":
         name = _muse_session_name(env, current_id)
         current = SessionEvidence(
@@ -911,6 +915,104 @@ def inspect_session(
             "resolved",
         )
     return _inspection("codex", current, parent, "resolved" if parent else "not_found")
+
+
+def _opencode_inspection(
+    session_id: str,
+    env: Mapping[str, str],
+    notices: list[str],
+    inspection: Callable[..., SessionInspection],
+) -> SessionInspection:
+    """Name and lineage from `opencode api session.get`, as Codex's app server.
+
+    The background service is checked first and never started: `opencode api`
+    would start a stopped service, and inspection promises no mutation.
+    """
+    from agent_fork import opencode_api
+
+    def unavailable(notice: str | None) -> SessionInspection:
+        if notice is not None:
+            notices.append(notice)
+        current = SessionEvidence(
+            session_id, "OPENCODE_SESSION_ID", name_status="unavailable"
+        )
+        return inspection("opencode", current, None, "unavailable")
+
+    if OPENCODE_SESSION_ID.fullmatch(session_id) is None:
+        return unavailable(None)
+    binary = shutil.which("opencode", path=env.get("PATH"))
+    if binary is None:
+        return unavailable(
+            "OpenCode CLI is unavailable; name and lineage were not looked up"
+        )
+    if not opencode_api.service_running(binary, env):
+        return unavailable(
+            "OpenCode background service is not running; name and lineage were "
+            "not looked up"
+        )
+
+    def read(target: str) -> dict[str, object] | None:
+        try:
+            return opencode_api.call(
+                binary,
+                "session.get",
+                target,
+                env,
+                timeout=opencode_api.OPENCODE_LOOKUP_TIMEOUT,
+            )
+        except opencode_api.OpencodeApiError as error:
+            if error.not_found:
+                return None
+            raise
+
+    try:
+        data = read(session_id)
+    except opencode_api.OpencodeApiError as error:
+        return unavailable(str(error))
+    if data is None:
+        notices.append(
+            f"OpenCode session {session_id} was not found; its resume command "
+            "would create a new session with that ID"
+        )
+        current = SessionEvidence(session_id, "OPENCODE_SESSION_ID")
+        return inspection("opencode", current, None, "not_found")
+    title = data.get("title")
+    name = title if isinstance(title, str) and title else None
+    current = SessionEvidence(
+        session_id,
+        "OPENCODE_SESSION_ID",
+        name,
+        "resolved" if name is not None else "not_found",
+        "opencode-api",
+    )
+    fork = data.get("fork")
+    parent_id = fork.get("sessionID") if isinstance(fork, dict) else None
+    if (
+        not isinstance(parent_id, str)
+        or OPENCODE_SESSION_ID.fullmatch(parent_id) is None
+    ):
+        return inspection("opencode", current, None, "not_found")
+    parent_name: str | None = None
+    parent_status = "not_found"
+    try:
+        parent_data = read(parent_id)
+        if parent_data is not None:
+            parent_title = parent_data.get("title")
+            if isinstance(parent_title, str) and parent_title:
+                parent_name = parent_title
+                parent_status = "resolved"
+    except opencode_api.OpencodeApiError as error:
+        notices.append(str(error))
+        parent_status = "unavailable"
+    parent = SessionEvidence(
+        parent_id,
+        "opencode-api",
+        parent_name,
+        parent_status,
+        "opencode-api",
+        "resolved",
+    )
+    return inspection("opencode", current, parent, "resolved")
 
 
 def validate_session(

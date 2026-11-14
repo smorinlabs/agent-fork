@@ -25,6 +25,7 @@ class ConfigValues:
     codex_extra_args: tuple[str, ...] | None = None
     muse_extra_args: tuple[str, ...] | None = None
     codex_session_name_resolution: bool | None = None
+    opencode_extra_args: tuple[str, ...] | None = None
     setup_hook_policy: str | None = None
     setup_hook_timeout: int | None = None
 
@@ -49,8 +50,10 @@ class ResolvedConfig:
     codex_session_name_resolution: bool
     setup_hook_policy: str
     setup_hook_timeout: int
-    # Defaulted so constructions that predate Muse (P08) stay valid.
+    # Defaulted so constructions that predate Muse (P08) and OpenCode (P09)
+    # stay valid.
     muse_extra_args: tuple[str, ...] = ()
+    opencode_extra_args: tuple[str, ...] = ()
 
     @property
     def mode(self) -> str:

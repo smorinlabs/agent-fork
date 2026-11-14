@@ -21,7 +21,12 @@ def _vocabulary() -> dict[str, tuple[str, ...]]:
     completion_parser = commands["completion"]
     shells = _choice_values(completion_parser, "shell")
     outputs = _collect_choice_values(root, "output") or ("text", "json")
-    agents = _collect_choice_values(root, "agent") or ("claude", "codex", "muse")
+    agents = _collect_choice_values(root, "agent") or (
+        "claude",
+        "codex",
+        "muse",
+        "opencode",
+    )
     return {
         "commands": tuple(sorted(commands)),
         "global_options": _option_strings(root),

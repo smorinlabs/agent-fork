@@ -188,3 +188,130 @@ def test_declared_recipe_flags_cover_every_rendered_flag():
         # after the renderer stops emitting it, leaving the probe guarding a
         # flag the recipe no longer uses.
         assert rendered == declared, f"{agent}: {rendered ^ declared} out of step"
+
+
+def _opencode_world(repo_scenario, fake_opencode, **build):
+    world = repo_scenario()
+    fake = fake_opencode(
+        {"ses_parent1": {"title": "Parent", "directory": str(world.parent_path)}},
+        **build,
+    )
+    return world, fake, fake.path_env(world.env)
+
+
+@pytest.mark.matrix("T-PRE-31")
+def test_opencode_preflight_confirms_the_parent_session_exists(
+    repo_scenario, fake_opencode
+):
+    """T-PRE-31 — an existing OpenCode session passes; there is no version floor."""
+    from agent_fork.agents import AgentContext, preflight_agent
+
+    world, fake, env = _opencode_world(
+        repo_scenario, fake_opencode, version="opencode v0.0.1"
+    )
+    result = preflight_agent(AgentContext("opencode", "ses_parent1"), env)
+    assert result.agent == "opencode"
+    assert result.version == (0, 0, 1)
+    assert result.context == AgentContext("opencode", "ses_parent1")
+    assert result.notices == ()
+    assert fake.api_ops() == ["session.get"]
+
+
+@pytest.mark.matrix("T-PRE-32")
+def test_opencode_unknown_session_refuses_before_mutation(repo_scenario, fake_opencode):
+    """T-PRE-32 — `opencode --session <unknown>` would create a session, so refuse."""
+    from agent_fork.agents import AgentContext, preflight_agent
+    from agent_fork.errors import AgentPreflightError
+
+    world, fake, env = _opencode_world(repo_scenario, fake_opencode)
+    with pytest.raises(AgentPreflightError) as caught:
+        preflight_agent(AgentContext("opencode", "ses_missing9"), env)
+    assert caught.value.code == "session_not_found"
+    assert caught.value.exit_code == 3
+    assert "ses_missing9" in str(caught.value)
+    assert "not found" in str(caught.value)
+    assert "doctor" in str(caught.value)
+    assert fake.api_ops() == ["session.get"]
+
+
+@pytest.mark.matrix("T-PRE-33")
+def test_opencode_unreadable_session_lookup_refuses(
+    repo_scenario, fake_opencode, monkeypatch
+):
+    """T-PRE-33 — unreachable, malformed, or slow lookups refuse as unconfirmed."""
+    import agent_fork.opencode_api as opencode_api
+    from agent_fork.agents import AgentContext, preflight_agent
+    from agent_fork.errors import AgentPreflightError
+
+    monkeypatch.setattr(opencode_api, "OPENCODE_API_TIMEOUT", 1)
+    world, fake, env = _opencode_world(repo_scenario, fake_opencode)
+    failures = (
+        {"code": 1, "stderr": "Error: Could not reach server at x: ECONNREFUSED"},
+        {"code": 0, "stdout": "not json"},
+        {"code": 0, "sleep": 5},
+    )
+    for failure in failures:
+        fake.update(fail={"session.get": failure})
+        with pytest.raises(AgentPreflightError) as caught:
+            preflight_agent(AgentContext("opencode", "ses_parent1"), env)
+        assert caught.value.code == "session_not_found"
+        assert "could not confirm OpenCode session ses_parent1" in str(caught.value)
+    # A successful reply must describe the parent itself: empty output, a
+    # missing id, or another session's id leaves the parent unconfirmed.
+    fake.update(fail={})
+    for reply in ("", '{"data":{}}', '{"data":{"id":"ses_other9"}}'):
+        fake.update(replies={"session.get": reply})
+        with pytest.raises(AgentPreflightError) as caught:
+            preflight_agent(AgentContext("opencode", "ses_parent1"), env)
+        assert caught.value.code == "session_not_found"
+        assert "could not confirm OpenCode session ses_parent1" in str(caught.value)
+
+
+@pytest.mark.matrix("T-PRE-34")
+def test_opencode_unsafe_session_id_refuses_before_any_call(
+    repo_scenario, fake_opencode
+):
+    """T-PRE-34 — IDs failing the `ses_` pattern never reach the OpenCode CLI."""
+    from agent_fork.agents import AgentContext, preflight_agent
+    from agent_fork.errors import AgentPreflightError
+
+    world, fake, env = _opencode_world(repo_scenario, fake_opencode)
+    for unsafe in ("parent1", "ses_x;rm -rf", "ses_\x1b[31m", "ses_"):
+        with pytest.raises(AgentPreflightError, match="not a valid OpenCode session"):
+            preflight_agent(AgentContext("opencode", unsafe), env)
+    assert fake.api_ops() == []
+
+
+@pytest.mark.matrix("T-PRE-35")
+def test_opencode_recipe_flag_matches_the_rendered_resume_command(
+    repo_scenario, fake_opencode
+):
+    """T-PRE-35 — the paste command's one flag is declared and probed in help."""
+    import re
+    from pathlib import Path
+
+    from agent_fork.agents import (
+        AgentContext,
+        build_launch_command,
+        help_invocation,
+        preflight_agent,
+        recipe_flags,
+    )
+
+    assert recipe_flags("opencode") == ("--session",)
+    assert help_invocation("opencode") == "opencode --help"
+    launch = build_launch_command(
+        AgentContext("opencode", "ses_parent1"),
+        worktree=Path("/tmp/wt"),
+        name="demo",
+        child_session_id="ses_child1",
+    )
+    assert launch.command == "cd /tmp/wt && opencode --session ses_child1"
+    assert launch.child_session_id == "ses_child1"
+    rendered = set(re.findall(r"(?<!\S)-{1,2}[A-Za-z][\w-]*", launch.command))
+    assert rendered == set(recipe_flags("opencode"))
+    world, fake, env = _opencode_world(
+        repo_scenario, fake_opencode, help_text="USAGE\n  opencode [flags]\n"
+    )
+    result = preflight_agent(AgentContext("opencode", "ses_parent1"), env)
+    assert any("no longer documents --session" in notice for notice in result.notices)

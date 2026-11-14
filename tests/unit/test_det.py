@@ -359,3 +359,134 @@ def test_partial_claude_plus_codex_is_ambiguous_in_auto_and_strict(repo_scenario
             with pytest.raises(AgentDetectionError, match="Claude and Codex") as caught:
                 resolve_agent_mode(mode, env)
             assert not isinstance(caught.value, AgentSignalIncompleteError)
+
+
+@pytest.mark.parametrize(
+    ("env", "status", "context", "present", "missing"),
+    [
+        pytest.param(
+            {"OPENCODE": "1", "OPENCODE_SESSION_ID": "ses_parent1"},
+            "detected",
+            ("opencode", "ses_parent1"),
+            ("OPENCODE_SESSION_ID",),
+            (),
+            id="T-DET-27",
+            marks=pytest.mark.matrix("T-DET-27"),
+        ),
+        pytest.param(
+            {"OPENCODE": "1"},
+            "absent",
+            None,
+            (),
+            (),
+            id="T-DET-28",
+            marks=pytest.mark.matrix("T-DET-28"),
+        ),
+        pytest.param(
+            {
+                "CLAUDECODE": "1",
+                "CLAUDE_CODE_SESSION_ID": "claude-parent",
+                "OPENCODE_SESSION_ID": "ses_parent1",
+            },
+            "ambiguous",
+            None,
+            ("CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID", "OPENCODE_SESSION_ID"),
+            (),
+            id="T-DET-29",
+            marks=pytest.mark.matrix("T-DET-29"),
+        ),
+    ],
+)
+def test_opencode_signal_assessment_truth_table(
+    repo_scenario, env, status, context, present, missing
+):
+    """T-DET-27..29 — OpenCode follows the Codex rule: its session ID alone detects."""
+    from agent_fork.agents import AgentContext, assess_agent_signals
+
+    repo_scenario()
+    assessment = assess_agent_signals(env)
+    expected_context = AgentContext(*context) if context is not None else None
+    assert assessment.status == status
+    assert assessment.context == expected_context
+    assert assessment.present == present
+    assert assessment.missing == missing
+
+
+@pytest.mark.matrix("T-DET-30")
+def test_opencode_with_another_agent_refuses_as_ambiguous(repo_scenario):
+    """T-DET-30 — OpenCode plus any Claude or Codex signal names every agent."""
+    from agent_fork.agents import assess_agent_signals, resolve_agent_mode
+    from agent_fork.errors import AgentDetectionError, AgentSignalIncompleteError
+
+    repo_scenario()
+    shapes = (
+        (
+            {"CODEX_THREAD_ID": "codex-parent", "OPENCODE_SESSION_ID": "ses_p"},
+            "both Codex and OpenCode signals are present",
+        ),
+        (
+            {
+                "MUSE_SESSION_ID": "01a1d375-470a-73b0-939a-6381da238f05",
+                "OPENCODE_SESSION_ID": "ses_p",
+            },
+            "both Muse and OpenCode signals are present",
+        ),
+        (
+            {"CLAUDECODE": "1", "OPENCODE_SESSION_ID": "ses_p"},
+            "Claude and OpenCode signals are present; incomplete Claude signal "
+            "is missing CLAUDE_CODE_SESSION_ID",
+        ),
+        (
+            {
+                "CLAUDECODE": "1",
+                "CLAUDE_CODE_SESSION_ID": "claude-parent",
+                "CODEX_THREAD_ID": "codex-parent",
+                "OPENCODE_SESSION_ID": "ses_p",
+            },
+            "Claude, Codex, and OpenCode signals are present",
+        ),
+    )
+    for env, diagnosis in shapes:
+        assert assess_agent_signals(env).diagnosis() == diagnosis
+        for mode in ("auto", "strict"):
+            with pytest.raises(AgentDetectionError, match=diagnosis) as caught:
+                resolve_agent_mode(mode, env)
+            assert not isinstance(caught.value, AgentSignalIncompleteError)
+    # The Claude-and-Codex wording is unchanged.
+    both = {
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "claude-parent",
+        "CODEX_THREAD_ID": "codex-parent",
+    }
+    assert (
+        assess_agent_signals(both).diagnosis()
+        == "both Claude and Codex signals are present"
+    )
+
+
+@pytest.mark.matrix("T-DET-31")
+def test_opencode_resolves_in_auto_strict_and_explicit_modes(repo_scenario):
+    """T-DET-31 — OpenCode resolves like Codex in every mode and by explicit flags."""
+    from agent_fork.agents import AgentContext, detect_agent, resolve_agent_mode
+    from agent_fork.errors import AgentDetectionError
+
+    repo_scenario()
+    env = {"OPENCODE": "1", "OPENCODE_SESSION_ID": "ses_parent1"}
+    for mode in ("auto", "strict"):
+        assert resolve_agent_mode(mode, env) == AgentContext("opencode", "ses_parent1")
+        assert resolve_agent_mode(
+            mode, {"OPENCODE_SESSION_ID": "ses_parent1"}
+        ) == AgentContext("opencode", "ses_parent1")
+    assert resolve_agent_mode("git-only", env) is None
+    assert detect_agent(
+        {"CODEX_THREAD_ID": "ambient"},
+        explicit_agent="opencode",
+        explicit_parent_session="ses_explicit",
+    ) == AgentContext("opencode", "ses_explicit")
+    assert detect_agent(env, explicit_agent="opencode") == AgentContext(
+        "opencode", "ses_parent1"
+    )
+    with pytest.raises(AgentDetectionError, match="--agent opencode requires"):
+        detect_agent({}, explicit_agent="opencode")
+    with pytest.raises(AgentDetectionError, match="claude, codex, muse, or opencode"):
+        detect_agent({}, explicit_agent="alien", explicit_parent_session="x")

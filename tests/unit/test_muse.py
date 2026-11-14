@@ -112,8 +112,8 @@ def test_explicit_muse_agent_and_parent_session(repo_scenario):
     assert from_env.parent_session_id == PARENT
     with pytest.raises(AgentDetectionError, match="--parent-session"):
         detect_agent({}, explicit_agent="muse")
-    with pytest.raises(AgentDetectionError, match="claude, codex, or muse"):
-        detect_agent({}, explicit_agent="opencode", explicit_parent_session="x")
+    with pytest.raises(AgentDetectionError, match="claude, codex, muse, or opencode"):
+        detect_agent({}, explicit_agent="alien", explicit_parent_session="x")
 
 
 # --- preflight ---------------------------------------------------------------

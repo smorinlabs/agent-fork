@@ -125,15 +125,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     fork.add_argument(
         "--agent",
-        metavar="{claude,codex,muse}",
-        help="Host agent (claude, codex, or muse); detected when omitted",
+        metavar="{claude,codex,muse,opencode}",
+        help="Host agent (claude, codex, muse, or opencode); detected when omitted",
     )
     fork.add_argument(
         "--parent-session",
         metavar="ID_OR_NAME",
         help=(
-            "Parent session/thread UUID or renamed Codex session name; "
-            "detected when omitted"
+            "Parent session/thread ID (Claude or Codex UUID, OpenCode ses_ ID) "
+            "or renamed Codex session name; detected when omitted"
         ),
     )
     agent_mode = fork.add_mutually_exclusive_group()
@@ -270,7 +270,9 @@ def _parser() -> argparse.ArgumentParser:
     session_validate = session_actions.add_parser(
         "validate", allow_abbrev=False, help="Assert detected session facts"
     )
-    session_validate.add_argument("--agent", choices=("claude", "codex", "muse"))
+    session_validate.add_argument(
+        "--agent", choices=("claude", "codex", "muse", "opencode")
+    )
     session_validate.add_argument("--session-id", metavar="ID")
     session_validate.add_argument("--parent-session-id", metavar="ID")
     parent_assertion = session_validate.add_mutually_exclusive_group()
@@ -490,6 +492,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     from agent_fork.agents import (
         LaunchCommand,
         build_launch_command,
+        build_opencode_dry_run_command,
         preflight_agent,
         preflight_git,
         resolve_agent_mode,
@@ -664,6 +667,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
             "claude": config.claude_extra_args,
             "codex": config.codex_extra_args,
             "muse": config.muse_extra_args,
+            "opencode": config.opencode_extra_args,
         }[context.agent]
         if context is not None
         else ()
@@ -676,10 +680,17 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
                 context,
                 environment,
                 codex_session_name_resolution=config.codex_session_name_resolution,
+                start_service=False,
             )
             context = agent_check.context or context
-            launch = build_launch_command(
-                context, worktree=destination, name=name, extra_args=extra_args
+            launch = (
+                build_opencode_dry_run_command(
+                    destination=destination, extra_args=extra_args
+                )
+                if context.agent == "opencode"
+                else build_launch_command(
+                    context, worktree=destination, name=name, extra_args=extra_args
+                )
             )
         else:
             launch = LaunchCommand(f"cd {shlex.quote(str(destination))}", None, ())
@@ -1740,6 +1751,7 @@ def main(argv: list[str] | None = None) -> int:
                             ),
                         },
                         "muse": {"extra_args": list(resolved.muse_extra_args)},
+                        "opencode": {"extra_args": list(resolved.opencode_extra_args)},
                     },
                 }
                 output_kind = args.output

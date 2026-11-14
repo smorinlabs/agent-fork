@@ -6,7 +6,7 @@ summary; this page carries the complete semantics.
 
 ## Inspection
 
-Use the same interface inside Claude Code or Codex:
+Use the same interface inside Claude Code, Codex, or OpenCode:
 
 ```bash
 agent-fork session
@@ -23,8 +23,8 @@ branch or detached state, remote/default-branch candidates, default membership,
 linked/bare topology, and clean/staged/unstaged/untracked/unmerged/operation
 status. A bare repository has null working-tree status. Outside Git—or when Git
 context is unavailable—the session evidence remains usable and `repository` is
-null. Inspection also reports `fork_command`: one detected Claude Code or Codex
-identity produces a shell-quoted native command using the resolved invocation
+null. Inspection also reports `fork_command`: one detected Claude Code, Codex, or
+OpenCode identity produces a shell-quoted native command using the resolved invocation
 directory. Claude receives a fresh, single-use child UUID. No identity,
 ambiguous identity, or terminal-unsafe identity/path data produces an explicit
 unavailable status and a null command. Inspection succeeds with `not_detected`
@@ -40,7 +40,9 @@ Machine output always includes an additive `agent_signal` object:
 `present` and `missing` contain only supported environment variable names,
 never their session or thread values. Either half of the Claude tuple by
 itself is incomplete. Any Claude value together with `CODEX_THREAD_ID` is
-ambiguous, including a partial Claude tuple. This assessment describes the
+ambiguous, including a partial Claude tuple. `OPENCODE_SESSION_ID` alone
+detects OpenCode (`OPENCODE=1` alone is `absent`); together with any Claude or
+Codex value it is ambiguous. This assessment describes the
 environment shape; it does not prove that the reported session exists.
 
 Incomplete inspection remains observational and exits 0. It reports no
@@ -55,7 +57,12 @@ The native session commands have these shapes:
 ```text
 cd '<resolved-directory>' && claude --session-id '<fresh-child-uuid>' --resume '<current-session-id>' --fork-session
 codex fork '<current-thread-id>' -C '<resolved-directory>'
+cd '<resolved-directory>' && child=$(opencode api session.fork --param sessionID=<current-session-id> -d '{}' | sed -n '…') && [ -n "$child" ] && opencode --session "$child"
 ```
+
+OpenCode has no command that forks and opens a session without first running
+a model turn, so its line forks through `opencode api` and then opens the
+child; the `[ -n "$child" ]` guard stops it when no child ID came back.
 
 `available` means the command was constructible from ambient identity; it does
 not run native CLI preflight. Use `agent-fork fork` when you need the supported
@@ -75,7 +82,11 @@ Parent means parent evidence, not proof that a transcript still exists. Codex
 name and parent evidence comes from its bounded local app-server. Agent
 Fork-created Claude children retain a prompt-free XDG provenance claim because
 Claude transcripts do not preserve the source session UUID. Missing evidence
-is not proof that a session was never forked. Inspection makes no network calls
+is not proof that a session was never forked. OpenCode name and parent
+evidence comes from `opencode api session.get` (`title`, `fork.sessionID`), a
+local call to OpenCode's background service; inspection first runs
+`opencode service status` and never starts a stopped service, reporting
+`lineage.status: unavailable` instead. Inspection makes no network calls
 and does not modify agent or repository state.
 
 A Codex app-server `thread/read` error is unavailable evidence, not a successful
