@@ -101,3 +101,40 @@ def test_fork_into_records_the_child_for_the_caller(tmp_path, fake_opencode):
     with pytest.raises(opencode_api.OpencodeApiError):
         opencode_api.fork_into(binary, "ses_parent1", target, env, created=stuck)
     assert len(stuck) == 1
+
+
+@pytest.mark.matrix("T-RBK-24")
+def test_fork_into_stops_the_turn_the_move_starts(tmp_path, fake_opencode, monkeypatch):
+    """T-RBK-24 — OpenCode 2.3.0 starts a turn in a child once it is moved, so
+    fork_into interrupts it (resume=true keeps the move); it retries once when
+    nothing was running yet, and a failed interrupt keeps the fork with a notice."""
+    import agent_fork.opencode_api as opencode_api
+
+    monkeypatch.setattr(opencode_api, "OPENCODE_INTERRUPT_RETRY_DELAY", 0)
+    fake, binary, target, env = _client(tmp_path, fake_opencode)
+    child = opencode_api.fork_into(binary, "ses_parent1", target, env)
+    ops = [call[1] for call in fake.calls() if call[:1] == ["api"]]
+    assert ops == ["session.fork", "session.move", "session.interrupt"]
+    interrupt = [call for call in fake.calls() if call[1:2] == ["session.interrupt"]][0]
+    assert interrupt == [
+        "api",
+        "session.interrupt",
+        "--param",
+        f"sessionID={child}",
+        "--param",
+        "resume=true",
+    ]
+
+    fake.update(interrupts=[False, True])
+    before = len(fake.api_ops())
+    opencode_api.fork_into(binary, "ses_parent1", target, env)
+    assert fake.api_ops()[before:].count("session.interrupt") == 2
+
+    fake.update(
+        interrupts=[True],
+        fail={"session.interrupt": {"code": 1, "stderr": "HTTP 500\n"}},
+    )
+    notices: list[str] = []
+    kept = opencode_api.fork_into(binary, "ses_parent1", target, env, notices=notices)
+    assert kept in fake.state()["sessions"]
+    assert any("could not stop" in notice and kept in notice for notice in notices)

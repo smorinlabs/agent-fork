@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from agent_fork.errors import AgentForkError
 from agent_fork.text import escape_terminal_text
 
 OPENCODE_API_TIMEOUT = 30.0
+# A retried interrupt waits this long for a turn that had not started yet.
+OPENCODE_INTERRUPT_RETRY_DELAY = 0.5
 _HTTP_STATUS = re.compile(r"^HTTP [1-5][0-9][0-9]\b", re.MULTILINE)
 # Read-only lookups (the session report) wait less than the fork path does.
 OPENCODE_LOOKUP_TIMEOUT = 5.0
@@ -49,14 +52,19 @@ def call(
     body: Mapping[str, object] | None = None,
     timeout: float | None = None,
     require_data: bool = True,
+    params: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Run one session operation and return its `data` object.
 
     `require_data=False` is for operations whose reply is never read (move,
-    remove): any successful reply is accepted and `{}` returned.
+    remove, interrupt): any successful reply is accepted, and its top-level
+    object is returned when it parses, else `{}`. `params` adds query
+    parameters after `sessionID`.
     """
     limit = OPENCODE_API_TIMEOUT if timeout is None else timeout
     argv = [binary, "api", operation, "--param", f"sessionID={session_id}"]
+    for key, value in (params or {}).items():
+        argv += ["--param", f"{key}={value}"]
     if body is not None:
         argv += ["-d", json.dumps(body)]
     try:
@@ -87,7 +95,13 @@ def call(
             uncertain=_HTTP_STATUS.search(f"{completed.stdout}\n{completed.stderr}")
             is None,
         )
-    if not require_data or not completed.stdout.strip():
+    if not require_data:
+        try:
+            document = json.loads(completed.stdout)
+        except ValueError:
+            return {}
+        return document if isinstance(document, dict) else {}
+    if not completed.stdout.strip():
         return {}
     try:
         document = json.loads(completed.stdout)
@@ -126,6 +140,7 @@ def fork_into(
     env: Mapping[str, str],
     *,
     created: list[str] | None = None,
+    notices: list[str] | None = None,
 ) -> str:
     """Fork `parent_id` and move the child into `directory`; return the child ID.
 
@@ -138,6 +153,11 @@ def fork_into(
     `created`, when given, holds the child from the moment its ID is known
     until this function deletes it, so a caller interrupted after the return
     can still find and delete it.
+
+    OpenCode 2.3.0 starts a turn in a child once it is moved (it adds a
+    fork notice and continues), so the child's turn is interrupted with
+    `resume=true`, which still applies the queued move. A failed interrupt
+    keeps the fork and adds a notice to `notices`.
     """
     try:
         data = call(binary, "session.fork", parent_id, env, body={})
@@ -186,7 +206,34 @@ def fork_into(
         if _remove_child(binary, child, env) is None:
             _forget(created, child)
         raise
+    _stop_child_turn(binary, child, env, notices)
     return child
+
+
+def _stop_child_turn(
+    binary: str, child: str, env: Mapping[str, str], notices: list[str] | None
+) -> None:
+    """Interrupt the turn a move starts; retry once if it had not started."""
+    for attempt in range(2):
+        try:
+            reply = call(
+                binary,
+                "session.interrupt",
+                child,
+                env,
+                params={"resume": "true"},
+                require_data=False,
+            )
+        except OpencodeApiError as error:
+            if notices is not None:
+                notices.append(
+                    f"could not stop the forked OpenCode session {child}'s "
+                    f"carried-over turn: {error}"
+                )
+            return
+        if reply.get("interrupted") is True or attempt == 1:
+            return
+        time.sleep(OPENCODE_INTERRUPT_RETRY_DELAY)
 
 
 def _forget(created: list[str] | None, child: str) -> None:

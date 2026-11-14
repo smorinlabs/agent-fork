@@ -379,6 +379,7 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                     creation.path,
                     env,
                     created=forked_child,
+                    notices=notices,
                 )
                 # Returning inside the try keeps an interrupt that lands after
                 # the fork, but before `finish` returns, inside this scope.

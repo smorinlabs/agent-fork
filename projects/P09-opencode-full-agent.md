@@ -240,6 +240,18 @@ fake `opencode` executable, never the real service.
       ran in the parent's directory. The live child ran only read-only
       checks and then asked before re-running the fork. Forks of an idle
       session, and a child ending on an unanswered prompt, start no turn.
+      Owner decision (2026-11-13): option A, interrupt the child. Probes on
+      2.3.0 showed the trigger is `session.move`, not the fork: any fork
+      followed by a move starts a fork-notice turn, even when the child's
+      history ends on a completed exchange (so forking `before` the turn
+      does not help). Fix: `fork_into` calls `session.interrupt` with
+      `resume=true` right after the move (the queued move still applies),
+      retrying once if nothing was running yet; a failed interrupt keeps the
+      fork with a notice (T-RBK-24). Verified live through `agent-fork fork`
+      run mid-turn: the carried-over step was interrupted 115 ms after it
+      started, with no tokens, and the child ended idle in the worktree.
+      Unprotected probe children had re-run the probe's fork script, which
+      is the harm this prevents. All probe sessions and directories deleted.
 - [x] [P09-T08] Adversarial review gate including Codex; fix findings.
       Round 1 (2026-11-13): Codex (7 findings) and a Fable whole-branch
       review (6 medium, 4 low). Fixed: dry run never starts a stopped

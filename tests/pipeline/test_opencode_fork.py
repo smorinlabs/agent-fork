@@ -46,7 +46,12 @@ def test_opencode_fork_runs_last_and_prints_the_child_resume_command(
     worktree = request.destination.resolve()
     assert result.launch.command == f"cd {worktree} && opencode --session ses_child1"
     assert result.launch.child_session_id == "ses_child1"
-    assert fake.api_ops() == ["session.get", "session.fork", "session.move"]
+    assert fake.api_ops() == [
+        "session.get",
+        "session.fork",
+        "session.move",
+        "session.interrupt",
+    ]
     sessions = fake.state()["sessions"]
     assert sessions["ses_child1"]["directory"] == str(worktree)
     assert sessions["ses_child1"]["parent"] == "ses_parent1"

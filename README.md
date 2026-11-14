@@ -640,6 +640,13 @@ step of the pipeline:
    times out or gets no readable answer may still have created a child whose
    ID was never returned; the error says so. An interrupt during the fork
    call can leave one too, and carries no such hint.
+   OpenCode 2.3.0 starts a turn in a child as soon as it is moved: it adds
+   its own fork notice and the model keeps working, before you open the
+   child. So `agent-fork` immediately interrupts that turn
+   (`session.interrupt` with `resume=true`, which still applies the move),
+   and the child waits for you, as Claude Code and Codex forks do. The
+   child's history keeps OpenCode's fork notice and one empty interrupted
+   step. If the interrupt fails, the fork is kept and a notice says so.
 4. The printed command opens the child there:
    `cd '<worktree>' && opencode --session <child-session-id>`.
 
