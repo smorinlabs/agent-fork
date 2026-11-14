@@ -24,6 +24,7 @@ class ConfigValues:
     claude_extra_args: tuple[str, ...] | None = None
     codex_extra_args: tuple[str, ...] | None = None
     codex_session_name_resolution: bool | None = None
+    opencode_extra_args: tuple[str, ...] | None = None
     setup_hook_policy: str | None = None
     setup_hook_timeout: int | None = None
 
@@ -48,6 +49,7 @@ class ResolvedConfig:
     codex_session_name_resolution: bool
     setup_hook_policy: str
     setup_hook_timeout: int
+    opencode_extra_args: tuple[str, ...] = ()
 
     @property
     def mode(self) -> str:

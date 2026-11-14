@@ -120,8 +120,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     fork.add_argument(
         "--agent",
-        metavar="{claude,codex}",
-        help="Host agent (claude or codex); detected when omitted",
+        metavar="{claude,codex,opencode}",
+        help="Host agent (claude, codex, or opencode); detected when omitted",
     )
     fork.add_argument(
         "--parent-session",
@@ -265,7 +265,7 @@ def _parser() -> argparse.ArgumentParser:
     session_validate = session_actions.add_parser(
         "validate", allow_abbrev=False, help="Assert detected session facts"
     )
-    session_validate.add_argument("--agent", choices=("claude", "codex"))
+    session_validate.add_argument("--agent", choices=("claude", "codex", "opencode"))
     session_validate.add_argument("--session-id", metavar="ID")
     session_validate.add_argument("--parent-session-id", metavar="ID")
     parent_assertion = session_validate.add_mutually_exclusive_group()
@@ -475,6 +475,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
     from agent_fork.agents import (
         LaunchCommand,
         build_launch_command,
+        build_opencode_dry_run_command,
         preflight_agent,
         preflight_git,
         resolve_agent_mode,
@@ -648,6 +649,8 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
         config.claude_extra_args
         if context is not None and context.agent == "claude"
         else config.codex_extra_args
+        if context is not None and context.agent == "codex"
+        else config.opencode_extra_args
         if context is not None
         else ()
     )
@@ -661,8 +664,14 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
                 codex_session_name_resolution=config.codex_session_name_resolution,
             )
             context = agent_check.context or context
-            launch = build_launch_command(
-                context, worktree=destination, name=name, extra_args=extra_args
+            launch = (
+                build_opencode_dry_run_command(
+                    destination=destination, extra_args=extra_args
+                )
+                if context.agent == "opencode"
+                else build_launch_command(
+                    context, worktree=destination, name=name, extra_args=extra_args
+                )
             )
         else:
             launch = LaunchCommand(f"cd {shlex.quote(str(destination))}", None, ())
@@ -1691,6 +1700,7 @@ def main(argv: list[str] | None = None) -> int:
                                 resolved.codex_session_name_resolution
                             ),
                         },
+                        "opencode": {"extra_args": list(resolved.opencode_extra_args)},
                     },
                 }
                 output_kind = args.output

@@ -210,6 +210,13 @@ KEY_SPECS: tuple[KeySpec, ...] = (
         settable=False,
     ),
     KeySpec(
+        "agents.opencode.extra_args",
+        "opencode_extra_args",
+        "agents.opencode",
+        "string-array",
+        settable=False,
+    ),
+    KeySpec(
         "agents.codex.session_name_resolution",
         "codex_session_name_resolution",
         "agents.codex",
@@ -405,6 +412,7 @@ def resolve_config(
     config_path: Path | None = None
     claude_extra_args: tuple[str, ...] = ()
     codex_extra_args: tuple[str, ...] = ()
+    opencode_extra_args: tuple[str, ...] = ()
     codex_session_name_resolution = True
 
     for source, label in zip(ordered, labels, strict=True):
@@ -463,6 +471,8 @@ def resolve_config(
             claude_extra_args = source.claude_extra_args
         if source.codex_extra_args is not None:
             codex_extra_args = source.codex_extra_args
+        if source.opencode_extra_args is not None:
+            opencode_extra_args = source.opencode_extra_args
         if source.codex_session_name_resolution is not None:
             codex_session_name_resolution = source.codex_session_name_resolution
 
@@ -480,6 +490,7 @@ def resolve_config(
         config_path=config_path,
         claude_extra_args=claude_extra_args,
         codex_extra_args=codex_extra_args,
+        opencode_extra_args=opencode_extra_args,
         codex_session_name_resolution=codex_session_name_resolution,
         setup_hook_policy=setup_hook_policy,
         setup_hook_timeout=setup_hook_timeout,
@@ -538,7 +549,7 @@ def load_config(path: Path) -> ConfigValues:
     agents = document.get("agents", {})
     if not isinstance(agents, dict):
         raise ConfigError(f"invalid config {path}: [agents] must be a table")
-    unknown_agents = set(agents) - {"claude", "codex"}
+    unknown_agents = set(agents) - {"claude", "codex", "opencode"}
     if unknown_agents:
         raise ConfigError(
             f"invalid config {path}: unknown agent {sorted(unknown_agents)[0]}"
@@ -775,6 +786,7 @@ def set_user_value(path: Path, key: str, value: str) -> None:
     for agent, extra_args in (
         ("claude", existing.claude_extra_args),
         ("codex", existing.codex_extra_args),
+        ("opencode", existing.opencode_extra_args),
     ):
         if extra_args is None and not (
             agent == "codex" and existing.codex_session_name_resolution is not None

@@ -781,6 +781,10 @@ Varying axes: none of the shared four vary (baseline pinned); the unknown `--age
 | T-CLI-68 | A5 — `fork --strict` is a false-default CLI-only boolean that parses and appears in help; no configuration or environment precedence surface is introduced | baseline | C | live | P02 A5 design; R3.3; R3.6 |
 | T-CLI-69 | Gate-6 finding 3 — dry-run's own unstaged count hardcoded `--ignore-submodules=dirty` unconditionally, undercounting a submodule under the tool's own `with_submodules` default | baseline | F | live | gate-6 finding 3 |
 | T-CLI-70 | Gate-6 round 2 finding 4 (second half) — the dry-run preview's own staged/unstaged count args need the same explicit `--ignore-submodules=none` flag `collect_inventory`/`materialize` gained, or a `submodule.<name>.ignore` local config makes the preview undercount what the real fork correctly carries | baseline | F | live | gate-6 round 2 finding 4 |
+| T-CLI-71 | `fork --agent` and `session validate --agent` accept `opencode`, and fork help names all three agents | agent=opencode | C | live | P09 |
+| T-CLI-72 | an OpenCode `fork --dry-run` confirms the parent (`session.get`) but never forks it, and previews `opencode --session <forked session ID>` | agent=opencode | C | live | P09 |
+| T-CLI-73 | `[agents.opencode] extra_args` reach the OpenCode paste command and survive `config set`; the Codex table never applies to OpenCode | agent=opencode | C | live | P09 |
+| T-CLI-74 | doctor reports an OpenCode CLI row with no minimum and its `--session` recipe flag; the row is optional unless an OpenCode signal is present | agent=opencode | C | live | P09 |
 
 ---
 

@@ -634,6 +634,24 @@ def build_launch_command(
     return LaunchCommand(command, child, extra_args)
 
 
+def build_opencode_dry_run_command(
+    *, destination: Path, extra_args: tuple[str, ...] = ()
+) -> LaunchCommand:
+    """The OpenCode paste command a dry run previews: the child does not exist
+    until the real fork's last step creates it, so its ID is a placeholder."""
+    values = [str(destination), *extra_args]
+    if not all(_terminal_safe(value) for value in values):
+        raise UnsafeCommandInputError(
+            "session identity or directory contains terminal-unsafe controls"
+        )
+    suffix = "".join(f" {shlex.quote(value)}" for value in extra_args)
+    command = (
+        f"cd {shlex.quote(str(destination))} && opencode --session "
+        f"<forked session ID>{suffix}"
+    )
+    return LaunchCommand(command, None, extra_args)
+
+
 def build_session_fork_command(
     context: AgentContext,
     *,

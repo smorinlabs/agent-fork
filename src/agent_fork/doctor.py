@@ -44,7 +44,7 @@ def _recipe_flag_check(env: Mapping[str, str], selected: str) -> DoctorCheck:
     name = "agent recipe flags"
     details: list[str] = []
     drifted = False
-    for agent in ("claude", "codex"):
+    for agent in ("claude", "codex", "opencode"):
         binary = shutil.which(agent, path=env.get("PATH"))
         if binary is None:
             details.append(f"{agent}: not installed (skipped)")
@@ -66,12 +66,14 @@ def _recipe_flag_check(env: Mapping[str, str], selected: str) -> DoctorCheck:
 def _version_check(
     name: str,
     executable: str | None,
-    floor: tuple[int, int, int],
+    floor: tuple[int, int, int] | None,
     env: Mapping[str, str],
 ) -> DoctorCheck:
-    minimum = ".".join(map(str, floor))
+    """`floor=None` means no minimum version: any readable version passes."""
+    minimum = ".".join(map(str, floor)) if floor is not None else None
     if executable is None:
-        return DoctorCheck(name, False, f"missing; requires >= {minimum}")
+        requirement = f"requires >= {minimum}" if minimum else "no minimum"
+        return DoctorCheck(name, False, f"missing; {requirement}")
     completed = subprocess.run(
         [executable, "--version"], env=dict(env), capture_output=True, text=True
     )
@@ -82,8 +84,9 @@ def _version_check(
         return DoctorCheck(name, False, f"unreadable version: {output}")
     return DoctorCheck(
         name,
-        completed.returncode == 0 and version >= floor,
-        f"{'.'.join(map(str, version))} (minimum {minimum})",
+        completed.returncode == 0 and (floor is None or version >= floor),
+        f"{'.'.join(map(str, version))} "
+        + (f"(minimum {minimum})" if minimum else "(no minimum)"),
     )
 
 
@@ -204,6 +207,9 @@ def run_doctor(
         CODEX_ENV_MIN,
         env,
     )
+    opencode = _version_check(
+        "OpenCode CLI", shutil.which("opencode", path=env.get("PATH")), None, env
+    )
     hook_policy: str | None = None
     hook_timeout = 0
     try:
@@ -263,8 +269,14 @@ def run_doctor(
     elif assessment.status != "ambiguous":
         if selected == "claude":
             codex = optional(codex)
-        else:
+        elif selected == "codex":
             claude = optional(claude)
+        else:
+            claude, codex = optional(claude), optional(codex)
+    # OpenCode is required only when an OpenCode signal is in play, so a
+    # Claude or Codex user without OpenCode installed still passes.
+    if "OPENCODE_SESSION_ID" not in assessment.present or selected_mode == "git-only":
+        opencode = optional(opencode)
     state = Path(
         env.get(
             "XDG_STATE_HOME",
@@ -292,6 +304,7 @@ def run_doctor(
         git,
         claude,
         codex,
+        opencode,
         recipes,
         signals,
         config,

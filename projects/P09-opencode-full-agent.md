@@ -178,7 +178,7 @@ fake `opencode` executable, never the real service.
       `{path: null, exists: false}`; name and parent from `session.get`, and
       `unavailable` plus a notice when it fails; `message_route` unchanged
       (T-SES-58…)
-- [ ] [P09-TS05] RED: CLI and doctor. `fork --agent opencode` and
+- [x] [P09-TS05] RED: CLI and doctor. `fork --agent opencode` and
       `session validate --agent opencode` accepted, help text names OpenCode;
       doctor reports the OpenCode version and its `--session` flag (T-CLI-71…)
 - [x] [P09-T01] GREEN: `AgentName` gains `opencode`; `assess_agent_signals`
@@ -187,7 +187,7 @@ fake `opencode` executable, never the real service.
 - [x] [P09-T03] GREEN: last-step fork in `pipeline.fork` with child deletion
       on a failed move
 - [x] [P09-T04] GREEN: session report commands, transcript, name and lineage
-- [ ] [P09-T05] GREEN: CLI choices, help, and doctor checks
+- [x] [P09-T05] GREEN: CLI choices, help, and doctor checks
 - [ ] [P09-T06] Version bump to 1.5.0; TEST-MATRIX rows and the `agent` axis;
       `just check-matrix`
 - [ ] [P09-T07] README (OpenCode as an agent, fork and resume rows) and the

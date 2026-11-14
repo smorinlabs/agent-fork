@@ -434,7 +434,7 @@ def test_help_documents_commands_options_and_exit_codes(repo_scenario):
     fork = run_cli(["help", "fork"], world.env, world.parent_path)
     for text in (
         b"Fork identity; derived from the current branch",
-        b"Host agent (claude or codex); detected",
+        b"Host agent (claude, codex, or opencode); detected",
         b"Preview every planned local mutation",
         b"Replace only the derived worktree parent directory",
     ):
@@ -872,7 +872,7 @@ def test_semantic_metavars_and_config_help_order(repo_scenario):
     fork = run_cli(["help", "fork"], world.env, world.parent_path).stdout
     for token in (
         b"[NAME]",
-        b"--agent {claude,codex}",
+        b"--agent {claude,codex,opencode}",
         b"--parent-session ID_OR_NAME",
         b"--worktree-base-dir DIRECTORY",
         b"--worktree-name COMPONENT",
