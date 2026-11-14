@@ -2,7 +2,8 @@
 
 `opencode api` exits 1 on any HTTP error and when the service is unreachable,
 so the exit status is trusted; a missing session is told apart by OpenCode's
-`SessionNotFoundError` tag.
+`SessionNotFoundError` tag. When the service is stopped, `opencode api`
+starts it, so read-only callers check `service_running` first.
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ from agent_fork.errors import AgentForkError
 from agent_fork.text import escape_terminal_text
 
 OPENCODE_API_TIMEOUT = 30.0
+# Read-only lookups (the session report) wait less than the fork path does.
+OPENCODE_LOOKUP_TIMEOUT = 5.0
 
 
 class OpencodeApiError(AgentForkError):
@@ -35,8 +38,10 @@ def call(
     env: Mapping[str, str],
     *,
     body: Mapping[str, object] | None = None,
+    timeout: float | None = None,
 ) -> dict[str, object]:
     """Run one session operation and return its `data` object ({} when empty)."""
+    limit = OPENCODE_API_TIMEOUT if timeout is None else timeout
     argv = [binary, "api", operation, "--param", f"sessionID={session_id}"]
     if body is not None:
         argv += ["-d", json.dumps(body)]
@@ -46,11 +51,11 @@ def call(
             env=dict(env),
             capture_output=True,
             text=True,
-            timeout=OPENCODE_API_TIMEOUT,
+            timeout=limit,
         )
     except subprocess.TimeoutExpired as error:
         raise OpencodeApiError(
-            f"`opencode api {operation}` timed out after {OPENCODE_API_TIMEOUT:g}s"
+            f"`opencode api {operation}` timed out after {limit:g}s"
         ) from error
     except (OSError, UnicodeDecodeError) as error:
         raise OpencodeApiError(f"`opencode api {operation}` failed: {error}") from error
@@ -73,6 +78,21 @@ def call(
     if not isinstance(data, dict):
         raise OpencodeApiError(f"`opencode api {operation}` returned no data object")
     return data
+
+
+def service_running(binary: str, env: Mapping[str, str]) -> bool:
+    """Whether OpenCode's background service runs; never starts it."""
+    try:
+        completed = subprocess.run(
+            [binary, "service", "status"],
+            env=dict(env),
+            capture_output=True,
+            text=True,
+            timeout=OPENCODE_LOOKUP_TIMEOUT,
+        )
+    except (OSError, UnicodeDecodeError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0 and completed.stdout.startswith("http")
 
 
 def fork_into(

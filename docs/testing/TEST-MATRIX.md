@@ -850,6 +850,10 @@ Varying axes: agent (Claude/Codex), session evidence (none/current/parent), and 
 | T-SES-55 | the Muse route name comes from `muse sessions --json` by `sessionId`; absent, malformed, failing, and slow (timeout) listings leave it null without changing the route | agent=muse | U | live | P07 |
 | T-SES-56 | CLI `--json` reports `message_route` and human output prints `message route:` with the exact command or address (Muse: address only), `message route name:` escaped, and `unavailable (<status>)` otherwise | baseline | C | live | P07; CLI R7.2 |
 | T-SES-57 | `document()` includes the additive `message_route` object with all seven fields | baseline | U | live | P07 |
+| T-SES-58 | an OpenCode session report fills `agent`, the one-line API `fork_command` with its empty-ID guard, and `resume_command`; `transcript` is `{path: null, exists: false}`; `messaging` and `message_route` are unchanged | agent=opencode | U | live | P09 |
+| T-SES-59 | OpenCode name and parent come from `opencode api session.get` (`title`, `fork.sessionID`), as Codex reads its app server; no fork evidence is lineage `not_found` | agent=opencode | U | live | P09 |
+| T-SES-60 | a stopped OpenCode service is never started (no `opencode api` call); unreachable, malformed, slow, and missing-CLI lookups are `unavailable` with a notice; an unknown session is `not_found` | agent=opencode | U | live | P09 |
+| T-SES-61 | an OpenCode session ID outside `ses_` plus letters and digits makes both commands `unsafe_input` and reaches no OpenCode call | agent=opencode | U | live | P09 |
 
 ---
 

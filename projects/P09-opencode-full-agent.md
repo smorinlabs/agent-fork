@@ -173,7 +173,7 @@ fake `opencode` executable, never the real service.
       is `cd <wt> && opencode --session <child>`; a failed `session.fork`
       rolls the worktree back; a failed `session.move` deletes the child and
       rolls the worktree back (T-RBK-17…, T-EMT-14…)
-- [ ] [P09-TS04] RED: session report. `fork_command` is the one-line API fork
+- [x] [P09-TS04] RED: session report. `fork_command` is the one-line API fork
       with the `[ -n "$child" ]` guard; `resume_command`; `transcript` is
       `{path: null, exists: false}`; name and parent from `session.get`, and
       `unavailable` plus a notice when it fails; `message_route` unchanged
@@ -186,7 +186,7 @@ fake `opencode` executable, never the real service.
 - [x] [P09-T02] GREEN: OpenCode branch in `preflight_agent`
 - [x] [P09-T03] GREEN: last-step fork in `pipeline.fork` with child deletion
       on a failed move
-- [ ] [P09-T04] GREEN: session report commands, transcript, name and lineage
+- [x] [P09-T04] GREEN: session report commands, transcript, name and lineage
 - [ ] [P09-T05] GREEN: CLI choices, help, and doctor checks
 - [ ] [P09-T06] Version bump to 1.5.0; TEST-MATRIX rows and the `agent` axis;
       `just check-matrix`

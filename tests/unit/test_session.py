@@ -1190,7 +1190,7 @@ def test_message_route_covers_each_tool_and_mixed_signals(repo_scenario, monkeyp
         session_module.shutil,
         "which",
         lambda name, path=None: (
-            None if name == "codex" else original_which(name, path=path)
+            None if name in {"codex", "opencode"} else original_which(name, path=path)
         ),
     )
     no_muse = _fake_muse(world.parent_path.parent / "bin-none", "exit 1")
@@ -1346,3 +1346,156 @@ def test_document_includes_message_route(repo_scenario):
         "command": None,
         "message_via": None,
     }
+
+
+def _opencode_session(repo_scenario, fake_opencode, sessions=None, **build):
+    from agent_fork.session import inspect_session
+
+    world = repo_scenario()
+    fake = fake_opencode(
+        sessions
+        if sessions is not None
+        else {"ses_current1": {"title": "Work", "directory": str(world.parent_path)}},
+        **build,
+    )
+    env = {**fake.path_env(world.env), "OPENCODE": "1"}
+
+    def inspect(session_id="ses_current1", **extra):
+        return inspect_session(
+            {**env, "OPENCODE_SESSION_ID": session_id, **extra}, cwd=world.parent_path
+        )
+
+    return world, fake, inspect
+
+
+@pytest.mark.matrix("T-SES-58")
+def test_opencode_session_report_maps_fork_resume_and_transcript(
+    repo_scenario, fake_opencode
+):
+    """T-SES-58 — OpenCode fills the same report fields as Claude and Codex."""
+    world, fake, inspect = _opencode_session(repo_scenario, fake_opencode)
+    report = inspect()
+    directory = world.parent_path.resolve()
+    assert report.agent == "opencode"
+    assert report.fork_command.status == "available"
+    assert report.fork_command.command == (
+        f"cd {directory} && child=$(opencode api session.fork --param "
+        "sessionID=ses_current1 -d '{}' | sed -n "
+        """'s/^{"data":{"id":"\\(ses_[A-Za-z0-9]*\\)".*/\\1/p') """
+        '&& [ -n "$child" ] && opencode --session "$child"'
+    )
+    assert report.fork_command.child_session_id is None
+    assert report.resume_command.status == "available"
+    assert report.resume_command.command == (
+        f"cd {directory} && opencode --session ses_current1"
+    )
+    assert report.transcript.document() == {"path": None, "exists": False}
+    assert report.messaging.status == "not_applicable"
+    route = report.message_route
+    assert (route.agent, route.status, route.address, route.command) == (
+        "opencode",
+        "address_only",
+        "ses_current1",
+        None,
+    )
+    assert report.document()["agent"] == "opencode"
+
+
+@pytest.mark.matrix("T-SES-59")
+def test_opencode_name_and_parent_come_from_session_get(repo_scenario, fake_opencode):
+    """T-SES-59 — like Codex's app server: title is the name, fork is the parent."""
+    world, fake, inspect = _opencode_session(
+        repo_scenario,
+        fake_opencode,
+        {
+            "ses_root1": {"title": "Root", "directory": "/tmp"},
+            "ses_current1": {
+                "title": "Work (fork #1)",
+                "directory": "/tmp",
+                "parent": "ses_root1",
+            },
+        },
+    )
+    report = inspect()
+    current = report.current_session.document()
+    assert (current["id"], current["id_source"]) == (
+        "ses_current1",
+        "OPENCODE_SESSION_ID",
+    )
+    assert (current["name"], current["name_status"], current["name_source"]) == (
+        "Work (fork #1)",
+        "resolved",
+        "opencode-api",
+    )
+    parent = report.parent_session.document()
+    assert (parent["id"], parent["id_status"], parent["name"]) == (
+        "ses_root1",
+        "resolved",
+        "Root",
+    )
+    assert report.lineage_status == "resolved"
+    assert fake.api_ops() == ["session.get", "session.get"]
+
+    root = inspect("ses_root1")
+    assert root.parent_session is None
+    assert root.lineage_status == "not_found"
+    assert root.current_session.name == "Root"
+
+
+@pytest.mark.matrix("T-SES-60")
+def test_opencode_lookup_failures_report_unavailable_without_mutation(
+    repo_scenario, fake_opencode, monkeypatch
+):
+    """T-SES-60 — a stopped service is never started; failures are unavailable."""
+    import agent_fork.opencode_api as opencode_api
+
+    world, fake, inspect = _opencode_session(
+        repo_scenario, fake_opencode, service="stopped"
+    )
+    stopped = inspect()
+    assert fake.api_ops() == []
+    assert stopped.current_session.name_status == "unavailable"
+    assert stopped.lineage_status == "unavailable"
+    assert any("service is not running" in notice for notice in stopped.notices)
+    assert stopped.fork_command.status == "available"
+
+    fake.update(service="http://127.0.0.1:49374")
+    monkeypatch.setattr(opencode_api, "OPENCODE_LOOKUP_TIMEOUT", 1)
+    for failure in (
+        {"code": 1, "stderr": "Error: Could not reach server"},
+        {"code": 0, "stdout": "not json"},
+        {"code": 0, "sleep": 5},
+    ):
+        fake.update(fail={"session.get": failure})
+        report = inspect()
+        assert report.current_session.name_status == "unavailable"
+        assert report.lineage_status == "unavailable"
+        assert any("session.get" in notice for notice in report.notices)
+
+    fake.update(fail={})
+    missing = inspect("ses_gone1")
+    assert missing.current_session.name_status == "not_found"
+    assert missing.lineage_status == "not_found"
+
+    real_which = __import__("shutil").which
+    monkeypatch.setattr(
+        "agent_fork.session.shutil.which",
+        lambda name, path=None: (
+            None if name == "opencode" else real_which(name, path=path)
+        ),
+    )
+    no_cli = inspect()
+    assert no_cli.current_session.name_status == "unavailable"
+    assert any("OpenCode CLI is unavailable" in n for n in no_cli.notices)
+
+
+@pytest.mark.matrix("T-SES-61")
+def test_opencode_unsafe_session_id_never_reaches_the_cli(repo_scenario, fake_opencode):
+    """T-SES-61 — IDs outside `ses_` plus letters and digits are unsafe input."""
+    world, fake, inspect = _opencode_session(repo_scenario, fake_opencode)
+    for unsafe in ("ses_bad\nnext", "parent1", "ses_x;y"):
+        report = inspect(unsafe)
+        assert report.fork_command.status == "unsafe_input"
+        assert report.resume_command.status == "unsafe_input"
+        assert report.current_session.name_status == "unavailable"
+    assert fake.api_ops() == []

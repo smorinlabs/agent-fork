@@ -568,6 +568,11 @@ def test_session_outputs_message_route(repo_scenario):
     )
     muse.write_text(f"#!/bin/sh\ncat <<'JSON'\n{listing}\nJSON\n")
     muse.chmod(0o755)
+    # Keep the host's real OpenCode service out of reach: a stopped service
+    # means the session report makes no `opencode api` call.
+    opencode = bin_dir / "opencode"
+    opencode.write_text("#!/bin/sh\necho stopped\n")
+    opencode.chmod(0o755)
     base = {**world.env, "PATH": f"{bin_dir}:{world.env['PATH']}"}
 
     muse_env = {**base, "MUSE_SESSION_ID": muse_id}
