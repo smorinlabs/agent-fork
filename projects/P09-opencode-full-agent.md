@@ -188,7 +188,7 @@ fake `opencode` executable, never the real service.
       on a failed move
 - [x] [P09-T04] GREEN: session report commands, transcript, name and lineage
 - [x] [P09-T05] GREEN: CLI choices, help, and doctor checks
-- [ ] [P09-T06] Version bump to 1.5.0; TEST-MATRIX rows and the `agent` axis;
+- [x] [P09-T06] Version bump to 1.5.0; TEST-MATRIX rows and the `agent` axis;
       `just check-matrix`
 - [ ] [P09-T07] README (OpenCode as an agent, fork and resume rows) and the
       `agent-fork` skill
