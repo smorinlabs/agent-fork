@@ -60,6 +60,16 @@ def test_opencode_dry_run_forks_nothing(repo_scenario, fake_opencode):
     assert document["command"].endswith("&& opencode --session <forked session ID>")
     assert fake.api_ops() == ["session.get"]
 
+    # A stopped service is never started by a dry run: no `opencode api` call.
+    fake.update(service="stopped")
+    stopped = run_cli(
+        ["fork", "oc-dry2", "--dry-run", "--json"], env, world.parent_path
+    )
+    assert stopped.returncode == 0, stopped.stderr
+    notices = json.loads(stopped.stdout)["notices"]
+    assert any("service is not running" in notice for notice in notices)
+    assert fake.api_ops() == ["session.get"]
+
 
 @pytest.mark.matrix("T-CLI-73")
 def test_opencode_extra_args_come_from_their_own_config_table(

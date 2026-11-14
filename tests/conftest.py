@@ -1066,7 +1066,9 @@ def sealed_env(extra: dict[str, str] | None = None) -> dict[str, str]:
         )
 
     env = {
-        "PATH": overrides.pop("PATH", os.environ.get("PATH", os.defpath)),
+        "PATH": overrides.pop(
+            "PATH", _without_opencode(os.environ.get("PATH", os.defpath))
+        ),
         "HOME": str(home),
         "LC_ALL": overrides.pop("LC_ALL", "C"),
         "XDG_CONFIG_HOME": str(config_home),
@@ -1083,6 +1085,17 @@ def sealed_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     }
     env.update(overrides)
     return env
+
+
+def _without_opencode(path: str) -> str:
+    """Drop every PATH directory holding an `opencode`, so tests never run the
+    host's real OpenCode (it talks to a live background service). Tests that
+    need OpenCode put the `fake_opencode` fixture's executable first."""
+    return os.pathsep.join(
+        directory
+        for directory in path.split(os.pathsep)
+        if not (directory and os.access(os.path.join(directory, "opencode"), os.X_OK))
+    )
 
 
 def run_cli(args: list[str], env: dict[str, str], cwd: Path):
@@ -1238,6 +1251,14 @@ def save():
         json.dump(state, handle)
 
 
+def emit(document):
+    # The real CLI prints compact JSON; `spaced` checks tolerance of other forms.
+    if state.get("spaced"):
+        print(json.dumps(document))
+    else:
+        print(json.dumps(document, separators=(",", ":")))
+
+
 def fail(op, default_code=1, default_err=""):
     spec = state.get("fail", {}).get(op)
     if spec is None:
@@ -1252,6 +1273,8 @@ if args == ["--version"]:
     print(state["version"]); sys.exit(0)
 if args == ["--help"]:
     print(state["help"]); sys.exit(0)
+if args[:1] == ["--session"]:
+    sys.exit(0)
 if args[:2] == ["service", "status"]:
     print(state["service"]); sys.exit(0)
 if args[:1] == ["api"]:
@@ -1268,6 +1291,7 @@ if args[:1] == ["api"]:
             body = json.loads(value)
     time.sleep(state.get("sleep", {}).get(op, 0))
     fail(op)
+    reply = state.get("replies", {}).get(op)
     sid = params.get("sessionID", "")
     sessions = state["sessions"]
     if sid not in sessions:
@@ -1280,15 +1304,17 @@ if args[:1] == ["api"]:
                 "location": {"directory": session["directory"]}}
         if session.get("parent"):
             data["fork"] = {"sessionID": session["parent"]}
-        print(json.dumps({"data": data})); sys.exit(0)
+        emit({"data": data}); sys.exit(0)
     if op == "session.fork":
         state["forks"] = state.get("forks", 0) + 1
         child = f"ses_child{state['forks']}"
         sessions[child] = {"title": f"{session.get('title')} (fork #1)",
                            "directory": session["directory"], "parent": sid}
         save()
-        print(json.dumps({"data": {"id": child, "fork": {"sessionID": sid},
-                                   "location": {"directory": session["directory"]}}}))
+        if reply is not None:
+            print(reply); sys.exit(0)
+        emit({"data": {"id": child, "fork": {"sessionID": sid},
+                       "location": {"directory": session["directory"]}}})
         sys.exit(0)
     if op == "session.move":
         target = body["directory"]
@@ -1297,7 +1323,10 @@ if args[:1] == ["api"]:
                               "message": f"Directory does not exist: {target}"}))
             print("HTTP 400 Bad Request"); sys.exit(1)
         session["directory"] = target
-        save(); sys.exit(0)
+        save()
+        if reply is not None:
+            print(reply)
+        sys.exit(0)
     if op == "session.remove":
         del sessions[sid]
         save(); sys.exit(0)

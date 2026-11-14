@@ -467,6 +467,9 @@ def test_opencode_resolves_in_auto_strict_and_explicit_modes(repo_scenario):
     env = {"OPENCODE": "1", "OPENCODE_SESSION_ID": "ses_parent1"}
     for mode in ("auto", "strict"):
         assert resolve_agent_mode(mode, env) == AgentContext("opencode", "ses_parent1")
+        assert resolve_agent_mode(
+            mode, {"OPENCODE_SESSION_ID": "ses_parent1"}
+        ) == AgentContext("opencode", "ses_parent1")
     assert resolve_agent_mode("git-only", env) is None
     assert detect_agent(
         {"CODEX_THREAD_ID": "ambient"},

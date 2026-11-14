@@ -16,12 +16,15 @@ with no contract extensions. The report fields that already exist for every
 agent (`transcript`, `message_route`, `messaging`) keep their contracts.
 
 ### Scope
-1. **Detection.** `opencode` becomes an agent in the single
-   `assess_agent_signals` assessment (`agents.py`), from `OPENCODE=1` or
-   `OPENCODE_SESSION_ID`. OpenCode signals together with another tool's
-   signals are `ambiguous`, as in P07. `fork --agent` accepts `opencode`. IDs
-   are validated by `OPENCODE_SESSION_ID` (`ses_…`); the shared
-   `SAFE_SESSION_ID` stays unchanged.
+1. **Detection (Codex rule, decided 2026-11-13 for least change).**
+   `opencode` becomes an agent in the single `assess_agent_signals`
+   assessment (`agents.py`). `OPENCODE_SESSION_ID` alone detects it, as
+   `CODEX_THREAD_ID` alone detects Codex; `OPENCODE=1` alone is `absent`, so
+   the Claude-only `incomplete` state is untouched. `OPENCODE_SESSION_ID`
+   together with any Claude or Codex signal is `ambiguous`. `fork --agent`
+   accepts `opencode`. IDs are validated by `OPENCODE_SESSION_ID` (`ses_…`);
+   the shared `SAFE_SESSION_ID` stays unchanged. P07's `message_route` keeps
+   its own rule (either variable counts).
 2. **Existence preflight.** Before a fork, `opencode api session.get
    --param sessionID=<id>` must succeed; otherwise the fork refuses with
    `session_not_found` (see item 8). Reason: `opencode --session <unknown>`
@@ -55,7 +58,12 @@ agent (`transcript`, `message_route`, `messaging`) keep their contracts.
    declares `--session`, as it does for the Claude and Codex recipe flags.
    A missing parent session reuses `AgentPreflightError` (`session_not_found`,
    exit 3), the error Codex uses for a missing rollout, so no new error code
-   is added.
+   is added. `[agents.opencode] extra_args` mirrors the Claude and Codex
+   tables (appended to the paste command; survives `config set`).
+9. **Fork boundary: full copy (owner decision 2026-11-13).** A fork run from
+   inside an OpenCode turn copies the history as it stands, ending on the
+   unanswered prompt that asked for the fork; no "stop before the current
+   turn" logic.
 5. **Transcript: existing contract.** OpenCode has no per-session file, so
    `transcript` reports `{path: null, exists: false}`. No new field.
 6. **Messaging: unchanged.** `message_route` stays `address_only`, the
@@ -160,11 +168,11 @@ export <id>` (JSON).
 ### Tests & Tasks
 Test IDs are the next free rows in `docs/testing/TEST-MATRIX.md`; tests use a
 fake `opencode` executable, never the real service.
-- [x] [P09-TS01] RED: detection. OpenCode signals assess as `detected` with
-      an OpenCode context; one of `OPENCODE=1` / `OPENCODE_SESSION_ID` alone is
-      `incomplete` (as for Claude); OpenCode plus Claude or Codex signals are
-      `ambiguous`; an ID failing `OPENCODE_SESSION_ID` is refused; explicit
-      `--agent opencode --parent-session <id>` wins (T-DET-27…)
+- [x] [P09-TS01] RED: detection. `OPENCODE_SESSION_ID` (with or without
+      `OPENCODE=1`) assesses as `detected`; `OPENCODE=1` alone is `absent`;
+      OpenCode plus Claude or Codex signals are `ambiguous`; explicit
+      `--agent opencode --parent-session <id>` wins (T-DET-27…31). Unsafe IDs
+      are refused in preflight (T-PRE-34)
 - [x] [P09-TS02] RED: preflight. Missing binary, version read, `session.get`
       404 and unreachable server both refuse with `session_not_found` (exit 3)
       before any mutation; help lacking `--session` adds a notice (T-PRE-31…)
@@ -198,5 +206,18 @@ fake `opencode` executable, never the real service.
 - [ ] [P09-TS06] Live verification: from inside a real OpenCode session, run
       `agent-fork fork` and open the printed command; run the session
       report's `fork_command` line
-- [ ] [P09-T08] Adversarial review gate including Codex; fix findings
+- [~] [P09-T08] Adversarial review gate including Codex; fix findings.
+      Round 1 (2026-11-13): Codex (7 findings) and a Fable whole-branch
+      review (6 medium, 4 low). Fixed: dry run never starts a stopped
+      service; fork compensation names an undeletable child with its
+      recovery command, deletes a child with an invalid reply ID, and says a
+      timed-out fork may have left one; the post-fork interrupt window is
+      inside the compensation scope; whitespace-tolerant extraction in the
+      session report's fork line, now executed in tests; move/remove replies
+      not required to be objects; doctor's version probe bounded and
+      escaped; tests strip every host `opencode` from PATH; a not-found
+      session warns that its resume command would create one; stale docs.
+      Documented, not fixed: an empty parent is refused only at the last
+      step; `agent-fork cleanup` leaves the forked OpenCode session.
+      (T-SES-62, T-RBK-21..22, T-CLI-75)
 - [ ] [P09-T09] One PR, merge commit, tag v1.5.0

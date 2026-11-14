@@ -127,8 +127,8 @@ def _parser() -> argparse.ArgumentParser:
         "--parent-session",
         metavar="ID_OR_NAME",
         help=(
-            "Parent session/thread UUID or renamed Codex session name; "
-            "detected when omitted"
+            "Parent session/thread ID (Claude or Codex UUID, OpenCode ses_ ID) "
+            "or renamed Codex session name; detected when omitted"
         ),
     )
     agent_mode = fork.add_mutually_exclusive_group()
@@ -662,6 +662,7 @@ def _fork_cli(args, environment: dict[str, str]) -> int:
                 context,
                 environment,
                 codex_session_name_resolution=config.codex_session_name_resolution,
+                start_service=False,
             )
             context = agent_check.context or context
             launch = (

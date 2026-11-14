@@ -1381,7 +1381,7 @@ def test_opencode_session_report_maps_fork_resume_and_transcript(
     assert report.fork_command.command == (
         f"cd {directory} && child=$(opencode api session.fork --param "
         "sessionID=ses_current1 -d '{}' | sed -n "
-        """'s/^{"data":{"id":"\\(ses_[A-Za-z0-9]*\\)".*/\\1/p') """
+        """'s/^{ *"data" *: *{ *"id" *: *"\\(ses_[A-Za-z0-9]*\\)".*/\\1/p') """
         '&& [ -n "$child" ] && opencode --session "$child"'
     )
     assert report.fork_command.child_session_id is None
@@ -1476,6 +1476,7 @@ def test_opencode_lookup_failures_report_unavailable_without_mutation(
     missing = inspect("ses_gone1")
     assert missing.current_session.name_status == "not_found"
     assert missing.lineage_status == "not_found"
+    assert any("would create a new session" in notice for notice in missing.notices)
 
     real_which = __import__("shutil").which
     monkeypatch.setattr(
@@ -1499,3 +1500,27 @@ def test_opencode_unsafe_session_id_never_reaches_the_cli(repo_scenario, fake_op
         assert report.resume_command.status == "unsafe_input"
         assert report.current_session.name_status == "unavailable"
     assert fake.api_ops() == []
+
+
+@pytest.mark.matrix("T-SES-62")
+def test_opencode_fork_command_line_runs_and_opens_the_child(
+    repo_scenario, fake_opencode
+):
+    """T-SES-62 — the emitted line itself works: run under `sh` it forks, then
+    opens the child, for compact and spaced JSON replies; a failed fork opens
+    nothing."""
+    import subprocess
+
+    world, fake, inspect = _opencode_session(repo_scenario, fake_opencode)
+    line = inspect().fork_command.command
+    env = fake.path_env(world.env)
+    for spaced, child in ((False, "ses_child1"), (True, "ses_child2")):
+        fake.update(spaced=spaced)
+        completed = subprocess.run(["sh", "-c", line], env=env, capture_output=True)
+        assert completed.returncode == 0, completed.stderr
+        assert ["--session", child] in fake.calls()
+    fake.update(fail={"session.fork": {"code": 1, "stdout": "HTTP 500\n"}})
+    failed = subprocess.run(["sh", "-c", line], env=env, capture_output=True)
+    assert failed.returncode != 0
+    assert ["--session", "ses_child3"] not in fake.calls()
+    assert sum(1 for call in fake.calls() if call[:1] == ["--session"]) == 2

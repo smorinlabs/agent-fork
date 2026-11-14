@@ -24,7 +24,7 @@ reconstruct a command from.
 Fork command — paste in a new terminal to fork this session in place:
 
 ```bash
-cd /Users/dev/project && child=$(opencode api session.fork --param sessionID=ses_e2c7c88bcffeV0uSO2gZ67RGwa -d '{}' | sed -n 's/^{"data":{"id":"\(ses_[A-Za-z0-9]*\)".*/\1/p') && [ -n "$child" ] && opencode --session "$child"
+cd /Users/dev/project && child=$(opencode api session.fork --param sessionID=ses_e2c7c88bcffeV0uSO2gZ67RGwa -d '{}' | sed -n 's/^{ *"data" *: *{ *"id" *: *"\(ses_[A-Za-z0-9]*\)".*/\1/p') && [ -n "$child" ] && opencode --session "$child"
 ```
 
 It is one line of two commands: OpenCode forks the session through its
@@ -56,7 +56,7 @@ Append any `notices` afterward as a "Notices:" list, verbatim.
 The entire reply is the exact `fork_command.command` string on one line — no
 label, no code fence, no explanation. For example, the reply body is exactly:
 
-cd /Users/dev/project && child=$(opencode api session.fork --param sessionID=ses_e2c7c88bcffeV0uSO2gZ67RGwa -d '{}' | sed -n 's/^{"data":{"id":"\(ses_[A-Za-z0-9]*\)".*/\1/p') && [ -n "$child" ] && opencode --session "$child"
+cd /Users/dev/project && child=$(opencode api session.fork --param sessionID=ses_e2c7c88bcffeV0uSO2gZ67RGwa -d '{}' | sed -n 's/^{ *"data" *: *{ *"id" *: *"\(ses_[A-Za-z0-9]*\)".*/\1/p') && [ -n "$child" ] && opencode --session "$child"
 
 ## Fork confirmation (dry run)
 

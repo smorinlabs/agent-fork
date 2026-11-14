@@ -313,8 +313,14 @@ def preflight_agent(
     version_output: str | None = None,
     help_output: str | None = None,
     codex_session_name_resolution: bool = True,
+    start_service: bool = True,
 ) -> PreflightResult:
-    """Refuse unsupported native forks before any repository mutation."""
+    """Refuse unsupported native forks before any repository mutation.
+
+    `start_service=False` (dry runs) never starts OpenCode's background
+    service: `opencode api` would start a stopped one, so a stopped service
+    skips the parent lookup with a notice instead.
+    """
     if (
         context.agent == "opencode"
         and OPENCODE_SESSION_ID.fullmatch(context.parent_session_id) is None
@@ -377,7 +383,14 @@ def preflight_agent(
         from agent_fork import opencode_api
 
         try:
-            opencode_api.call(binary, "session.get", context.parent_session_id, env)
+            if not start_service and not opencode_api.service_running(binary, env):
+                notices.append(
+                    "OpenCode background service is not running, so parent session "
+                    f"{context.parent_session_id} was not confirmed; the real fork "
+                    "will start the service and confirm it"
+                )
+            else:
+                opencode_api.call(binary, "session.get", context.parent_session_id, env)
         except opencode_api.OpencodeApiError as error:
             if error.not_found:
                 raise _diagnosis(
@@ -595,7 +608,7 @@ def _render_native_command(
         # No single OpenCode command forks and opens a session without a model
         # turn, so fork through the API, then open the child. The pipeline
         # hides `opencode api`'s exit status; the empty-ID guard stops the line.
-        extract = quote(r's/^{"data":{"id":"\(ses_[A-Za-z0-9]*\)".*/\1/p')
+        extract = quote(r's/^{ *"data" *: *{ *"id" *: *"\(ses_[A-Za-z0-9]*\)".*/\1/p')
         return (
             f"cd {quote(str(directory))} && child=$(opencode api session.fork "
             f"--param {quote('sessionID=' + context.parent_session_id)} -d '{{}}' "

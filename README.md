@@ -8,7 +8,7 @@ uncommitted file copied and verified.**
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/smorinlabs/agent-fork/blob/main/LICENSE)
 
-You are deep in a Claude Code or Codex session. The agent has context you do not
+You are deep in a Claude Code, Codex, or OpenCode session. The agent has context you do not
 want to rebuild, and your working tree is full of uncommitted work. Now you want
 to try a *second* approach — without stashing, without losing the first one, and
 without starting the conversation over.
@@ -26,7 +26,7 @@ a session-continuation command, so the same tool covers plain Git workflows.
 
 ## Demo
 
-From inside your Claude Code or Codex session:
+From inside your Claude Code or Codex session (the skill installs into those two; inside OpenCode, run the `agent-fork` CLI):
 
 ```text
 /agent-fork try-redis       # fork without leaving the conversation
@@ -159,7 +159,7 @@ uvx --isolated --refresh --from git+https://github.com/smorinlabs/agent-fork age
 **Requirements:** Python 3.11+ and Git 2.19+. Forking an agent session
 additionally needs Claude Code 2.0.73+ or Codex 0.95+ (Codex's native `fork`
 itself requires 0.81+), or OpenCode with its background service (verified with
-2.2.7; no minimum is enforced). Run `agent-fork doctor` to check all of this at
+2.2.7; no minimum is enforced). Run `agent-fork doctor` to check the CLIs at
 once.
 
 ### Alternative: local skill install
@@ -364,7 +364,7 @@ codex:  <CODEX_HOME|~/.codex>/sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<thr
 file is there right now. OpenCode keeps every session's history in one shared
 database instead of a per-session file, so an OpenCode session reports
 `{path: null, exists: false}`; `opencode session export <id>` prints one
-session's history as JSON. The two agents store transcripts differently, and the
+session's history as JSON. Claude Code and Codex store transcripts differently, and the
 difference is visible in the field. The Claude path is *derived* from the
 session ID and the resolved invocation directory — every non-alphanumeric
 character of that directory becomes `-` — so it can be reported before the
@@ -425,7 +425,7 @@ address-only because `muse session-message send --target <id>` found an
 interactive target session but refused the sender with `sender_unverified`,
 both from a plain shell and from inside a headless `muse exec` session; Muse
 appears to accept messages only through its own in-session tool. OpenCode has
-no messaging command: `opencode run --session <id>` starts a model turn and
+no messaging command that agent-fork reports: `opencode run --session <id>` starts a model turn and
 creates the session if the ID is unknown, so it is not offered as a send
 command.
 
@@ -534,7 +534,7 @@ record; cleanup adds no flag that prunes this metadata automatically.
 |---|---|
 | `NAME` | Fork identity; derived from the current branch when omitted |
 | `--agent {claude,codex,opencode}` | Host agent; detected when omitted |
-| `--parent-session ID_OR_NAME` | Parent session/thread UUID, or a renamed Codex session name |
+| `--parent-session ID_OR_NAME` | Parent session/thread ID (Claude or Codex UUID, OpenCode `ses_` ID), or a renamed Codex session name |
 | `--require-agent` | Refuse unless a single usable agent session is available |
 | `--no-agent` | Ignore agent signals; create only the branch and worktree |
 | `--branch BRANCH` | Explicit fork branch name |
@@ -629,12 +629,19 @@ step of the pipeline:
    exactly as for Claude Code and Codex.
 3. Only after all of them succeed, `agent-fork` forks the parent
    (`session.fork`) and moves the child session into the new worktree
-   (`session.move`). If the move fails or the run is interrupted, the child
-   is deleted, the registry record removed, and the worktree rolled back.
+   (`session.move`). If anything fails after the fork, the registry record is
+   removed and the worktree rolled back, and the child is deleted on a best
+   effort basis: a child that cannot be deleted is named in the error with
+   the `opencode api session.remove` command that removes it, and a fork that
+   fails or is interrupted before OpenCode answers may leave a child whose ID
+   was never returned, which the error says.
 4. The printed command opens the child there:
    `cd '<worktree>' && opencode --session <child-session-id>`.
 
-A dry run confirms the parent but never forks it, so it previews the command
+A parent session with no messages cannot be forked; OpenCode refuses it only
+at this last step, so the worktree is created and then rolled back. A dry run
+confirms the parent but never forks it, and never starts a stopped background
+service: it skips the confirmation with a notice instead. It previews the command
 with `<forked session ID>` in place of the child's ID. `agent-fork cleanup`
 removes the worktree but leaves the forked OpenCode session in OpenCode's own
 session list. When the fork runs from inside an OpenCode turn, the child's

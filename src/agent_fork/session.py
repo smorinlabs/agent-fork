@@ -931,6 +931,10 @@ def _opencode_inspection(
     except opencode_api.OpencodeApiError as error:
         return unavailable(str(error))
     if data is None:
+        notices.append(
+            f"OpenCode session {session_id} was not found; its resume command "
+            "would create a new session with that ID"
+        )
         current = SessionEvidence(session_id, "OPENCODE_SESSION_ID")
         return inspection("opencode", current, None, "not_found")
     title = data.get("title")

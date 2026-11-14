@@ -21,6 +21,11 @@ from agent_fork.agents import (
 from agent_fork.config import ConfigError, resolve_discovered_config, worktree_root
 from agent_fork.git import PRODUCT_GIT_MIN
 from agent_fork.include import SETUP_HOOK_RELATIVE_PATH, setup_hook_eligibility
+from agent_fork.text import escape_terminal_text
+
+# Every installed agent CLI is probed, selected or not, so one that hangs
+# must not hang doctor.
+DOCTOR_PROBE_TIMEOUT = 10
 
 
 @dataclass(frozen=True)
@@ -74,10 +79,22 @@ def _version_check(
     if executable is None:
         requirement = f"requires >= {minimum}" if minimum else "no minimum"
         return DoctorCheck(name, False, f"missing; {requirement}")
-    completed = subprocess.run(
-        [executable, "--version"], env=dict(env), capture_output=True, text=True
-    )
-    output = (completed.stdout or completed.stderr).strip()
+    try:
+        completed = subprocess.run(
+            [executable, "--version"],
+            env=dict(env),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=DOCTOR_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return DoctorCheck(
+            name, False, f"--version timed out after {DOCTOR_PROBE_TIMEOUT}s"
+        )
+    except (OSError, UnicodeDecodeError) as error:
+        return DoctorCheck(name, False, f"--version failed: {error}")
+    output = escape_terminal_text((completed.stdout or completed.stderr).strip())
     try:
         version = parse_version(output)
     except ValueError:

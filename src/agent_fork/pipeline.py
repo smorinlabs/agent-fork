@@ -41,6 +41,7 @@ from agent_fork.include import (
 from agent_fork.lineage import LineageClaim, add_lineage
 from agent_fork.materialize import materialize
 from agent_fork.models import RegistryEntry
+from agent_fork.opencode_api import call as opencode_call
 from agent_fork.opencode_api import fork_into
 from agent_fork.registry import add_entry, occupied_fork, remove_entry
 from agent_fork.repository import (
@@ -366,18 +367,30 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
             # only OpenCode change is made once. A failure here removes this
             # call's record; rollback then removes the worktree, and
             # `fork_into` has already deleted a child it could not move.
+            binary = (
+                request.agent_executable
+                or shutil.which("opencode", path=env.get("PATH"))
+                or "opencode"
+            )
             try:
                 forked_child.append(
                     fork_into(
-                        request.agent_executable
-                        or shutil.which("opencode", path=env.get("PATH"))
-                        or "opencode",
-                        resolved_agent.parent_session_id,
-                        creation.path,
-                        env,
+                        binary, resolved_agent.parent_session_id, creation.path, env
                     )
                 )
+                # Returning inside the try keeps an interrupt that lands after
+                # the fork, but before `finish` returns, inside this scope.
+                return included.copied, setup_hook
             except BaseException:
+                if forked_child:
+                    with suppress(Exception):
+                        opencode_call(
+                            binary,
+                            "session.remove",
+                            forked_child.pop(),
+                            env,
+                            require_data=False,
+                        )
                 with suppress(Exception):
                     remove_entry(entry.token(), env=env)
                 raise
