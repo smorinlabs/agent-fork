@@ -190,10 +190,11 @@ fake `opencode` executable, never the real service.
 - [x] [P09-T05] GREEN: CLI choices, help, and doctor checks
 - [x] [P09-T06] Version bump to 1.5.0; TEST-MATRIX rows and the `agent` axis;
       `just check-matrix`
-- [ ] [P09-T07] README (OpenCode as an agent, fork and resume rows) and the
+- [x] [P09-T07] README (OpenCode as an agent, fork and resume rows) and the
       `agent-fork` skill
-- [ ] Regression Test Status: `make check`, `just all`, `just check-matrix`,
-      `just strict-collect`, `just clean-install`
+- [x] Regression Test Status (2026-11-13): `make check`, `just all` (801
+      passed, 1 skipped), `just check-matrix`, `just strict-collect`,
+      `just clean-install` (1.5.0 wheel), and `just test-signals` (16 passed)
 - [ ] [P09-TS06] Live verification: from inside a real OpenCode session, run
       `agent-fork fork` and open the printed command; run the session
       report's `fork_command` line
