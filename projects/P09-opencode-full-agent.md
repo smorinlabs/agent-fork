@@ -217,9 +217,29 @@ fake `opencode` executable, never the real service.
 - [x] Regression Test Status (2026-11-13): `make check`, `just all` (801
       passed, 1 skipped), `just check-matrix`, `just strict-collect`,
       `just clean-install` (wheel), and `just test-signals` (16 passed)
-- [ ] [P09-TS06] Live verification: from inside a real OpenCode session, run
-      `agent-fork fork` and open the printed command; run the session
-      report's `fork_command` line
+- [x] [P09-TS06] Live verification (2026-11-13, OpenCode 2.3.0, driven
+      through a Rex tab in a scratch repo with uncommitted changes): inside a
+      real OpenCode turn, this branch's `agent-fork --version` read 1.6.0;
+      `session --json` reported `agent: opencode`, the name via
+      `opencode-api`, the one-line `fork_command`, `resume_command`,
+      `transcript {path: null, exists: false}`, and the unchanged
+      `address_only` route; the dry run created no session and previewed
+      `<forked session ID>`; `fork live-check --json` created the branch and
+      worktree, carried the files, verified, and printed
+      `cd <wt> && opencode --session <child>`. From outside: the child was
+      already in the worktree, `session.get` reports `fork.sessionID`, the
+      child's own session report shows the parent `resolved`, the session
+      report's line ran under zsh and opened its child, `list` showed the
+      fork as `opencode`, and `cleanup` removed it (dirty and unpushed
+      guards refused first). All four sessions the check created, and the
+      scratch repo, were deleted.
+      Finding: OpenCode updated to 2.3.0 during the session. In 2.3.0,
+      forking a session that is mid-turn carries the running turn into the
+      child: OpenCode adds a `<fork-notice>` message and the child keeps
+      working at once, before agent-fork's move, so its first shell command
+      ran in the parent's directory. The live child ran only read-only
+      checks and then asked before re-running the fork. Forks of an idle
+      session, and a child ending on an unanswered prompt, start no turn.
 - [x] [P09-T08] Adversarial review gate including Codex; fix findings.
       Round 1 (2026-11-13): Codex (7 findings) and a Fable whole-branch
       review (6 medium, 4 low). Fixed: dry run never starts a stopped
