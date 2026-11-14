@@ -525,7 +525,13 @@ def preflight_agent(
                     "will start the service and confirm it"
                 )
             else:
-                opencode_api.call(binary, "session.get", context.parent_session_id, env)
+                found = opencode_api.call(
+                    binary, "session.get", context.parent_session_id, env
+                )
+                if found.get("id") != context.parent_session_id:
+                    raise opencode_api.OpencodeApiError(
+                        "`opencode api session.get` did not describe that session"
+                    )
         except opencode_api.OpencodeApiError as error:
             if error.not_found:
                 raise _diagnosis(

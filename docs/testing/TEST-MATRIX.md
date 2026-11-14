@@ -146,7 +146,7 @@ Varying axes: agent (claude/codex, must vary per §4) for warn-band vs rollout-f
 | T-PRE-30 | app-server closing its input mid-handshake yields the typed closed-input failure even under default (fatal) SIGPIPE disposition | agent=codex | U | live | REQ-46; D17 |
 | T-PRE-31 | OpenCode preflight confirms the parent session with one `opencode api session.get` call and applies no version floor | agent=opencode | U | live | P09 |
 | T-PRE-32 | an unknown OpenCode session refuses with `session_not_found` (exit 3) before mutation, because `opencode --session <unknown>` would create one | agent=opencode | U | live | P09 |
-| T-PRE-33 | an unreachable, malformed, or slow (timed-out) OpenCode session lookup refuses as unconfirmed | agent=opencode | U | live | P09 |
+| T-PRE-33 | an unreachable, malformed, or slow (timed-out) OpenCode session lookup, or a successful reply that does not describe the parent (empty, no `id`, another session's `id`), refuses as unconfirmed | agent=opencode | U | live | P09 |
 | T-PRE-34 | an OpenCode session ID outside `ses_` plus letters and digits refuses before any `opencode api` call | agent=opencode | U | live | P09 |
 | T-PRE-35 | the OpenCode paste command's only flag, `--session`, is the declared recipe flag; help lacking it adds a notice | agent=opencode | U | live | P09; P02 A4 |
 | T-PRE-06 | PRODUCT_GIT_MIN boundary — injected `git --version` just below 2.19.0 → the named check fails | baseline | F | live | REQ-38 (A9); PRODUCT-GIT-MIN-AUDIT |
@@ -495,7 +495,7 @@ Varying axes: none of the shared four vary (baseline pinned); scenario varies by
 | T-RBK-21 | OpenCode fork compensation names any child it could not delete with its `opencode api session.remove` recovery command, deletes a child whose reply ID is invalid, and says a timed-out fork may have created one | agent=opencode | U | live | P09; review gate |
 | T-RBK-22 | OpenCode `session.move` and `session.remove` replies are never read, so any successful reply shape is accepted | agent=opencode | U | live | P09; review gate |
 | T-RBK-23 | `fork_into` records a live child in the caller's list as soon as its ID is known and removes it once deleted, so an interrupt after the return can still be compensated and nothing is deleted twice | agent=opencode | U | live | P09; review gate round 2 |
-| T-RBK-24 | after moving the child, `fork_into` interrupts the turn OpenCode 2.3.0 starts in it (`resume=true` keeps the move), retries once when nothing was running yet, reports an unconfirmed stop (unreadable reply, nothing found after the retry) and a failed interrupt with notices while keeping the fork, and deletes the child when interrupted during the stop step | agent=opencode | U | live | P09; live check on 2.3.0 |
+| T-RBK-24 | after moving the child, `fork_into` interrupts the turn OpenCode 2.3.0 starts in it (`resume=true` keeps the move), retries once when nothing was running yet, reports an unconfirmed stop (unreadable reply, nothing found after the retry) and a failed interrupt with notices while keeping the fork, and deletes the child when interrupted during the stop step, keeping the signal and the recovery command when that deletion fails | agent=opencode | U | live | P09; live check on 2.3.0 |
 
 ---
 

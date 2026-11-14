@@ -256,6 +256,15 @@ def test_opencode_unreadable_session_lookup_refuses(
             preflight_agent(AgentContext("opencode", "ses_parent1"), env)
         assert caught.value.code == "session_not_found"
         assert "could not confirm OpenCode session ses_parent1" in str(caught.value)
+    # A successful reply must describe the parent itself: empty output, a
+    # missing id, or another session's id leaves the parent unconfirmed.
+    fake.update(fail={})
+    for reply in ("", '{"data":{}}', '{"data":{"id":"ses_other9"}}'):
+        fake.update(replies={"session.get": reply})
+        with pytest.raises(AgentPreflightError) as caught:
+            preflight_agent(AgentContext("opencode", "ses_parent1"), env)
+        assert caught.value.code == "session_not_found"
+        assert "could not confirm OpenCode session ses_parent1" in str(caught.value)
 
 
 @pytest.mark.matrix("T-PRE-34")

@@ -41,8 +41,12 @@ from agent_fork.include import (
 from agent_fork.lineage import LineageClaim, add_lineage
 from agent_fork.materialize import materialize
 from agent_fork.models import RegistryEntry
-from agent_fork.opencode_api import OpencodeApiError, fork_into
-from agent_fork.opencode_api import call as opencode_call
+from agent_fork.opencode_api import (
+    OpencodeApiError,
+    fork_into,
+    remove_child,
+    with_recovery,
+)
 from agent_fork.registry import add_entry, occupied_fork, remove_entry
 from agent_fork.repository import (
     WorktreeCreation,
@@ -388,18 +392,15 @@ def fork(request: ForkRequest, *, env: Mapping[str, str]) -> ForkResult:
                 # `fork_into` already tried to delete the child for its own
                 # failures and named any it could not; delete here only after
                 # an exit it did not handle (an interrupt after it returned).
+                leftover = None
                 if forked_child and not isinstance(error, OpencodeApiError):
-                    with suppress(Exception):
-                        opencode_call(
-                            binary,
-                            "session.remove",
-                            forked_child.pop(),
-                            env,
-                            require_data=False,
-                        )
+                    leftover = remove_child(binary, forked_child.pop(), env)
                 with suppress(Exception):
                     remove_entry(entry.token(), env=env)
-                raise
+                replacement = with_recovery(error, leftover)
+                if replacement is error:
+                    raise
+                raise replacement from error
         return included.copied, setup_hook
 
     included, setup_hook = run_with_rollback(creation, finish, env=env)

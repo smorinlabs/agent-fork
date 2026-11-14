@@ -102,7 +102,9 @@ def call(
             return {}
         return document if isinstance(document, dict) else {}
     if not completed.stdout.strip():
-        return {}
+        raise OpencodeApiError(
+            f"`opencode api {operation}` returned no output", uncertain=True
+        )
     try:
         document = json.loads(completed.stdout)
     except ValueError as error:
@@ -205,11 +207,31 @@ def fork_into(
             _forget(created, child)
             raise
         raise OpencodeApiError(f"{error}; {leftover}") from error
-    except BaseException:
-        if _remove_child(binary, child, env) is None:
-            _forget(created, child)
-        raise
+    except BaseException as error:
+        # This function owns the cleanup it attempts: the child leaves
+        # `created` either way, and a failed deletion is named in the error.
+        leftover = _remove_child(binary, child, env)
+        _forget(created, child)
+        replacement = with_recovery(error, leftover)
+        if replacement is error:
+            raise
+        raise replacement from error
     return child
+
+
+def with_recovery(error: BaseException, leftover: str | None) -> BaseException:
+    """`error`, or an interruption that keeps its signal and names the child
+    that could not be deleted, so the recovery command reaches the user."""
+    from agent_fork.interrupts import OperationInterrupted
+
+    if leftover is None or not isinstance(error, OperationInterrupted):
+        return error
+    return OperationInterrupted(error.signum, f"{error}; {leftover}")
+
+
+def remove_child(binary: str, child: str, env: Mapping[str, str]) -> str | None:
+    """Delete a forked child; on failure return a notice naming it."""
+    return _remove_child(binary, child, env)
 
 
 def _stop_child_turn(

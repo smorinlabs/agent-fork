@@ -1305,6 +1305,8 @@ if args[:1] == ["api"]:
         print("HTTP 404 Not Found", file=sys.stderr); sys.exit(1)
     session = sessions[sid]
     if op == "session.get":
+        if reply is not None:
+            print(reply); sys.exit(0)
         data = {"id": sid, "title": session.get("title"),
                 "location": {"directory": session["directory"]}}
         if session.get("parent"):

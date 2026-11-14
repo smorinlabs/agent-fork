@@ -170,4 +170,13 @@ def test_fork_into_stops_the_turn_the_move_starts(tmp_path, fake_opencode, monke
     with pytest.raises(OperationInterrupted):
         opencode_api.fork_into(binary, "ses_parent1", target, env, created=created)
     assert created == []
+
+    # If deleting the child also fails, the interruption keeps its signal and
+    # carries the child's recovery command.
+    fake.update(fail={"session.remove": {"code": 1, "stderr": "HTTP 500\n"}})
+    stuck: list[str] = []
+    with pytest.raises(OperationInterrupted) as interrupted:
+        opencode_api.fork_into(binary, "ses_parent1", target, env, created=stuck)
+    assert interrupted.value.signum == signal.SIGINT
+    assert "opencode api session.remove --param sessionID=" in str(interrupted.value)
     monkeypatch.setattr(opencode_api, "call", real_call)
