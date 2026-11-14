@@ -885,12 +885,28 @@ def main(argv: list[str] | None = None) -> int:
             executable = shutil.which("muse", path=environment.get("PATH"))
             if executable is None:
                 raise MuseForkError("Muse fork failed: muse CLI is missing from PATH")
-            fork_id = fork_session(
-                executable,
-                args.parent_session_id,
-                environment,
-                warn=lambda line: print(f"agent-fork: {line}", file=sys.stderr),
-            )
+
+            def warn(line: str) -> None:
+                # A closed stderr must not kill the helper (SIGPIPE is default
+                # here) while it still owns a running `muse serve`.
+                from agent_fork.codex_app_server import _sigpipe_ignored
+
+                with _sigpipe_ignored():
+                    try:
+                        print(f"agent-fork: {line}", file=sys.stderr, flush=True)
+                    except OSError:
+                        pass
+
+            try:
+                fork_id = fork_session(
+                    executable, args.parent_session_id, environment, warn=warn
+                )
+            except MuseForkError:
+                raise
+            except Exception as error:
+                # The paste command depends on exit 3 and an empty stdout for
+                # every failure, not only the ones the client anticipates.
+                raise MuseForkError(f"Muse fork failed: {error}") from error
             print(fork_id)
             return 0
         if args.command == "completion":

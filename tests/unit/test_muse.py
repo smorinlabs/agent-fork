@@ -199,12 +199,18 @@ def test_muse_preflight_help_drift_is_a_notice(repo_scenario, tmp_path):
 def test_msp_fork_returns_the_fork_id_and_leaves_it(
     repo_scenario, tmp_path, monkeypatch
 ):
+    import agent_fork.muse_server as muse_server
     from agent_fork.muse_server import fork_session
 
     world = repo_scenario()
     env = _muse_env(world, tmp_path)
     binary = env["PATH"].split(":")[0] + "/muse"
+    # The fake, like Muse, exits on EOF only once left with `stop: true`; with
+    # a long shutdown bound, a fast return proves the leave made it exit.
+    monkeypatch.setattr(muse_server, "SHUTDOWN_TIMEOUT", 20.0)
+    started = time.monotonic()
     assert fork_session(binary, PARENT, env) == FORK
+    assert time.monotonic() - started < 10
     received = _received(tmp_path)
     methods = [message.get("method") for message in received]
     assert methods == ["initialize", "initialized", "session/fork", "session/leave"]
@@ -216,14 +222,24 @@ def test_msp_fork_returns_the_fork_id_and_leaves_it(
     assert (leave_params["sessionId"], leave_params["stop"]) == (FORK, True)
     assert uuid.UUID(leave_params["commandId"]).version == 7
 
+    # A server->client request that reuses the client's id is not the reply.
+    colliding = {**env, "FAKE_MUSE_MODE": "serverreq"}
+    assert muse_server.fork_session(binary, PARENT, colliding) == FORK
+
     # A host that stays up after stdin EOF is terminated within the bound.
-    import agent_fork.muse_server as muse_server
+    noisy = {**env, "FAKE_MUSE_MODE": "noise"}
+    assert muse_server.fork_session(binary, PARENT, noisy) == FORK
 
     monkeypatch.setattr(muse_server, "SHUTDOWN_TIMEOUT", 0.5)
-    lingering = {**env, "FAKE_MUSE_MODE": "linger"}
+    pidfile = tmp_path / "linger.pid"
+    lingering = {**env, "FAKE_MUSE_MODE": "linger", "FAKE_MUSE_PIDFILE": str(pidfile)}
     started = time.monotonic()
     assert muse_server.fork_session(binary, PARENT, lingering) == FORK
     assert time.monotonic() - started < 10
+    import os
+
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pidfile.read_text()), 0)
 
 
 @pytest.mark.matrix("T-MUS-08")
@@ -240,6 +256,7 @@ def test_msp_fork_failures_are_typed(repo_scenario, tmp_path, monkeypatch):
         ("hang", "timed out"),
         ("big", "output limit"),
         ("badid", "unsupported fork result"),
+        ("noresult", "invalid reply"),
     ):
         env = _muse_env(world, tmp_path, FAKE_MUSE_MODE=mode)
         binary = env["PATH"].split(":")[0] + "/muse"
@@ -248,6 +265,10 @@ def test_msp_fork_failures_are_typed(repo_scenario, tmp_path, monkeypatch):
         assert raised.value.code == "muse_fork_failed"
         assert raised.value.exit_code == ERROR_CATALOG["muse_fork_failed"].exit_code
         assert raised.value.exit_code == 3
+    # A reply naming the parent itself is not a new fork.
+    echo = _muse_env(world, tmp_path, FAKE_MUSE_FORK_ID=PARENT)
+    with pytest.raises(MuseForkError, match="unsupported fork result"):
+        muse_server.fork_session(echo["PATH"].split(":")[0] + "/muse", PARENT, echo)
 
 
 # --- commands, transcript, inspection ---------------------------------------
@@ -264,7 +285,7 @@ def test_muse_native_commands(repo_scenario, tmp_path, monkeypatch):
     )
 
     executable = "/opt/agent fork/bin/agent-fork"
-    monkeypatch.setattr(agents, "agent_fork_executable", lambda: executable)
+    monkeypatch.setattr(agents, "agent_fork_executable", lambda: (executable,))
     worktree = tmp_path / "my worktree"
     q = shlex.quote
     launch = build_launch_command(
@@ -286,6 +307,16 @@ def test_muse_native_commands(repo_scenario, tmp_path, monkeypatch):
         build_launch_command(
             AgentContext("muse", "bad\x1b[31m"), worktree=worktree, name="n"
         )
+    # Started as a module, the paste command names this interpreter, never a
+    # bare `agent-fork` that could resolve to another installation.
+    import sys
+
+    monkeypatch.undo()
+    monkeypatch.setattr(sys, "argv", ["/src/agent_fork/cli.py"])
+    module = build_launch_command(
+        AgentContext("muse", PARENT), worktree=worktree, name="fork-name"
+    )
+    assert f"$({q(sys.executable)} -m agent_fork.cli muse-fork" in module.command
 
 
 @pytest.mark.matrix("T-MUS-10")
@@ -326,7 +357,7 @@ def test_muse_session_inspection(repo_scenario, tmp_path, monkeypatch):
     from agent_fork.session import inspect_session
 
     world = repo_scenario()
-    monkeypatch.setattr(agents, "agent_fork_executable", lambda: "/bin/agent-fork")
+    monkeypatch.setattr(agents, "agent_fork_executable", lambda: ("/bin/agent-fork",))
     env = _muse_env(
         world,
         tmp_path,
@@ -411,3 +442,55 @@ def test_readme_exit_table_lists_muse_fork_failed(repo_scenario):
     ]
     assert len(rows) == 1
     assert "`muse_fork_failed`" in rows[0]
+
+
+@pytest.mark.matrix("T-MUS-19")
+def test_msp_fork_cleans_up_the_host_on_sigterm(repo_scenario, tmp_path, monkeypatch):
+    import os
+    import signal
+    import threading
+
+    import agent_fork.muse_server as muse_server
+    from agent_fork.errors import MuseForkError
+
+    world = repo_scenario()
+    pidfile = tmp_path / "muse.pid"
+    env = _muse_env(
+        world, tmp_path, FAKE_MUSE_MODE="hang", FAKE_MUSE_PIDFILE=str(pidfile)
+    )
+    monkeypatch.setattr(muse_server, "TIMEOUT", 20.0)
+    binary = env["PATH"].split(":")[0] + "/muse"
+    previous = signal.getsignal(signal.SIGTERM)
+    timer = threading.Timer(1.0, os.kill, (os.getpid(), signal.SIGTERM))
+    timer.start()
+    try:
+        with pytest.raises(MuseForkError, match="SIGTERM"):
+            muse_server.fork_session(binary, PARENT, env)
+    finally:
+        timer.cancel()
+    assert signal.getsignal(signal.SIGTERM) == previous
+    host = int(pidfile.read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(host, 0)
+
+
+@pytest.mark.matrix("T-MUS-20")
+def test_muse_fork_command_maps_unexpected_errors_to_exit_3(
+    repo_scenario, tmp_path, monkeypatch, capsys
+):
+    import agent_fork.muse_server as muse_server
+    from agent_fork.cli import main
+
+    world = repo_scenario()
+    env = _muse_env(world, tmp_path)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(muse_server, "fork_session", explode)
+    assert main(["muse-fork", PARENT]) == 3
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "muse_fork_failed" in captured.err or "Muse fork failed" in captured.err

@@ -649,10 +649,17 @@ cd '<worktree>' && muse resume "$('<agent-fork>' muse-fork '<parent-uuid>')"
 `agent-fork muse-fork <parent-uuid>` is an internal command (absent from
 `--help`). It starts `muse serve`, calls `session/fork`, leaves the new session
 cleanly, and prints only the new session's UUID. `<agent-fork>` is the absolute
-path of the `agent-fork` that printed the command, so the paste works even
-when `agent-fork` is not on `PATH` (for example under `uvx`). If the fork
-fails, `muse-fork` exits 3 with `muse_fork_failed`, and `muse resume ""`
-refuses, so no session opens. The command works in bash, zsh, and fish 3.4+.
+path of the `agent-fork` that printed the command (or its Python with
+`-m agent_fork.cli` when it was started that way), so the paste works even
+when `agent-fork` is not on `PATH`. Under `uvx` that path is inside the uv
+cache, so `uv cache clean` or `uv cache prune` before pasting breaks the
+command; the paste then fails without opening a session. If the fork fails,
+`muse-fork` exits 3 with `muse_fork_failed`, and `muse resume ""` refuses, so
+no session opens. Once Muse has created the fork, `muse-fork` prints its UUID
+even if leaving it cleanly fails: the fork already exists and cannot be
+deleted, so opening it beats losing it. It warns on stderr, and Muse may
+report on the first resume that the session "ended abnormally". The command is tested in bash and zsh; fish 3.4+ supports
+its `"$(…)"` substitution but has not been tested.
 
 What to expect:
 

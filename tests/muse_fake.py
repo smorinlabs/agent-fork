@@ -23,8 +23,23 @@ if args == ["--help"]:
 if args == ["sessions", "--json"]:
     print(os.environ.get("FAKE_MUSE_SESSIONS", '{"sessions":[]}'))
     sys.exit(0)
+if args and args[0] == "resume":
+    record = os.environ.get("FAKE_MUSE_RESUME_LOG")
+    if record:
+        with open(record, "a") as handle:
+            handle.write(json.dumps(args) + "\n")
+    if len(args) < 2 or not args[1]:
+        sys.stderr.write("invalid resume session reference: "
+                         "session name must not be empty\n")
+        sys.exit(2)
+    sys.exit(0)
 if args != ["serve"]:
     sys.exit(64)
+pidfile = os.environ.get("FAKE_MUSE_PIDFILE")
+if pidfile:
+    with open(pidfile, "w") as handle:
+        handle.write(str(os.getpid()))
+left = False
 fork_id = os.environ.get("FAKE_MUSE_FORK_ID", "00000000-0000-7e89-a143-57729763e0d9")
 def out(obj):
     sys.stdout.write(json.dumps(obj) + "\n"); sys.stdout.flush()
@@ -37,6 +52,13 @@ for line in sys.stdin:
     if method == "initialize":
         if mode == "exit":
             sys.exit(3)
+        if mode == "noresult":
+            out({"jsonrpc": "2.0", "id": ident})
+            continue
+        if mode == "noise":
+            # Replies to ids this client never sent are dropped, not kept.
+            for stray in range(100, 140):
+                out({"jsonrpc": "2.0", "id": stray, "result": {"pad": "x" * 4096}})
         out({"jsonrpc": "2.0", "id": ident, "result": {"serverInfo": {"name": "muse"}}})
     elif method == "session/fork":
         if mode == "error":
@@ -49,6 +71,10 @@ for line in sys.stdin:
         elif mode == "big":
             sys.stdout.write("x" * 3_000_000); sys.stdout.flush()
         else:
+            if mode == "serverreq":
+                # A server->client request that reuses the client's id.
+                out({"jsonrpc": "2.0", "id": ident, "method": "approval/request",
+                     "params": {}})
             out({"jsonrpc": "2.0", "method": "session/started", "params": {}})
             sid = "not a uuid; rm -rf" if mode == "badid" else fork_id
             out({"jsonrpc": "2.0", "id": ident, "result": {
@@ -57,7 +83,10 @@ for line in sys.stdin:
                                 "sessionId": message["params"]["sessionId"]}},
                 "history": {}, "pendingRequests": [], "viewCursor": "v"}})
     elif method == "session/leave":
+        left = message["params"].get("stop") is True
         out({"jsonrpc": "2.0", "id": ident, "result": {"status": "accepted"}})
-if mode == "linger":
+# Like Muse 1.4.20, a host with a loaded session exits on stdin EOF only after
+# it was left with `stop: true`; `linger` never exits on its own.
+if mode == "linger" or not left:
     time.sleep(30)
 """

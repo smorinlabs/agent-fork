@@ -109,8 +109,71 @@ def test_doctor_reports_muse(repo_scenario):
     world = repo_scenario()
     env = _env(world, MUSE_SESSION_ID=PARENT, MUSE_THREAD_ID=PARENT)
     completed = run_cli(["doctor"], env, world.parent_path)
+    assert completed.returncode == 0, completed.stdout
     output = completed.stdout.decode()
     assert "Muse CLI: 1.4.20" in output
     assert "environment signals: status=detected" in output
     assert "selected=muse" in output
     assert "muse: 2 documented" in output
+    # Under Claude+Codex ambiguity without Muse installed, the Muse row is
+    # optional: only agents whose signals are present are required.
+    mixed = {
+        **world.env,
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "c",
+        "CODEX_THREAD_ID": "x",
+    }
+    ambiguous = run_cli(["doctor"], mixed, world.parent_path).stdout.decode()
+    muse_row = next(line for line in ambiguous.splitlines() if "Muse CLI" in line)
+    assert "(optional)" in muse_row
+    # A broken Muse install does not crash a Claude user's diagnosis.
+    broken_dir = world.parent_path.parent / "broken-muse"
+    broken_dir.mkdir()
+    broken = broken_dir / "muse"
+    broken.write_bytes(b"#!/bin/sh\nprintf '\\377\\376'\n")
+    broken.chmod(0o755)
+    claude_env = {
+        **world.env,
+        "PATH": f"{broken_dir}{os.pathsep}{world.env['PATH']}",
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_SESSION_ID": "c",
+    }
+    survived = run_cli(["doctor"], claude_env, world.parent_path)
+    assert b"Traceback" not in survived.stderr
+    broken_row = next(
+        line for line in survived.stdout.decode().splitlines() if "Muse CLI" in line
+    )
+    assert "(optional)" in broken_row
+
+
+@pytest.mark.matrix("T-MUS-18")
+def test_paste_command_runs_in_real_shells(repo_scenario):
+    """The printed fork command forks and resumes; a failed fork opens nothing."""
+    import shutil
+    import subprocess
+
+    from conftest import run_cli
+
+    world = repo_scenario()
+    resumes = world.parent_path.parent / "resumes.jsonl"
+    env = _env(world, MUSE_SESSION_ID=PARENT, FAKE_MUSE_RESUME_LOG=str(resumes))
+    report = json.loads(run_cli(["session", "--json"], env, world.parent_path).stdout)
+    command = report["fork_command"]["command"]
+    shells = [shell for shell in ("bash", "zsh") if shutil.which(shell)]
+    assert shells
+    for shell in shells:
+        resumes.unlink(missing_ok=True)
+        ok = subprocess.run([shell, "-c", command], env=env, capture_output=True)
+        assert ok.returncode == 0, (shell, ok.stderr)
+        assert json.loads(resumes.read_text()) == ["resume", FORK]
+        resumes.unlink()
+        failed = subprocess.run(
+            [shell, "-c", command],
+            env={**env, "FAKE_MUSE_MODE": "error"},
+            capture_output=True,
+        )
+        assert failed.returncode == 2, (shell, failed.stderr)
+        assert json.loads(resumes.read_text()) == ["resume", ""]
+        assert (
+            b"muse_fork_failed" in failed.stderr or b"Muse fork failed" in failed.stderr
+        )

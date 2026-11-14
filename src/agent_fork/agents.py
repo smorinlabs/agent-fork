@@ -385,18 +385,19 @@ def muse_forked_from(log: Path) -> str | None:
     return source if isinstance(source, str) and _is_canonical_uuid(source) else None
 
 
-def agent_fork_executable() -> str:
-    """Absolute path of the running `agent-fork`, for Muse's paste command.
+def agent_fork_executable() -> tuple[str, ...]:
+    """The argv that runs this `agent-fork`, for Muse's paste command.
 
     The paste command runs `agent-fork muse-fork` later, possibly where
     `agent-fork` is not on PATH (the skill can run it through `uvx`), so it
-    names this executable. Falls back to PATH, then to the bare name.
+    names this installation: the absolute console script, or this interpreter
+    with `-m agent_fork.cli` when started that way. Never a bare name, which
+    could resolve to a different installation.
     """
     argv0 = sys.argv[0] if sys.argv else ""
     if argv0 and Path(argv0).name == "agent-fork" and Path(argv0).exists():
-        return os.path.abspath(argv0)
-    found = shutil.which("agent-fork")
-    return os.path.abspath(found) if found else "agent-fork"
+        return (os.path.abspath(argv0),)
+    return (os.path.abspath(sys.executable), "-m", "agent_fork.cli")
 
 
 def _is_canonical_uuid(value: str) -> bool:
@@ -640,10 +641,8 @@ def _render_native_command(
     mode: Literal["fork", "resume"] = "fork",
 ) -> str:
     """Render the shared native-command grammar with one quoting boundary."""
-    executable = agent_fork_executable() if context.agent == "muse" else None
-    values = [str(directory), context.parent_session_id, *extra_args]
-    if executable is not None:
-        values.append(executable)
+    executable = agent_fork_executable() if context.agent == "muse" else ()
+    values = [str(directory), context.parent_session_id, *extra_args, *executable]
     if child_session_id is not None:
         values.append(child_session_id)
     if name is not None:
@@ -667,10 +666,10 @@ def _render_native_command(
                 f"cd {quote(str(directory))} && muse resume "
                 f"{quote(context.parent_session_id)}{suffix}"
             )
-        assert executable is not None
+        launcher = " ".join(quote(part) for part in executable)
         return (
             f"cd {quote(str(directory))} && muse resume "
-            f'"$({quote(executable)} muse-fork {quote(context.parent_session_id)})"'
+            f'"$({launcher} muse-fork {quote(context.parent_session_id)})"'
             f"{suffix}"
         )
     if context.agent not in ("claude", "codex"):

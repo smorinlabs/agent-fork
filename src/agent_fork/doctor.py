@@ -69,6 +69,8 @@ def _version_check(
     executable: str | None,
     floor: tuple[int, int, int] | None,
     env: Mapping[str, str],
+    *,
+    bounded: bool = False,
 ) -> DoctorCheck:
     """`floor=None` means no version is required (Muse: 1.4.20 is observed)."""
     minimum = ".".join(map(str, floor)) if floor is not None else None
@@ -76,9 +78,24 @@ def _version_check(
         return DoctorCheck(
             name, False, f"missing; requires >= {minimum}" if minimum else "missing"
         )
-    completed = subprocess.run(
-        [executable, "--version"], env=dict(env), capture_output=True, text=True
-    )
+    if bounded:
+        # Muse's row is probed on every run, even for Claude or Codex users, so
+        # a broken Muse install must not hang or crash their diagnosis.
+        try:
+            completed = subprocess.run(
+                [executable, "--version"],
+                env=dict(env),
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as error:
+            return DoctorCheck(name, False, f"unreadable version: {error}")
+    else:
+        completed = subprocess.run(
+            [executable, "--version"], env=dict(env), capture_output=True, text=True
+        )
     output = (completed.stdout or completed.stderr).strip()
     try:
         version = parse_version(output)
@@ -210,7 +227,7 @@ def run_doctor(
         env,
     )
     muse = _version_check(
-        "Muse CLI", shutil.which("muse", path=env.get("PATH")), None, env
+        "Muse CLI", shutil.which("muse", path=env.get("PATH")), None, env, bounded=True
     )
     hook_policy: str | None = None
     hook_timeout = 0
@@ -274,6 +291,11 @@ def run_doctor(
         claude = claude if selected == "claude" else optional(claude)
         codex = codex if selected == "codex" else optional(codex)
         muse = muse if selected == "muse" else optional(muse)
+    else:
+        # Under ambiguity no agent is selected; an agent with no signal at all
+        # is not one of the candidates, so its CLI is not required.
+        if "MUSE_SESSION_ID" not in assessment.present:
+            muse = optional(muse)
     state = Path(
         env.get(
             "XDG_STATE_HOME",
