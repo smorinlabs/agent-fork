@@ -36,6 +36,10 @@ test-live:
 test-git-matrix:
     bash scripts/check_git_matrix.sh
 
+# Benchmark fork wall-clock with a 50k-object submodule versus none (no gate)
+measure-clone-cost:
+    bash scripts/measure_clone_cost.sh
+
 # Run rollback signal tests in an unrestricted process environment
 test-signals:
     uv run pytest -m requires_process_group_signals

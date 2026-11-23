@@ -56,7 +56,9 @@ jobs:
   git-compatibility:
     name: Apple Git and Flox Git compatibility
     runs-on: macos-latest
-    # Observed runtime is ~72s; the wider bound covers the Flox install.
+    # Observed step runtime is ~41s plus ~43s for the Flox install. The
+    # submodule clone-cost benchmark that used to make this step ~280s lives in
+    # clone-cost.yml, which skips pull requests that do not touch its paths.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7

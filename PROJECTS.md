@@ -53,3 +53,4 @@ file plus those.
 - [x] **P07** — [cross-tool message route](projects/P07-cross-tool-message-route.md)
 - [x] **P08** — [Muse as a full agent-fork agent](projects/P08-muse-full-agent.md)
 - [x] **P09** — [OpenCode as a full agent-fork agent](projects/P09-opencode-full-agent.md)
+- [~] **P10** — [CI macOS compatibility job speedup](projects/P10-ci-macos-compat-speedup.md)

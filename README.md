@@ -1037,6 +1037,11 @@ just test-git-matrix
 Apple Git and the GNU Git pinned by Flox. Linux runs use the system Git and the
 same Flox Git.
 
+`just measure-clone-cost` reports fork wall-clock time for a fixture with a
+50,000-file submodule versus one without. It has no pass/fail threshold. CI
+runs it on pushes to `main`, nightly, on demand, and on pull requests that
+change the clone or submodule-carry code.
+
 Flox owns the reproducible Python, Git, and test toolchain. Claude Code and
 Codex remain host-managed prerequisites because their release cadence and
 platform availability differ from the four-system Flox environment, including
