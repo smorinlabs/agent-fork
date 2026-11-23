@@ -2,6 +2,7 @@
 
 **References**
 - **Trunk:** [PROJECTS.md](../PROJECTS.md)
+- **Discussion:** https://github.com/smorinlabs/agent-fork/pull/85 (this project's PR)
 - **Prior art:** [P02 — fault remediation](P02-agent-fork-fault-remediation.md) (A6b step 7 added the clone-cost benchmark to `scripts/check_git_matrix.sh`)
 
 ## [~] Project P10: CI macOS compatibility job speedup (CI only, no release)
@@ -30,4 +31,6 @@ threshold.
 - [x] [P10-T01] Split `measure_clone_cost` out of `scripts/check_git_matrix.sh` into `scripts/measure_clone_cost.sh` plus a `measure-clone-cost` just recipe
 - [x] [P10-T02] Add `.github/workflows/clone-cost.yml` (path-filtered PRs, push to `main`, nightly, `workflow_dispatch`)
 - [x] [P10-T03] Update the `ci.yml` runtime comment and the README development section
-- [ ] [P10-TS01] PR CI: `ci.yml` wall-clock about 2.5 min, compat job under ~2.5 min, and the clone-cost job green
+- [x] [P10-TS01] PR CI: `ci.yml` wall-clock about 2.5 min, compat job under ~2.5 min, and the clone-cost job green
+      PR #85 run 45114824093: `ci.yml` 2m34s (was ~4.5 min avg); compat job 1m34s (was 5.6 min); critical path is now the ubuntu matrix job at 2m31s. Clone-cost run 45114824310 green in 3m31s (`with-submodule=55s without-submodule=1s delta=54s`).
+- [ ] [P10-T04] Close P10 after PR #85 merges
