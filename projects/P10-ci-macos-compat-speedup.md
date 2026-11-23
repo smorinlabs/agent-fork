@@ -5,7 +5,7 @@
 - **Discussion:** https://github.com/smorinlabs/agent-fork/pull/85 (this project's PR)
 - **Prior art:** [P02 — fault remediation](P02-agent-fork-fault-remediation.md) (A6b step 7 added the clone-cost benchmark to `scripts/check_git_matrix.sh`)
 
-## [~] Project P10: CI macOS compatibility job speedup (CI only, no release)
+## [x] Project P10: CI macOS compatibility job speedup (CI only, no release)
 **Goal**: cut pull-request CI wall-clock from ~4.5 min to ~2.5 min without
 dropping intent-to-add (ITA) compatibility coverage.
 
@@ -33,4 +33,4 @@ threshold.
 - [x] [P10-T03] Update the `ci.yml` runtime comment and the README development section
 - [x] [P10-TS01] PR CI: `ci.yml` wall-clock about 2.5 min, compat job under ~2.5 min, and the clone-cost job green
       PR #85 run 45114824093: `ci.yml` 2m34s (was ~4.5 min avg); compat job 1m34s (was 5.6 min); critical path is now the ubuntu matrix job at 2m31s. Clone-cost run 45114824310 green in 3m31s (`with-submodule=55s without-submodule=1s delta=54s`).
-- [ ] [P10-T04] Close P10 after PR #85 merges
+- [x] [P10-T04] Close P10 after PR #85 merges (merged 2026-11-23 as 0d13d947)
